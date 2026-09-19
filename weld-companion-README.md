@@ -1,6 +1,6 @@
 # ⚡ Weld Companion for Perchance
 
-Quality-of-life upgrades for **Perchance**, for readers/players and authors alike. It runs *outside* the generator sandbox as a Tampermonkey / Violentmonkey / Greasemonkey userscript, so it works on **any** generator — not just ones built with [Weld](https://github.com/therealwestninja/weld). Your favorites, history, and settings stay local and account-free; the only network calls it makes are ones **you** start, to a service **you** choose.
+Quality-of-life upgrades for **Perchance**, for readers/players and authors alike. It runs *outside* the generator sandbox as a Tampermonkey / Violentmonkey / Greasemonkey userscript, so it works on **any** generator — not just ones built with the Weld plugin suite. Your favorites, history, and settings stay local and account-free; the only network calls it makes are ones **you** start, to a service **you** choose.
 
 > This is a quick overview. Full documentation is in **[README.md](README.md)**.
 
@@ -38,7 +38,7 @@ The **⚡ Weld** drawer has a result-tools header (copy / save / pin / undo-rero
 From the **⇅ GitHub** tab (or the **⇅ GitHub** button in the *This Generator* panel):
 
 - **⬇ Pull** — fetch the generator's DSL + HTML from your repo's public `raw.githubusercontent.com` files and fill the editor's two panes (undoable); you review and **Save**. Optional backup-before-pull.
-- **⬆ Push** — commit the editor's contents back to your repo via the GitHub Contents API, behind a confirm dialog. Needs a **fine-grained Personal Access Token** (single repo, Contents read & write), stored locally and sent only to `api.github.com` — never logged. Set it under **⚙ → GitHub push (token)**.
+- **⬆ Push** — commit the editor's DSL and HTML together to your repo through GitHub's Git Data API, behind a confirm dialog. Needs a **fine-grained Personal Access Token** (single repo, Contents read & write), stored locally and sent only to `api.github.com` — never logged. Set it under **⚙ → GitHub push (token)**.
 
 Set `owner` / `repo` / `branch` and path templates once under the gear (paste a GitHub file URL to auto-fill); per-generator overrides re-point slugs that don't match their filenames.
 
