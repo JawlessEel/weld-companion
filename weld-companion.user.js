@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/therealwestninja/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/therealwestninja/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/therealwestninja/weld-companion/main/weld-companion.user.js
-// @version      1.54.1
+// @version      1.54.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.54.1';
+  var WC_VERSION = '1.54.2';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -842,11 +842,10 @@
 
   // ---- GitHub push (current generator) ----------------------------------------
   // Symmetric partner to Pull: read both editor panes and commit them to the repo
-  // via the GitHub Contents API. Requires a write-scoped Personal Access Token,
+  // via GitHub's REST API. Requires a write-scoped Personal Access Token,
   // stored locally and sent ONLY to api.github.com in the Authorization header --
   // never logged, never put in commit messages.
   function ghToken() { return gget('ghToken', '') || ''; }
-  function b64utf8(s) { try { return btoa(unescape(encodeURIComponent(String(s)))); } catch (e) { return btoa(String(s)); } }
   function ghApi(method, apiPath, token, body, cb) {
     try {
       GM_xmlhttpRequest({
@@ -859,19 +858,45 @@
       });
     } catch (e) { cb(new Error(String((e && e.message) || e)), 0, null); }
   }
-  // Create-or-update one file: GET its current sha (404 = new file -> create), then PUT.
-  function ghPushFile(o, repo, branch, path, content, token, msg, cb) {
-    var enc = String(path).split('/').map(encodeURIComponent).join('/');
-    ghApi('GET', '/repos/' + o + '/' + repo + '/contents/' + enc + '?ref=' + encodeURIComponent(branch), token, null, function (err, st, json) {
-      if (err) return cb(err);
-      if (st !== 200 && st !== 404) return cb(new Error('GET ' + st + (json && json.message ? ' ' + json.message : '')));
-      var sha = (st === 200 && json && json.sha) ? json.sha : null;
-      var body = { message: msg, content: b64utf8(content), branch: branch };
-      if (sha) body.sha = sha;
-      ghApi('PUT', '/repos/' + o + '/' + repo + '/contents/' + enc, token, body, function (e2, st2, j2) {
-        if (e2) return cb(e2);
-        if (st2 === 200 || st2 === 201) return cb(null, sha ? 'updated' : 'created');
-        cb(new Error('PUT ' + st2 + (j2 && j2.message ? ' ' + j2.message : '')));
+  function ghApiError(action, status, json) { return new Error(action + ' ' + status + (json && json.message ? ' ' + json.message : '')); }
+  function ghBranchPath(branch) { return String(branch || '').replace(/^refs\/heads\//, '').split('/').map(encodeURIComponent).join('/'); }
+  // Commit both editor panes through Git's blob/tree/commit/ref APIs, rather than
+  // two Contents-API PUTs. If any request fails before the final ref update, the
+  // branch stays exactly as it was; it can never contain just one pane's update.
+  function ghPushFilesAtomic(o, repo, branch, files, token, msg, cb) {
+    var base = '/repos/' + o + '/' + repo + '/git/';
+    function api(method, path, body, done) { ghApi(method, base + path, token, body, done); }
+    function fail(action, err, st, json) { cb(err || ghApiError(action, st, json)); }
+    var branchPath = ghBranchPath(branch);
+    if (!branchPath) return cb(new Error('Branch is required'));
+    api('GET', 'ref/heads/' + branchPath, null, function (err, st, ref) {
+      if (err || st !== 200 || !ref || !ref.object || !ref.object.sha) return fail('GET branch', err, st, ref);
+      var parent = ref.object.sha;
+      api('GET', 'commits/' + encodeURIComponent(parent), null, function (eCommit, sCommit, parentCommit) {
+        if (eCommit || sCommit !== 200 || !parentCommit || !parentCommit.tree || !parentCommit.tree.sha) return fail('GET commit', eCommit, sCommit, parentCommit);
+        var blobs = [], i = 0;
+        function putBlob() {
+          if (i >= files.length) return putTree();
+          var f = files[i++];
+          api('POST', 'blobs', { content: f.content, encoding: 'utf-8' }, function (eBlob, sBlob, blob) {
+            if (eBlob || (sBlob !== 201 && sBlob !== 200) || !blob || !blob.sha) return fail('POST blob', eBlob, sBlob, blob);
+            blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
+            putBlob();
+          });
+        }
+        function putTree() {
+          api('POST', 'trees', { base_tree: parentCommit.tree.sha, tree: blobs }, function (eTree, sTree, tree) {
+            if (eTree || (sTree !== 201 && sTree !== 200) || !tree || !tree.sha) return fail('POST tree', eTree, sTree, tree);
+            api('POST', 'commits', { message: msg, tree: tree.sha, parents: [parent] }, function (eNew, sNew, commit) {
+              if (eNew || (sNew !== 201 && sNew !== 200) || !commit || !commit.sha) return fail('POST commit', eNew, sNew, commit);
+              api('PATCH', 'refs/heads/' + branchPath, { sha: commit.sha, force: false }, function (eRef, sRef, updated) {
+                if (eRef || sRef !== 200) return fail('PATCH branch', eRef, sRef, updated);
+                cb(null, 'updated');
+              });
+            });
+          });
+        }
+        putBlob();
       });
     });
   }
@@ -901,13 +926,10 @@
     if (!confirm(confirmMsg)) { toast('Cancelled'); return; }
     toast('Pushing ' + name + ' to GitHub\u2026');
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
-    ghPushFile(R.cfg.owner, R.cfg.repo, branch, dslP, dsl, token, commitMsg, function (e1, r1) {
-      if (e1) { console.error('[weld push] DSL', e1.message); toast('Push failed (DSL): ' + e1.message); return; }
-      ghPushFile(R.cfg.owner, R.cfg.repo, branch, htmlP, html, token, commitMsg, function (e2, r2) {
-        if (e2) { console.error('[weld push] HTML', e2.message); toast('Push failed (HTML; DSL was ' + r1 + '): ' + e2.message); return; }
-        console.log('[weld github] pushed', { name: name, dsl: dslP, html: htmlP, dslResult: r1, htmlResult: r2, branch: branch });
-        toast('Pushed ' + name + ' (DSL ' + r1 + ', HTML ' + r2 + ')');
-      });
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result) {
+      if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message); return; }
+      console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
+      toast('Pushed ' + name + ' (one atomic commit)');
     });
   }
   function ghConfigure() {
@@ -2180,9 +2202,18 @@
   // companion now honors it (provider-specific field). Merges, so it co-exists with json mode.
   function sbApplyMaxTokens(provider, b, n) {
     n = n | 0; if (n <= 0 || !b) return;
-    if (provider === 'openai') b.max_tokens = n;
+    if (provider === 'openai' || provider === 'localai') b.max_tokens = n;
     else if (provider === 'anthropic') b.max_tokens = n;          // overrides the default 4096
     else if (provider === 'google') { b.generationConfig = b.generationConfig || {}; b.generationConfig.maxOutputTokens = n; }
+    else if (provider === 'ollama') { b.options = b.options || {}; b.options.num_predict = n; }
+  }
+  // D4 companion: use a caller-supplied sampling temperature when present. Leave
+  // each provider's established default untouched when the caller does not send one.
+  function sbApplyTemperature(provider, b, value) {
+    var t = Number(value); if (!b || !isFinite(t)) return;
+    if (provider === 'openai' || provider === 'localai' || provider === 'anthropic') b.temperature = t;
+    else if (provider === 'google') { b.generationConfig = b.generationConfig || {}; b.generationConfig.temperature = t; }
+    else if (provider === 'ollama') { b.options = b.options || {}; b.options.temperature = t; }
   }
   // verbose AI failure classification (ported from Rook): a status/error -> { cause, fix }
   function classifyAIError(status, body, provider) {
@@ -2199,13 +2230,13 @@
     return { cause: 'Request failed.', fix: '' };
   }
   function aiErr(status, body, provider) { var c = classifyAIError(status, body, provider); return c.cause + (c.fix ? ' — ' + c.fix : ''); }
-  function callOwnAI(cfg, sys, user, cb, json, maxTokens) {
+  function callOwnAI(cfg, sys, user, cb, json, maxTokens, temperature) {
     var p = PROVIDERS[cfg.provider]; if (!p) return cb('Unknown provider', null);
     var key = (cfg.keys || {})[cfg.provider]; if (!key && !p.noKey) return cb('No API key set for ' + p.label, null);
     var endpoint = (cfg.endpoints || {})[cfg.provider] || p.defaultEndpoint;
     var model = (cfg.models || {})[cfg.provider] || p.defaultModel;
     var bodyStr = p.body(model, sys, user, json);
-    if (maxTokens) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(cfg.provider, bo, maxTokens); bodyStr = JSON.stringify(bo); } catch (e) {} }
+    if (maxTokens || temperature != null) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(cfg.provider, bo, maxTokens); if (temperature != null) sbApplyTemperature(cfg.provider, bo, temperature); bodyStr = JSON.stringify(bo); } catch (e) {} }
     GM_xmlhttpRequest({
       method: 'POST', url: p.url(model, key, endpoint), headers: p.headers(key), data: bodyStr, timeout: 120000,
       onload: function (res) {
@@ -2265,15 +2296,15 @@
   }
   // Stream a completion: emit(delta) per token chunk, then cb(null, fullText). GM_xmlhttpRequest
   // delivers responseText cumulatively in onprogress; we parse only newly-completed SSE lines.
-  function callOwnAIStream(cfg, sys, user, json, maxTokens, emit, cb) {
+  function callOwnAIStream(cfg, sys, user, json, maxTokens, temperature, emit, cb) {
     var prov = cfg.provider;
     var p = PROVIDERS[prov]; if (!p) return cb('Unknown provider', null);
     var key = (cfg.keys || {})[prov]; if (!key && !p.noKey) return cb('No API key set for ' + p.label, null);
-    var st = STREAM[prov]; if (!st) return callOwnAI(cfg, sys, user, cb, json, maxTokens);   // no stream cfg (e.g. Ollama NDJSON) -> single-shot
+    var st = STREAM[prov]; if (!st) return callOwnAI(cfg, sys, user, cb, json, maxTokens, temperature);   // no stream cfg (e.g. Ollama NDJSON) -> single-shot
     var endpoint = (cfg.endpoints || {})[prov] || p.defaultEndpoint;
     var model = (cfg.models || {})[prov] || p.defaultModel;
     var bodyStr = st.body(model, sys, user, json);
-    if (maxTokens) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(prov, bo, maxTokens); bodyStr = JSON.stringify(bo); } catch (e) {} }
+    if (maxTokens || temperature != null) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(prov, bo, maxTokens); if (temperature != null) sbApplyTemperature(prov, bo, temperature); bodyStr = JSON.stringify(bo); } catch (e) {} }
     var acc = '', buf = '', lastLen = 0, done = false;
     function pump(text) {
       text = text || '';
@@ -2511,16 +2542,17 @@
       // D3: stream when the caller wired onChunk (payload.stream) AND we can emit partials down.
       // The stored key is used HERE; only completion text (chunks + full) goes back, never the key.
       var maxTokens = (payload.maxTokens != null) ? (payload.maxTokens | 0) : 0;
-      if (payload.stream && typeof emit === 'function') callOwnAIStream(cfg, sys, user, !!payload.json, maxTokens, emit, done);
-      else callOwnAI(cfg, sys, user, done, !!payload.json, maxTokens);
+      var temperature = (payload.temperature != null && isFinite(Number(payload.temperature))) ? Number(payload.temperature) : null;
+      if (payload.stream && typeof emit === 'function') callOwnAIStream(cfg, sys, user, !!payload.json, maxTokens, temperature, emit, done);
+      else callOwnAI(cfg, sys, user, done, !!payload.json, maxTokens, temperature);
     });
   }
 
   // D1: 'fetch' capability -- the companion runs OUTSIDE the sandbox, so GM_xmlhttpRequest can
   // reach URLs the in-sandbox weld.fetch cannot (CORS-blocked, arbitrary hosts). Consent-gated per
-  // generator. Defense in depth: http(s) only, private/loopback/link-local hosts blocked, cookies
-  // never sent (anonymous), body size + time capped. (It cannot stop DNS-rebinding to a private IP
-  // -- the guard only inspects the literal hostname.)
+  // generator. Defense in depth: http(s) only, private/loopback/link-local hosts blocked, redirects
+  // rejected, cookies never sent (anonymous), body size + time capped. (It cannot stop DNS rebinding
+  // to a private IP -- the guard only inspects the literal hostname.)
   function sbParseHeaders(raw) {
     var h = {};
     try {
@@ -2532,20 +2564,45 @@
     } catch (e) {}
     return h;
   }
+  function sbPrivateIpv4(a, b) {
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19));
+  }
+  function sbIpv6Parts(host) {
+    var s = String(host || '').toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+    if (!s || s.indexOf('.') !== -1) return null;
+    var halves = s.split('::'); if (halves.length > 2) return null;
+    var left = halves[0] ? halves[0].split(':') : [], right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+    if ((halves.length === 1 && left.length !== 8) || left.length + right.length > 8) return null;
+    var parts = left.concat(new Array(8 - left.length - right.length).fill('0'), right).map(function (part) {
+      return /^[0-9a-f]{1,4}$/i.test(part) ? parseInt(part, 16) : -1;
+    });
+    return parts.some(function (part) { return part < 0; }) ? null : parts;
+  }
+  function sbPrivateIpv6(host) {
+    var p = sbIpv6Parts(host); if (!p) return false;
+    var allZero = p.every(function (part) { return part === 0; });
+    if (allZero || (p.slice(0, 7).every(function (part) { return part === 0; }) && p[7] === 1)) return true;
+    if ((p[0] & 0xffc0) === 0xfe80 || (p[0] & 0xfe00) === 0xfc00) return true; // link-local and unique-local
+    // IPv4-mapped IPv6 (for example ::ffff:127.0.0.1, normalized by URL as ::ffff:7f00:1).
+    if (p.slice(0, 5).every(function (part) { return part === 0; }) && p[5] === 0xffff) return sbPrivateIpv4(p[6] >> 8, p[6] & 0xff);
+    return false;
+  }
   function sbFetchGuard(rawUrl) {
     var u;
     try { u = new URL(String(rawUrl)); } catch (e) { return { ok: false, reason: 'bad-url' }; }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, reason: 'scheme-blocked' };
     var host = (u.hostname || '').toLowerCase();
     if (!host) return { ok: false, reason: 'no-host' };
-    if (host === 'localhost' || host === '0.0.0.0' || host === '::1' || host === '[::1]') return { ok: false, reason: 'local-blocked' };
+    if (host === 'localhost' || host === '0.0.0.0') return { ok: false, reason: 'local-blocked' };
     if (/\.local$|\.internal$|\.localhost$/.test(host)) return { ok: false, reason: 'local-blocked' };
     var m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
     if (m) {
       var a = +m[1], b = +m[2];
-      if (a === 0 || a === 127 || a === 10 || (a === 169 && b === 254) || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)) return { ok: false, reason: 'private-ip-blocked' };
+      if (a > 255 || b > 255 || +m[3] > 255 || +m[4] > 255 || sbPrivateIpv4(a, b)) return { ok: false, reason: 'private-ip-blocked' };
     }
-    if (host.indexOf(':') !== -1 && /^\[?(?:::1|fe80|fc|fd)/i.test(host)) return { ok: false, reason: 'private-ip-blocked' };
+    if (host.indexOf(':') !== -1 && sbPrivateIpv6(host)) return { ok: false, reason: 'private-ip-blocked' };
     return { ok: true, url: u.href };
   }
   function sbServiceFetch(payload) {
@@ -2556,20 +2613,33 @@
       if (['GET', 'POST', 'HEAD', 'PUT', 'DELETE', 'PATCH'].indexOf(method) === -1) method = 'GET';
       var headers = (payload && payload.headers && typeof payload.headers === 'object') ? payload.headers : undefined;
       var CAP = 200 * 1024;   // cap the body so a huge page can't blow up the agent's context
+      var settled = false, request = null, timer = null;
+      function finish(result) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(result);
+      }
       try {
-        GM_xmlhttpRequest({
+        // Tampermonkey implements redirect handling through fetch, whose native
+        // timeout option is unavailable in Chrome. Keep the old 15-second cap
+        // with an explicit abort timer instead.
+        timer = setTimeout(function () { try { if (request && request.abort) request.abort(); } catch (e) {} finish({ ok: false, reason: 'timeout' }); }, 15000);
+        request = GM_xmlhttpRequest({
           method: method, url: guard.url, headers: headers,
           data: (payload && payload.body != null) ? payload.body : undefined,
-          timeout: 15000, anonymous: true,                 // never send the user's cookies to arbitrary sites
+          anonymous: true, redirect: 'error',  // never send cookies or follow an unvalidated redirect
           onload: function (res) {
+            var finalGuard = sbFetchGuard(res.finalUrl || guard.url);
+            if (!finalGuard.ok) { finish({ ok: false, reason: finalGuard.reason }); return; }
             var body = String(res.responseText || ''); var truncated = false;
             if (body.length > CAP) { body = body.slice(0, CAP); truncated = true; }
-            resolve({ ok: res.status >= 200 && res.status < 400, status: res.status || 0, url: res.finalUrl || guard.url, headers: sbParseHeaders(res.responseHeaders), body: body, truncated: truncated });
+            finish({ ok: res.status >= 200 && res.status < 400, status: res.status || 0, url: res.finalUrl || guard.url, headers: sbParseHeaders(res.responseHeaders), body: body, truncated: truncated });
           },
-          onerror: function () { resolve({ ok: false, reason: 'network-error' }); },
-          ontimeout: function () { resolve({ ok: false, reason: 'timeout' }); }
+          onerror: function () { finish({ ok: false, reason: 'network-error' }); },
+          ontimeout: function () { finish({ ok: false, reason: 'timeout' }); }
         });
-      } catch (e) { resolve({ ok: false, reason: String((e && e.message) || e).slice(0, 120) }); }
+      } catch (e) { finish({ ok: false, reason: String((e && e.message) || e).slice(0, 120) }); }
     });
   }
 

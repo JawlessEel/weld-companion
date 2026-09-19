@@ -1,0 +1,7 @@
+{
+  "name": "weld-companion",
+  "private": true,
+  "scripts": {
+    "test": "node tests/skybridge-contracts.test.js"
+  }
+}
