@@ -60,6 +60,30 @@ assert.match(source, /redirect:\s*'error'/);
 assert.match(source, /request\.abort\(\)/);
 assert.match(source, /callOwnAIStream\(cfg, sys, user, !!payload\.json, maxTokens, temperature, emit, done\)/);
 
+const helperSelectors = load(
+  ['helperSubmitButton', 'helperPromptInput'],
+  between('function helperSubmitButton(', '// If the user picked their own provider'),
+  {
+    $(selector) {
+      return ({ '#aiHelperSubmitBtn': null, '#aiAgentSendBtn': 'new-send', '#aiHelperInputEl': null, '#aiAgentInputEl': 'new-input' })[selector] || null;
+    },
+  },
+);
+assert.equal(helperSelectors.helperSubmitButton(), 'new-send');
+assert.equal(helperSelectors.helperPromptInput(), 'new-input');
+
+const legacyHelperSelectors = load(
+  ['helperSubmitButton', 'helperPromptInput'],
+  between('function helperSubmitButton(', '// If the user picked their own provider'),
+  {
+    $(selector) {
+      return ({ '#aiHelperSubmitBtn': 'legacy-send', '#aiHelperInputEl': 'legacy-input' })[selector] || null;
+    },
+  },
+);
+assert.equal(legacyHelperSelectors.helperSubmitButton(), 'legacy-send');
+assert.equal(legacyHelperSelectors.helperPromptInput(), 'legacy-input');
+
 const calls = [];
 const atomicPush = load(
   ['ghPushFilesAtomic'],

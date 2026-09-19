@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/therealwestninja/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/therealwestninja/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/therealwestninja/weld-companion/main/weld-companion.user.js
-// @version      1.54.2
+// @version      1.54.3
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.54.2';
+  var WC_VERSION = '1.54.3';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2395,14 +2395,18 @@
     var box = $('#aiHelperInstructions') || $('[id*="aiHelperInstruction" i]') || $('#aiHelperInputEl');
     if (box && 'value' in box && !box.dataset.wcSet) { box.dataset.wcSet = '1'; box.value = cfg.instruction; }
   }
+  // Perchance renamed the editor helper from aiHelper* to aiAgent*. Keep both
+  // selectors so local-model routing works in the legacy and current editors.
+  function helperSubmitButton() { return $('#aiHelperSubmitBtn') || $('#aiAgentSendBtn'); }
+  function helperPromptInput() { return $('#aiHelperInputEl') || $('#aiAgentInputEl'); }
   // If the user picked their own provider, intercept the Helper submit and route
   // it to their model, writing the result into the model editor. Best-effort:
   // we wrap the submit button rather than the internal generateText.
   function hookHelperSubmit() {
-    var btn = $('#aiHelperSubmitBtn'); if (!btn || btn.dataset.wcHook) return; btn.dataset.wcHook = '1';
+    var btn = helperSubmitButton(); if (!btn || btn.dataset.wcHook) return; btn.dataset.wcHook = '1';
     btn.addEventListener('click', function (e) {
       var cfg = aiConfig(); if (cfg.provider === 'builtin') return; // let Perchance handle it
-      var input = $('#aiHelperInputEl'); var dv = dslView(); if (!input || !dv) return;
+      var input = helperPromptInput(); var dv = dslView(); if (!input || !dv) return;
       var prompt = (input.value || '').trim(); if (!prompt) return;
       e.stopImmediatePropagation(); e.preventDefault();
       var sys = cfg.instruction || 'You are a Perchance generator coding assistant. Given the current code and an instruction, return the COMPLETE updated code only, no explanation. Respect Perchance DSL conventions and avoid bare [word] list-reference traps.';
