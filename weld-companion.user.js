@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.56.0
+// @version      1.56.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.56.0';
+  var WC_VERSION = '1.56.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -151,10 +151,24 @@
   // preventDefaults), then execCommand insertText as a fallback. Returns which fired.
   // Resolve the live CodeMirror 6 EditorView behind a .cm-content element.
   function isCmView(v) { try { return !!(v && v.state && v.state.doc && typeof v.dispatch === 'function'); } catch (e) { return false; } }
+  // Tampermonkey's sandbox window and Perchance's real page window are
+  // different objects. The editor registry lives on the page window on newer
+  // Perchance builds, so inspect both without exposing any editor contents.
+  function editorPageWindow() {
+    try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { return window; }
+  }
+  function editorScopes() {
+    var page = editorPageWindow();
+    return page === window ? [window] : [page, window];
+  }
   function cmViewFor(elx) {
     try { var v = elx && elx.cmView && elx.cmView.view; if (isCmView(v)) return v; } catch (e) {}
     // Fallback: match the element against Perchance's exposed view maps.
-    try { var maps = window.editorViewsByDocId || {}; for (var k in maps) { var arr = maps[k]; if (arr) for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].contentDOM === elx && isCmView(arr[i])) return arr[i]; } } catch (e) {}
+    var scopes = editorScopes();
+    for (var s = 0; s < scopes.length; s++) try {
+      var maps = scopes[s].editorViewsByDocId || {};
+      for (var k in maps) { var arr = maps[k]; if (arr) for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].contentDOM === elx && isCmView(arr[i])) return arr[i]; }
+    } catch (e) {}
     return null;
   }
   // Canonical pane resolver. The editor exposes its live CM6 EditorViews on
@@ -165,10 +179,20 @@
   // has, rather than the view-specific getValue/setValue -- so a mapped raw view
   // works too. A write via dispatch is recorded in the editor's own undo history.
   function viewForDocId(docId) {
-    try { var v = window.docIdToView && window.docIdToView[docId]; if (isCmView(v) && !v.destroyed) return v; } catch (e) {}
-    try { var arr = window.editorViewsByDocId && window.editorViewsByDocId[docId]; if (arr) for (var i = 0; i < arr.length; i++) if (isCmView(arr[i]) && !arr[i].destroyed) return arr[i]; } catch (e) {}
-    var named = docId === 'modelText' ? window.modelTextEditor : (docId === 'outputTemplate' ? window.outputTemplateEditor : null);
-    return isCmView(named) ? named : null;
+    var scopes = editorScopes(), s, v, arr, i, named;
+    for (s = 0; s < scopes.length; s++) try {
+      v = scopes[s].docIdToView && scopes[s].docIdToView[docId];
+      if (isCmView(v) && !v.destroyed) return v;
+      arr = scopes[s].editorViewsByDocId && scopes[s].editorViewsByDocId[docId];
+      if (arr) for (i = 0; i < arr.length; i++) if (isCmView(arr[i]) && !arr[i].destroyed) return arr[i];
+      named = docId === 'modelText' ? scopes[s].modelTextEditor : scopes[s].outputTemplateEditor;
+      if (isCmView(named) && !named.destroyed) return named;
+    } catch (e) {}
+    // Last fallback: Perchance's two main CodeMirror panes are DSL then HTML.
+    // This only accepts a real CM6 view, never raw displayed text.
+    var contents = $$('.cm-content');
+    var index = docId === 'modelText' ? 0 : 1;
+    return contents[index] ? cmViewFor(contents[index]) : null;
   }
   function dslView()  { return viewForDocId('modelText'); }
   function htmlView() { return viewForDocId('outputTemplate'); }

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build-studio.js",
-    "test": "node tests/skybridge-contracts.test.js && node tests/ai-workspace.test.js && node tests/studio.test.js && node tests/studio-ui.test.js",
+    "test": "node tests/skybridge-contracts.test.js && node tests/ai-workspace.test.js && node tests/editor-resolution.test.js && node tests/studio.test.js && node tests/studio-ui.test.js",
     "check": "node scripts/build-studio.js --check && node --check weld-companion.user.js && npm test"
   }
 }
