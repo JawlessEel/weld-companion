@@ -212,6 +212,12 @@ If you've saved a note on a generator, a small floating 🗒 badge appears when 
 
 **Read aloud** speaks the current page's output, any Scrapbook entry, or a whole chat story using the browser's built-in speech — local, no network, no key. **Per-generator notes** let you jot "great for elf names" on any generator, searchable from the Scrapbook box. **🎲 Random favorite** (in the sticky header) jumps to a random starred generator. **Night light** now lives in the **Comfort** tab beside the theme it controls — it auto-applies a comfort theme (Warm, Dim, Sepia, Gray, or Dark) on an hour schedule, e.g. Warm from 20:00 to 07:00 — or in **ambient mode**, where the theme follows the hour and season (warm in the evening, earlier in winter, later in summer; dark late at night; southern-hemisphere aware) — restoring your previous theme outside those hours; your manual comfort settings always win when it's off.
 
+### Character & World Studio (v1.56.0)
+
+The **Studio** tab adds guided character editing, shared world lore with activation and knowledge rules, relationships, timelines, five chatbot templates, model-connected conversation tests, side-by-side reply comparisons, approved playthrough memory, consistency checking, and project export/import with snapshots. It uses your existing AI provider settings and character/lore interfaces.
+
+See [the Studio guide](STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
+
 ### Tools — AI Helper & character files
 
 The **🛠 Tools** tab holds self-contained tool cards.
