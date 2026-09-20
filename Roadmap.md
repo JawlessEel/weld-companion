@@ -67,7 +67,7 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 - **Accessibility audit** — output contrast ratio, font size, `prefers-reduced-motion` compliance. One-line result in the Generators tab. *(offline)*
 - **Local version history** — track every edit; rollback to any version; diff between any two. *(offline)*
 - **Contextual platform tutorial** — "how does this work?" panel specific to the generator you're looking at. *(offline)*
-- **DSL reader / explainer** — "explain this generator in plain English." The AI Helper writes code; this reads it. *(online — uses AI)*
+- ~~**DSL reader / explainer**~~ — completed in v1.55.0 as the review-first AI project workspace, with selectable DSL/HTML context and explicit diff-before-apply. *(online or local AI)*
 - **Atomic GitHub commits** — push DSL + HTML as a single commit rather than two. *(online)*
 - **Richer GitHub manager** — sync-status badge and pre-Pull/Push diff. *(online)*
 - **Conflict detection for collaborators** — detect divergence via the bus; alert both authors before either saves. *(offline)*

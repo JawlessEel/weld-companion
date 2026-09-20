@@ -218,10 +218,15 @@ The **🛠 Tools** tab holds self-contained tool cards.
 
 #### 🤖 AI Helper
 
-Perchance's built-in AI Helper writes generator code from a prompt. This card adds the two things it's missing:
+The AI Helper is now a **review-first project workspace**. It can explain a generator, debug a failure, or propose DSL/HTML changes without silently replacing either editor pane.
 
-1. **Edit the instruction.** Override the helper's system prompt with your own.
-2. **Use your own model — cloud or local.** Route the helper (and, via Skybridge, any generator's `ai` capability) through a model **you** control:
+1. Choose and save a cloud or local provider.
+2. Pick the context to include: current DSL, HTML, both panes, or neither.
+3. Write a request and select **Ask selected model**.
+4. Read or edit the reply in the workspace. Use **Copy reply** when you only need advice.
+5. For a proposed code change, select **Review → DSL** or **Review → HTML**. A line-by-line diff appears; the editor changes only after you explicitly select **Apply**. CodeMirror undo remains available.
+
+The provider choices are:
 
    | Provider | Default model | Notes |
    | :------- | :------------ | :---- |
@@ -231,10 +236,12 @@ Perchance's built-in AI Helper writes generator code from a prompt. This card ad
    | **Local — Ollama** | `llama3.1` | **no key**; endpoint `http://localhost:11434` |
    | **Local — OpenAI-compatible** | `local-model` | LM Studio / llama.cpp; endpoint `http://localhost:1234`; key optional |
 
-   Pick a provider, set the model (and, for local, the **endpoint**), and hit **Test**. Cloud replies **stream token-by-token**; the result is written straight into the code editor. The **local** providers run on your own machine — free and private — reaching `localhost` through the privileged `GM_xmlhttpRequest` (the in-sandbox bridge cannot). When a call fails, the error is **classified into a plain-language cause + fix** (e.g. a `403` from Ollama tells you to run it with `OLLAMA_ORIGINS=*`). Prefer the default? Leave it on **Perchance built-in** with just a custom instruction.
+Set the model and, for a local server, its endpoint, then use **Test provider**. Local providers run on your own machine and are reached through `GM_xmlhttpRequest`. Failures are classified into a plain-language cause and suggested fix. LM Studio models that consume their output budget as reasoning without producing a final answer get a specific diagnostic instead of a blank result.
+
+**Perchance built-in** continues to use Perchance's native AI Agent UI. If you want the native Agent's Send button and desktop Enter key to use LM Studio or another configured provider, enable **Route Perchance AI Agent sends into this review workspace** and save. This option is off by default. It preserves the native prompt, keeps Shift+Enter as a newline, and does not intercept touch/mobile Enter.
 
 > [!NOTE]
-> For a local model the userscript reaches `localhost` directly. Ollama must be started with **`OLLAMA_ORIGINS=*`** (or your browser origin) so it accepts the browser-origin request — the AI Helper's **Test** and the **🧪 Diagnostics** self-test both report this precisely when it's missing.
+> For a local model the userscript reaches `localhost` directly. Ollama must be started with **`OLLAMA_ORIGINS=*`** (or your browser origin) so it accepts the browser-origin request — **Test provider** and the **🧪 Diagnostics** self-test both report this precisely when it's missing.
 
 > [!IMPORTANT]
 > Your API key is stored **only** in this browser and sent **only** to the provider you select. See [Privacy & safety](#privacy--safety).

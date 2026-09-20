@@ -2,6 +2,7 @@
   "name": "weld-companion",
   "private": true,
   "scripts": {
-    "test": "node tests/skybridge-contracts.test.js"
+    "test": "node tests/skybridge-contracts.test.js && node tests/ai-workspace.test.js",
+    "check": "node --check weld-companion.user.js && npm test"
   }
 }
