@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.55.0
+// @version      1.55.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.55.0';
+  var WC_VERSION = '1.55.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2205,6 +2205,7 @@
     cfg.endpoints = cfg.endpoints || {};
     cfg.instruction = cfg.instruction || '';
     cfg.interceptAgent = cfg.interceptAgent === true;
+    cfg.maxTokens = Math.max(256, Math.min(32768, Math.floor(Number(cfg.maxTokens) || 4096)));
     return cfg;
   }
   // D4 consumer: apply a per-call output cap. The bridge has always forwarded maxTokens; the
@@ -2246,14 +2247,19 @@
     var model = (cfg.models || {})[cfg.provider] || p.defaultModel;
     var bodyStr = p.body(model, sys, user, json);
     if (maxTokens || temperature != null) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(cfg.provider, bo, maxTokens); if (temperature != null) sbApplyTemperature(cfg.provider, bo, temperature); bodyStr = JSON.stringify(bo); } catch (e) {} }
-    GM_xmlhttpRequest({
+    return GM_xmlhttpRequest({
       method: 'POST', url: p.url(model, key, endpoint), headers: p.headers(key), data: bodyStr, timeout: 120000,
       onload: function (res) {
         if (res.status && (res.status < 200 || res.status >= 300)) return cb(aiErr(res.status, res.responseText, cfg.provider), null);
         try { var j = JSON.parse(res.responseText); var txt = p.extract(j, json);
+          var finish = j && j.choices && j.choices[0] && j.choices[0].finish_reason;
+          if (finish === 'length' || (j && (j.stop_reason === 'max_tokens' || j.done_reason === 'length')) ||
+              (j && j.candidates && j.candidates[0] && j.candidates[0].finishReason === 'MAX_TOKENS')) {
+            return cb('The reply reached its output-token limit and may be incomplete. Increase Maximum output tokens or request a smaller change.', null);
+          }
           if (txt != null && txt !== '') cb(null, txt);
           else if (cfg.provider === 'localai' && j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.reasoning_content) cb('The model used its token budget for reasoning but returned no final answer. Increase the output-token limit or disable thinking/reasoning in LM Studio.', null);
-          else cb('No text in response: ' + String(res.responseText).slice(0, 200), null);
+          else cb('The provider returned no final text. Check the model settings and server logs.', null);
         } catch (e) { cb('Parse error: ' + e.message, null); }
       },
       onerror: function (res) { cb(aiErr((res && res.status) || 0, (res && res.responseText) || '', cfg.provider), null); },
@@ -2345,21 +2351,33 @@
       });
     } catch (e) { finish(String((e && e.message) || e)); }
   }
-  var AI_WORKSPACE = { prompt: '', response: '', context: 'dsl', status: '', busy: false };
+  var AI_WORKSPACE = { prompt: '', response: '', context: 'dsl', status: '', busy: false, sequence: 0, request: null };
+
+  function aiStopWorkspace(clear) {
+    var request = AI_WORKSPACE.request;
+    AI_WORKSPACE.sequence++;
+    AI_WORKSPACE.request = null; AI_WORKSPACE.busy = false;
+    if (request && typeof request.abort === 'function') request.abort();
+    if (clear) { AI_WORKSPACE.prompt = ''; AI_WORKSPACE.response = ''; }
+    AI_WORKSPACE.status = clear ? '' : 'Stopped. Previous reply preserved.';
+    refreshAIWorkspace();
+  }
 
   // Pull a proposed editor replacement from a model reply. Applying it still
   // requires a separate human-confirmed diff step.
   function aiExtractCode(text, target) {
     text = String(text || '').trim();
     var blocks = [], re = /```([^\r\n`]*)\r?\n([\s\S]*?)```/g, m;
-    while ((m = re.exec(text))) blocks.push({ lang: String(m[1] || '').trim().toLowerCase(), code: String(m[2] || '').trim() });
+    while ((m = re.exec(text))) blocks.push({ lang: String(m[1] || '').trim().toLowerCase(), code: String(m[2] || '').replace(/\r?\n$/, '') });
     if (!blocks.length) return text;
-    var preferred = target === 'html' ? ['html', 'javascript', 'js'] : ['perchance', 'dsl', 'text', 'plaintext', 'txt'];
-    for (var i = 0; i < preferred.length; i++) for (var j = 0; j < blocks.length; j++) if (blocks[j].lang === preferred[i]) return blocks[j].code;
-    return blocks[0].code;
+    var preferred = target === 'html' ? ['html'] : ['perchance', 'dsl'];
+    var matches = blocks.filter(function (block) { return preferred.indexOf(block.lang) !== -1; });
+    if (matches.length === 1) return matches[0].code;
+    if (!matches.length && blocks.length === 1 && ['', 'text', 'plaintext', 'txt'].indexOf(blocks[0].lang) !== -1) return blocks[0].code;
+    throw new Error('Use one complete ' + target.toUpperCase() + ' code block for this pane. The reply contains ambiguous or differently labeled blocks.');
   }
   function aiWorkspaceSystem(cfg) {
-    return cfg.instruction || 'You are a Perchance project assistant. Explain your recommendation clearly. If code changes are needed, include the proposed replacement in a fenced code block labeled perchance or html. Never claim that you applied a change; the user reviews and applies changes separately.';
+    return cfg.instruction || 'You are a Perchance project assistant. Explain your recommendation clearly. If code changes are needed, include the COMPLETE replacement for each affected pane in exactly one fenced code block labeled perchance or html. Preserve existing features and do not use omissions or placeholders. Never claim that you applied a change; the user reviews and applies changes separately.';
   }
   function aiWorkspaceUser(prompt, context) {
     var parts = ['REQUEST:\n' + String(prompt || '').trim()];
@@ -2377,26 +2395,37 @@
     if (!prompt) { AI_WORKSPACE.status = 'Enter a request first.'; refreshAIWorkspace(); return false; }
     if (cfg.provider === 'builtin') { AI_WORKSPACE.status = 'Choose an external or local provider for the review workspace. Perchance built-in continues to use its native AI Agent UI.'; refreshAIWorkspace(); return false; }
     if (AI_WORKSPACE.busy) return false;
-    AI_WORKSPACE.busy = true; AI_WORKSPACE.response = '';
+    AI_WORKSPACE.busy = true;
+    var sequence = ++AI_WORKSPACE.sequence;
     AI_WORKSPACE.status = 'Asking ' + ((PROVIDERS[cfg.provider] || {}).label || cfg.provider) + '\u2026';
     refreshAIWorkspace();
-    callOwnAI(cfg, aiWorkspaceSystem(cfg), aiWorkspaceUser(prompt, AI_WORKSPACE.context), function (err, txt) {
-      AI_WORKSPACE.busy = false;
+    function complete(err, txt) {
+      if (sequence !== AI_WORKSPACE.sequence) return;
+      AI_WORKSPACE.busy = false; AI_WORKSPACE.request = null;
       if (err) { AI_WORKSPACE.status = '\u2717 ' + err; toast(('\u2717 ' + err).slice(0, 110), 6000); }
       else { AI_WORKSPACE.response = String(txt || ''); AI_WORKSPACE.status = '\u2713 Reply ready for review. Nothing was changed.'; toast('\u2713 AI reply ready for review'); }
       refreshAIWorkspace();
-    }, false, 4096, 0.4);
+    }
+    try {
+      var request = callOwnAI(cfg, aiWorkspaceSystem(cfg), aiWorkspaceUser(prompt, AI_WORKSPACE.context), complete, false, cfg.maxTokens, 0.4);
+      if (AI_WORKSPACE.busy && sequence === AI_WORKSPACE.sequence) AI_WORKSPACE.request = request;
+    } catch (err) { complete('Could not start request: ' + err.message, null); }
     return true;
   }
   function renderAIReviewModal(target) {
     var view = target === 'html' ? htmlView() : dslView();
     if (!view) return toast('Open the Perchance editor first \u2014 the ' + target.toUpperCase() + ' pane was not found');
-    var proposed = aiExtractCode(AI_WORKSPACE.response, target);
+    if (AI_WORKSPACE.busy) return toast('Wait for the reply or stop the request before reviewing');
+    var proposed;
+    try { proposed = aiExtractCode(AI_WORKSPACE.response, target); }
+    catch (err) { return toast(err.message, 7000); }
     if (!proposed) return toast('There is no AI reply to review');
     var current = viewText(view), d = lineDiffOps(current, proposed), stats = diffStats(d);
-    var prev = $('#wc-ai-review-modal'); if (prev) prev.remove();
+    var project = genName();
+    var prev = $('#wc-ai-review-modal'); if (prev && prev.wcClose) prev.wcClose();
     var ov = el('div', { id: 'wc-ai-review-modal', class: 'wc-root', style: { position: 'fixed', inset: '0', zIndex: '2147483646', background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
     function close() { ov.remove(); document.removeEventListener('keydown', onEsc, true); }
+    ov.wcClose = close;
     function onEsc(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
     ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     document.addEventListener('keydown', onEsc, true);
@@ -2416,6 +2445,10 @@
     panel.appendChild(el('div', { class: 'wc-row', style: { marginTop: '14px', justifyContent: 'flex-end', gap: '8px' } }, [
       el('button', { class: 'wc-btn', text: 'Cancel', onclick: close }),
       el('button', { class: 'wc-btn wc-btn-accent', text: 'Apply to ' + target.toUpperCase(), onclick: function () {
+        var live = target === 'html' ? htmlView() : dslView();
+        if (genName() !== project || live !== view || view.destroyed || viewText(live) !== current) {
+          close(); return toast('The editor changed after this review opened. Review the proposal again before applying.', 7000);
+        }
         var unmute = muteBugFinderError(); var ok = viewSet(view, proposed); setTimeout(unmute, 2000); close();
         toast(ok ? '\u2713 Applied to ' + target.toUpperCase() + ' (editor undo is available)' : 'Could not update the editor');
       } })
@@ -2428,6 +2461,7 @@
     var keyWrap = el('div', {}), modelWrap = el('div', {});
     var instruction = el('textarea', { class: 'wc-field', rows: '4', placeholder: 'Optional system instruction for the selected provider.' }); instruction.value = cfg.instruction;
     var intercept = el('input', { type: 'checkbox' }); intercept.checked = cfg.interceptAgent;
+    var maxTokens = el('input', { class: 'wc-field', type: 'number', min: '256', max: '32768', step: '1', value: cfg.maxTokens, 'aria-label': 'Maximum output tokens' });
     function renderProviderFields() {
       keyWrap.innerHTML = ''; modelWrap.innerHTML = '';
       var pk = provider.value;
@@ -2450,16 +2484,22 @@
     }
     provider.addEventListener('change', renderProviderFields);
     function save(quiet) {
-      cfg.provider = provider.value; cfg.instruction = instruction.value; cfg.interceptAgent = intercept.checked; gset('ai', cfg); applyHelperInstruction();
+      cfg.provider = provider.value; cfg.instruction = instruction.value; cfg.interceptAgent = intercept.checked;
+      cfg.maxTokens = Math.max(256, Math.min(32768, Math.floor(Number(maxTokens.value) || 4096)));
+      maxTokens.value = cfg.maxTokens;
+      if (!gset('ai', cfg)) return false;
+      applyHelperInstruction();
       if (!quiet) toast('AI settings saved');
+      return true;
     }
     var test = el('button', { class: 'wc-btn', text: 'Test provider', onclick: function () {
-      save(true); if (cfg.provider === 'builtin') return toast('Perchance built-in is tested through its native AI Agent');
-      callOwnAI(cfg, 'Reply with only the word ok.', 'ping', function (err, txt) { toast(err ? ('\u2717 ' + err).slice(0, 110) : ('\u2713 ' + (txt || '').trim().slice(0, 50)), err ? 6000 : 3000); }, false, 256, 0);
+      if (!save(true)) return; if (cfg.provider === 'builtin') return toast('Perchance built-in is tested through its native AI Agent');
+      callOwnAI(cfg, 'Reply with only the word ok.', 'ping', function (err, txt) { toast(err ? ('\u2717 ' + err).slice(0, 110) : ('\u2713 ' + (txt || '').trim().slice(0, 50)), err ? 6000 : 3000); }, false, cfg.maxTokens, 0);
     } });
     var aicols = el('div', { class: 'wc-cols' });
     var cardP = el('div', { class: 'wc-card wc-col' }, [el('label', { class: 'wc-label', text: 'Provider' }), provider, keyWrap, modelWrap]);
     var cardI = el('div', { class: 'wc-card wc-col' }, [el('label', { class: 'wc-label', text: 'Custom instruction (system prompt)' }), instruction,
+      el('label', { class: 'wc-label', text: 'Maximum output tokens (includes model reasoning)' }), maxTokens,
       el('label', { class: 'wc-check', style: { marginTop: '10px' } }, [intercept, el('span', { class: 'wc-sw' }), el('span', { text: 'Route Perchance AI Agent sends into this review workspace' })]),
       el('div', { class: 'wc-section-note', text: 'Off by default. When enabled, Send/Enter uses your selected provider and leaves the native prompt intact. Shift+Enter and touch/mobile Enter remain newlines.' })]);
     aicols.appendChild(cardP); aicols.appendChild(cardI); body.appendChild(aicols);
@@ -2473,13 +2513,15 @@
     var prompt = el('textarea', { class: 'wc-field', rows: '5', placeholder: 'Example: explain why this generator fails, then propose a safe fix in a fenced code block.' }); prompt.value = AI_WORKSPACE.prompt;
     prompt.addEventListener('input', function () { AI_WORKSPACE.prompt = prompt.value; });
     var response = el('textarea', { class: 'wc-field', rows: '12', placeholder: 'The model reply will appear here for review.' }); response.value = AI_WORKSPACE.response;
+    response.readOnly = AI_WORKSPACE.busy;
     response.addEventListener('input', function () { AI_WORKSPACE.response = response.value; });
     workspace.appendChild(context); workspace.appendChild(prompt);
-    var ask = el('button', { class: 'wc-btn wc-btn-accent', text: AI_WORKSPACE.busy ? 'Working\u2026' : 'Ask selected model', onclick: function () { save(true); AI_WORKSPACE.prompt = prompt.value; AI_WORKSPACE.context = context.value; aiAskWorkspace(); } });
+    var ask = el('button', { class: 'wc-btn wc-btn-accent', text: AI_WORKSPACE.busy ? 'Working\u2026' : 'Ask selected model', onclick: function () { if (!save(true)) return; AI_WORKSPACE.prompt = prompt.value; AI_WORKSPACE.context = context.value; aiAskWorkspace(); } });
     ask.disabled = AI_WORKSPACE.busy;
     workspace.appendChild(el('div', { class: 'wc-row', style: { margin: '8px 0' } }, [
       ask,
-      el('button', { class: 'wc-btn', text: 'Clear', onclick: function () { AI_WORKSPACE.prompt = ''; AI_WORKSPACE.response = ''; AI_WORKSPACE.status = ''; refreshAIWorkspace(); } })
+      AI_WORKSPACE.busy ? el('button', { class: 'wc-btn', text: 'Stop', onclick: function () { aiStopWorkspace(false); } }) : null,
+      el('button', { class: 'wc-btn', text: 'Clear', onclick: function () { aiStopWorkspace(true); } })
     ]));
     if (AI_WORKSPACE.status) workspace.appendChild(el('div', { class: 'wc-section-note', text: AI_WORKSPACE.status }));
     workspace.appendChild(el('label', { class: 'wc-label', text: 'Editable reply' })); workspace.appendChild(response);
@@ -2507,6 +2549,7 @@
     var cfg = aiConfig(), input = aiAgentInput(), prompt = aiAgentPrompt(input);
     if (!cfg.interceptAgent || cfg.provider === 'builtin' || !prompt) return false;
     if (e) { e.stopImmediatePropagation(); e.preventDefault(); }
+    if (AI_WORKSPACE.busy) { toast('A request is already running. Stop it before sending another.'); return true; }
     AI_WORKSPACE.prompt = prompt; AI_WORKSPACE.context = 'dsl'; AI_WORKSPACE.status = '';
     openWindow('tools'); aiAskWorkspace(); return true;
   }

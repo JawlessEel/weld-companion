@@ -220,6 +220,10 @@ The **🛠 Tools** tab holds self-contained tool cards.
 
 The AI Helper is now a **review-first project workspace**. It can explain a generator, debug a failure, or propose DSL/HTML changes without silently replacing either editor pane.
 
+Version 1.55.1 adds **Stop**, cancellation when clearing, and a configurable **Maximum output tokens** setting (256–32768, default 4096). The last reply stays available if a new request fails or is stopped. Replies cut off by a provider's token limit are reported as incomplete. Workspace text survives closing and reopening the drawer in the same page session; it is not saved across page reloads.
+
+Review expects one complete code block for the selected pane (perchance/dsl or html). Ambiguous or mismatched fenced blocks are rejected; plain text can still be reviewed after editing it into a complete replacement. Applying replaces the entire selected pane, so check the diff. If the editor changes while the review is open, reopen the review before applying.
+
 1. Choose and save a cloud or local provider.
 2. Pick the context to include: current DSL, HTML, both panes, or neither.
 3. Write a request and select **Ask selected model**.
