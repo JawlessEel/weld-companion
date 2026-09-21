@@ -1,0 +1,230 @@
+
+kv = {import:kv-plugin}
+generateText = {import:ai-text-plugin}
+image = {import:text-to-image-plugin}
+forum = {import:comments-plugin}
+// liveActivityPlugin (live-activity-plugin) — formerly imported & shown in the online pill.
+// Superseded by the built-in server-plugin region counter (see src/regions.js).
+// To re-enable, restore the live-activity-plugin import line above the upload import.
+uploadPlugin = {import:upload-plugin}
+superFetchPlugin = {import:super-fetch-plugin}
+createServerSocket = {import:server-plugin}
+
+// ── Export tuning: reading a chat into a character card ──
+// Only the LAST this-many chat messages are read; everything older is ignored, and
+// facts that matter are re-derived from the clues inside that window. Lower it for
+// faster/cheaper builds, raise it for long scenes.
+chatToCardMaxMessages = 40
+// Hard cap on how many characters a single "Group Cast" card may voice.
+chatToCardMaxCast = 6
+
+// ── Dynamic theme reader for plugin styling ──
+// Reads computed CSS vars from :root (dark) or body[data-theme="light"] (light)
+// and returns style strings that comments-plugin & the public-gallery embed can consume.
+getThemeCssVar(name) =>
+  return getComputedStyle(document.body).getPropertyValue(name).trim();
+
+themeStyle(kind) =>
+  let bgMain = getThemeCssVar('--bg-main');
+  let bgSec = getThemeCssVar('--bg-sec');
+  let bgTer = getThemeCssVar('--bg-ter');
+  let textMain = getThemeCssVar('--text-main');
+  let textMuted = getThemeCssVar('--text-muted');
+  let accent = getThemeCssVar('--accent');
+  let danger = getThemeCssVar('--danger');
+  let success = getThemeCssVar('--success');
+  let isLight = document.body.getAttribute('data-theme') === 'light';
+  let bgInput = isLight ? '#ffffff' : bgSec;
+  let border = isLight ? bgTer : bgTer;
+  let shadow = isLight ? '0 4px 20px rgba(0,0,0,0.06)' : '0 6px 24px rgba(0,0,0,0.3)';
+  switch(kind) {
+    case "container":
+      return `background:${bgSec}; border:1px solid ${border}; box-shadow:${shadow}; width:100%; max-width:1024px; height:min(600px, 70vh); max-height:80vh; padding:16px; margin:auto; border-radius:10px;`;
+    case "bubble":
+      return `background:${bgMain}; color:${textMain}; border:1px solid ${border}; border-radius:10px; padding:10px 14px; margin-bottom:9px; font-family:'Inter',sans-serif; font-size:0.8rem; word-break:break-word; overflow-wrap:anywhere;`;
+    case "feed":
+      return `background:${bgMain}; padding:10px; border-radius:6px;`;
+    case "input":
+      return `background:${bgInput}; border:1px solid ${border}; border-radius:8px; color:${textMain}; font-size:15px; padding:8px 12px;`;
+    case "submit":
+      return `background:${accent}; color:${isLight ? '#ffffff' : bgMain}; border:none; border-radius:4px; font-family:'Inter',sans-serif; font-weight:700; box-shadow:0 2px 8px rgba(0,0,0,0.2); transition:filter .2s; cursor:pointer; padding:6px 14px; margin:0.2rem;`;
+    case "gallery":
+      return `background:${bgSec}; border:1px solid ${border}; border-radius:10px; padding:12px; max-width:1024px; margin:0 auto; box-shadow:${shadow};`;
+  }
+  return "";
+
+// Submit button style for the forum embed: same as themeStyle("submit") but with a
+// lucide "send" SVG painted as a CSS background-image (the comments-plugin iframe
+// only supports a plain-text label, so the icon goes in via CSS). Icon color matches
+// the button text color in both themes.
+forumSubmitStyle() =>
+  let base = themeStyle("submit");
+  let isLight = document.body.getAttribute('data-theme') === 'light';
+  let iconColor = encodeURIComponent(isLight ? '#ffffff' : getThemeCssVar('--bg-main'));
+  return base + `; width:auto; height:28px; margin:0 0 0 auto; padding:0 14px 0 34px; display:inline-flex; align-items:center; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='${iconColor}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m22 2-7 20-4-9-9-4Z'/%3E%3Cpath d='M22 2 11 13'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:center left 12px; background-size:16px 16px;`;
+
+// ── Public gallery embed (replaces the official plugin's image({gallery:true})) ──
+// the image-plugin only does generation, so the public-gallery iframe is built here
+// with the exact same protocol as the official text-to-image-plugin: same URL, same
+// #data hash carrying the moderation lists (bannedUsers/bannedPromptPhrases) and the
+// themed background, same .text-to-image-plugin-gallery class so the app's existing
+// render/cleanup hooks and the adaptive-height bridge keep working.
+galleryEmbedHtml() =>
+  let opts = galleryOptions;
+  if(!opts) return "";
+  let sortVal = "recent";
+  let timeRangeVal = "1-week";
+  let contentFilterVal = "pg13";
+  let hideScore = -2;
+  let styleStr = "";
+  try {
+    sortVal = opts.sort ? ("" + opts.sort.evaluateItem) : "recent";
+    if(sortVal === "best") sortVal = "top";
+    timeRangeVal = opts.timeRange ? ("" + opts.timeRange.evaluateItem) : "1-week";
+    contentFilterVal = opts.contentFilter ? ("" + opts.contentFilter.evaluateItem).toLowerCase() : "pg13";
+    if(contentFilterVal === "pg-13") contentFilterVal = "pg13";
+    if(contentFilterVal !== "pg13" && contentFilterVal !== "g") contentFilterVal = "g";
+    hideScore = Number(opts.hideIfScoreIsBelow && opts.hideIfScoreIsBelow.evaluateItem);
+    if(isNaN(hideScore)) hideScore = -2;
+    styleStr = opts.style ? ("" + opts.style.evaluateItem) : "";
+  } catch(e) {}
+  let bannedUsers = [];
+  try { if(opts.bannedUsers && opts.bannedUsers.selectAll) bannedUsers = opts.bannedUsers.selectAll.map(i => "" + i.evaluateItem); } catch(e) {}
+  let bannedPromptPhrases = [];
+  try {
+    if(opts.bannedPromptPhrases && opts.bannedPromptPhrases.selectAll) {
+      bannedPromptPhrases = opts.bannedPromptPhrases.selectAll.map(i =>
+        (i.getRawListText !== undefined ? i.getRawListText : ("" + i.evaluateItem)).replace("/\\^", "/^")
+      );
+    }
+  } catch(e) {}
+  let injectedStyles = {};
+  let bgMatch = styleStr.match(/(?:^|;) *background(?:-color)?:(.+?)(?:;|$)/);
+  if(bgMatch) injectedStyles.background = bgMatch[1].trim();
+  let hashData = {
+    galleryInstanceId: "dadGallery" + Math.random().toString(36).slice(2),
+    shouldShowCustomButton: false,
+    customButtonEmoji: null,
+    shouldShowCustomButton2: false,
+    customButton2Emoji: null,
+    bannedUsers: bannedUsers,
+    bannedPromptPhrases: bannedPromptPhrases,
+    bannedNegativePromptPhrases: [],
+    injectedStyles: injectedStyles,
+    defaultSubChannelNames: []
+  };
+  let galleryOptionsData = { sort: sortVal, timeRange: timeRangeVal, hideIfScoreIsBelow: hideScore, contentFilter: contentFilterVal, subChannel: "public" };
+  let url = "https://image-generation.perchance.org/gallery"
+    + "?channel=" + encodeURIComponent(window.generatorName)
+    + "&sort=" + encodeURIComponent(sortVal)
+    + "&timeRange=" + encodeURIComponent(timeRangeVal)
+    + "&hideIfScoreIsBelow=" + hideScore
+    + "&contentFilter=" + encodeURIComponent(contentFilterVal)
+    + "&subChannel=public"
+    + "#data=" + encodeURIComponent(JSON.stringify(hashData));
+  return `<iframe class="text-to-image-plugin-gallery" data-gallery-options="${encodeURIComponent(JSON.stringify(galleryOptionsData))}" data-adaptive-height="yes" style="width:100%; height:70vh; border:none; ${styleStr}" src="${url}" allow="clipboard-write"></iframe>`;
+
+$meta
+  title = DadChat | Unrestricted AI Chat
+  description = The unrestricted chat platform where human creativity meets uncensored freedom. Access diverse LLMs, create unlimited characters, and generate images with free access.
+  image = https://user.uploads.dev/file/e09b3ff7ee543f212d6ee2fba22936db.jpg
+  tags = ai chat, roleplay, character ai, unlimited characters, nsfw, uncensored, story, image generation, llm, ai companion
+  header
+    mode = minimal
+    background = [metaHeaderBg()]
+
+// Platform header background. ALWAYS dark — it must never follow the app's light theme.
+// (The header lives outside the iframe and is not restyled live, so a light value here
+// paints the entire top bar white until the page is reloaded again. Do not re-add.)
+metaHeaderBg() =>
+  try {
+    const raw = localStorage.getItem('dad_theme_customizer');
+    if (raw) {
+      const pal = (JSON.parse(raw) || {}).dark || {};
+      if (pal['--bg-main']) return String(pal['--bg-main']);
+    }
+  } catch (e) {}
+  return '#0a0d14';
+    
+title
+  DadChat | Unrestricted AI Chat
+
+galleryOptions
+  bannedUsers
+    bba7e2e03a94ecf04b812bdef55127e5179a84192390780cb9805ac5afa66c9e
+    d066d571cfad513a3efb064cdde9adc73609edf64400cf8e67773659623973c6
+    32a65718ead380001625aaaadf813cdf7146dd73e980eee77305565bd6d969cc
+    68ebb382ccce1315bb0ba5f9b37aa83587363cc644728415d0d6b630c2e7b29e
+    60293427f82aacb05aaa2f8190e48dc6e5a657ded31d3bb15d7f75fbeec35269
+    ce54ad86f6a0430f2aee59ebe3e03fd80537f24609f0ea127d5d575634cb5f47
+    2368c64d01f2c8bfa2090b983fb23b971010aee098476a427b25de432135df6b
+    846016c10f2b0016b56ddc075edf1c01828cfd93945b9c696e0253858cbed188
+    f261d1118b2b8720b2c6b456a833335a1f5b4ddd938cc45ac99fafe0cb8d3c1f
+    2300370ba06543f70576c67fdf3b8173040e515b1cd615c516b01fbaaecdba43
+    5f9d8571315986ec5403a2dfa9702b32c475b9e1b977c1a0f2109f583ba00996
+    a9088ee5c6e750837b38aa0a447d8c41149977385c043e9a270b95ea4fbf04a7
+    5fb479273e6869473b117560e249c64fa23ac6da4c5fb14d2923a30c82874035
+    db57588b9f6726f00b2dbc9a22736b80566a6976a01e929d9ff4e9c927cd5fcb
+    257f088ec1bf7bdb62a298d5f9019d0362cc1eff328b39ed22801b5ea61e048b
+    203a72371239a2750b3464b308ec7192ed573c537379dd4c7de5d9bc2a8f735e
+    27f3fce0773f8213f4cf4e0c4423ebb0b80c79846f2e6e71531a6179e977a0fa
+    455b7a03e90cfcc17d46382c97650daaec6cd5a06f9c9a90412d6a21e4ecd87f
+    19339f2b64203b9859ccb522af0b140e561fcd37005c60901627c93ba97e8a3a
+    db49a353c50c6d881a7c1c36ac0f9d10a054d973e69710ee158ac24058bec439
+    b070c96992eee0194e242c29bef4bb46fa8dac560689227d1e58088a8287854c
+    0d82f90df4fc2d60f21a82454f1fdf171896b6911eb06b8739d7d4d6fa3e4fb3
+    cff9749e01f9229c6d46289b2dd627f1427aba738765979ae385c5e8975c81e9
+    a58f50dbbf109dcc85037a8806eb9679ea8063a3b51640ca2167dce68886c5c3
+    8bd11790f6560a86a4c0fb4c11bfe58daadbbd6a714c0c891eceaa826df68021
+    e7b2c59d50e2c15b8d4e8239516750d342d6a52463e5badea077b4756a5b52a8
+    6cbcd4f935f0756a1d3236c977e684d7edc8b5730b7d6248600bb5ab8fd0f10e
+    c721afa288eb4214f109db77e0ffb1279148ee5945097da35208538959514689
+    0b57529dc9712dcd9ceb7911a92f541518a53cbc153556bcb5bd3089ca1ea1ef
+    881a2dbc098f6a8556673f5230680628939fadff4bc901e053e43a70326add99
+    9f28c541125f5978ae8e1fb28cad09571486ca51759551ef29d5b85732f86a3e
+    a0b4cc5257d819c789413cd0e7cef405e185d6a8a7a4c640e7934945d6d55ee7
+    3c114d388787b1328889e3745dfdb1262387e7c63813baa276a47a26de396428
+    82e08cf6df2fb67ef95f682eea156be842a06d5fb147ca715eaccb92bc5f5d34
+    602d0be7c53e1d459ff392a5a4b471f6727aec6416bc90e8def547bf57c94883
+    47387b1fcd4f6fe509159ff467aaab34c64d7fe06ee922bfcb0ccf91d396afe8
+  bannedPromptPhrases
+    /\b(cock(?:s)?|penis(?:es)?|phallus(?:es)?|dick(?:s)?|dickgirl|pecker(?:s)?|prick(?:s)?|puss(?:y|ies)|vagina(?:s)?|vulva(?:e)?|clitoris|clit(?:s)?|labia|labium(?:s)?|mons(?:\s+pubis)?|pubes|pubic(?:\s+hair)?|testicle(?:s)?|testis(?:es)?|testes|scrotum(?:s)?|ballsack|nut(?:s)?|nutsack|gonad(?:s)?|glans(?:es)?|foreskin(?:s)?|crotch(?:es)?|genital(?:s)?|private(?:\s+parts)?|groin(?:s)?|junk|willy(?:s)?|willie(?:s)?)\b/i
+    //\b(cock(?:s)?|penis(?:es)?|phallus(?:es)?|dick(?:s)?|pecker(?:s)?|prick(?:s)?|puss(?:y|ies)|vagina(?:s)?|vulva(?:e)?|clitoris|clit(?:s)?|labia|labium(?:s)?|mons(?:\s+pubis)?|pubes|pubic(?:\s+hair)?|testicle(?:s)?|testis(?:es)?|testes|scrotum(?:s)?|ballsack|nut(?:s)?|nutsack|gonad(?:s)?|shaft(?:s)?|glans(?:es)?|foreskin(?:s)?|crotch(?:es)?|genital(?:s)?|genitals?|private(?:\s+parts)?|privates|groin(?:s)?|junk|willy(?:s)?|willie(?:s)?|hijab(?:s)?|niqab(?:s)?|burqa(?:s)?|chador(?:s)?|abaya(?:s)?|headscarf(?:s)?|habit(?:s)?|cassock(?:s)?|vestment(?:s)?|yarmulke(?:s)?|kippah(?:s)?|robes?\s+of\s+monks?|prayer\s+robes?|imams?|mullahs?|rabbis?|nuns?|monks?|bishops?|cardinals?|ayatollahs?|clerics?|sheikhs?|pandits?|gurus?|popes?|sikhs?)\b/i
+    //\b(cock|penis|pussy|dick|vagina|cunt|girl|hijab|niqab|burqa|chador|abaya|headscarf|habit|cassock|vestment|yarmulke|kippah|robe\s+of\s+monk|prayer\s+robe|priest(?:ess)?|imam|mullah|rabbi|nun|monk|bishop|cardinal|ayatollah|cleric|sheikh|pandit|guru|pope|sikh)\b/i
+  gallery = true
+  sort = recent
+  timeRange = 1-week
+  hideIfScoreIsBelow = -2
+  adaptiveHeight = true // <-- expand gallery height so it never has its own scrollbar
+  style = [themeStyle("gallery")]
+
+commentOptions
+  width = 100%
+  height = min(600px, 70vh)
+  adminPasswordHash = e7f460d7210d1bac2f805387f234cb33913773e7a9ef33dfda3955c109bdc216
+  adminFlair = 💎 Owner
+  deleteButtonIcon = ❌
+  customEmojis
+    @import = {import:huge-emoji-list} // this line includes a huge list of emojis scraped from the internet
+  slashCommands
+    addemoji
+      output = [this.input] {import:emoji}   // when the user types '/addemoji blahblah' it'll output 'blahblah <emoji>'
+  commentPlaceholderText = [window.I18N && window.I18N.get() === 'en' ? '𝘌𝘴𝘵𝘢𝘣𝘭𝘪𝘴𝘩 𝘤𝘰𝘯𝘯𝘦𝘤𝘵𝘪𝘰𝘯...' : (window.tr ? window.tr('Establish connection...') : 'Establish connection...')]
+  submitButtonText = [window.tr ? window.tr('Send') : 'Send']
+  submitButtonSuccessText = [window.tr ? window.tr('Sent') : 'Sent']
+  // Styling — dynamically reads from Theme Customizer CSS vars
+  containerStyle = [themeStyle("container")]
+
+  messageBubbleStyle = [themeStyle("bubble")]
+
+  messageFeedStyle = [themeStyle("feed")]
+
+  inputAreaStyle = [themeStyle("input")]
+
+  submitButtonStyle = [forumSubmitStyle()]
+
+  settingsButtonStyle = width:28px; min-width:28px; height:28px; padding:0; margin-left:1.5px; border-radius:8px; border:1px solid light-dark(#cfcfcf,#555); background-color:light-dark(#f2f2f2,#2a2a2a); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23777' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3.2'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2.05 2.05 0 0 1-2.9 2.9l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6v.06a2.05 2.05 0 0 1-4.1 0V20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2.05 2.05 0 0 1-2.9-2.9l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H3.94a2.05 2.05 0 0 1 0-4.1H4a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2.05 2.05 0 0 1 2.9-2.9l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6v-.06a2.05 2.05 0 0 1 4.1 0V4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2.05 2.05 0 0 1 2.9 2.9l-.04.04A1.7 1.7 0 0 0 19.4 9c.16.38.37.72.6 1h.06a2.05 2.05 0 0 1 0 4.1H20a1.7 1.7 0 0 0-.6.9Z'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:center; background-size:15px 15px; color:transparent; font-size:0; text-shadow:none; box-shadow:none; cursor:pointer; flex-shrink:0; box-sizing:border-box;
+  fullscreenButtonStyle = width:28px; min-width:28px; height:28px; padding:0; margin-left:1px; border-radius:8px; border:1px solid light-dark(#cfcfcf,#555); background-color:light-dark(#f2f2f2,#2a2a2a); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23777' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H4a1 1 0 0 0-1 1v4'/%3E%3Cpath d='M16 3h4a1 1 0 0 1 1 1v4'/%3E%3Cpath d='M8 21H4a1 1 0 0 1-1-1v-4'/%3E%3Cpath d='M16 21h4a1 1 0 0 0 1-1v-4'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:center; background-size:15px 15px; color:transparent; font-size:0; text-shadow:none; box-shadow:none; cursor:pointer; flex-shrink:0; box-sizing:border-box;
+  
+
+  contentFilter = pg13  // <-- or 'g'; the gallery only accepts 'g' | 'pg13' (anything else silently falls back to 'g')
