@@ -1,0 +1,51 @@
+// Ternary Bonsai 2 27B — a 27-billion-parameter ternary LLM running entirely
+// on the visitor's own GPU via WebGPU compute kernels.
+//
+// This file is just metadata + config. The app itself is:
+//   index.html        — app shell (upstream CSS/markup + the module scripts)
+//   src/scene.js      — animated landing scene (WebGPU)
+//   src/small-model.js — small GGUF chat mode (wllama: llama.cpp in wasm +
+//                        WebGPU), selectable from the landing page's model picker
+//   src/bonsai-app.js — GGUF reader, WebGPU kernel generator, chat UI
+//   src/hybrid-thinking.js — optional "☁ cloud thinking" mode (off by default)
+// See src/README.md for architecture, provenance and re-sync instructions.
+//
+// Model constants live inside src/bonsai-app.js (`Ri` / `Cl`):
+//   repo  prism-ml/Ternary-Bonsai-2-27B-gguf   (Apache-2.0, public)
+//   file  Ternary-Bonsai-2-27B-PTQ1_0.gguf     (5.95 GB, ternary PTQ1_0)
+// Appending ?src=<hf-repo-id> to the page URL points the app at another GGUF
+// repo; ?nocache skips its weight cache; ?ctx=4096 caps the context window.
+
+// The model picker on the landing page can also start one of ~20 small (<5 GB)
+// GGUF models instead of the 27B engine — general chat (Qwen3.5/3.8, Gemma 4,
+// Liquid LFM) plus a set of uncensored roleplay tunes. They stream from Hugging
+// Face into wllama's cache (origin private file system) so the next visit loads
+// from disk. The preset list lives at the top of src/small-model.js.
+
+$meta
+  title = Ternary Bonsai 2 27B — On-Device WebGPU Chat
+  description = Chat with a 27-billion-parameter ternary-quantized language model running entirely on your own GPU. A 5.9 GB GGUF streams from Hugging Face on first visit, then every token is computed locally with WebGPU kernels. Prefer something smaller? The model picker also loads any of ~20 sub-5 GB GGUFs — Qwen3.5, Qwen3.8, Gemma 4 and Liquid LFM, along with uncensored roleplay tunes — through llama.cpp in WebAssembly, cached on your device so later visits skip the download entirely.
+  image = https://user.uploads.dev/file/84e9012be42901ff072f38e10a0d3b7f.jpg
+  tags = ai, llm, chat, webgpu, on-device, gguf, ternary, qwen, gemma, roleplay, uncensored, wasm
+  header
+    mode = minimal
+
+// ---- Cloud-thinking hybrid (opt-in, off by default) -------------------------
+// The `☁` button in the composer (src/hybrid-thinking.js) can move a thinking
+// turn's *reasoning* step onto Perchance's generateText service while the answer
+// is still decoded locally. That is the only reason this plugin is imported, and
+// importing it puts an ad on the generator for logged-out visitors.
+generateText = {import:ai-text-plugin}
+
+// ---- Reading a chat back into a character card ------------------------------
+// Only the last this-many messages are read as evidence (the Author's Note and the
+// continuity ledger count as context even when they are older than the window).
+chatToCardMaxMessages = 40
+// Hard cap on how many characters one "Group Cast from Chat" build may voice.
+chatToCardMaxCast = 6
+
+// ---- Roleplay Studio -------------------------------------------------------
+// kv      — persistent store for characters, personas, lorebooks, threads.
+// image   — text-to-image-plugin, for character avatars and scene illustrations.
+kv = {import:kv-plugin}
+image = {import:text-to-image-plugin}
