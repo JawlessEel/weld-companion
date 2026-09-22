@@ -1,0 +1,37 @@
+$meta
+  title = Gig Lead Radar — fresh freelance leads, one screen
+  description = Scans public freelance/gig sources (Reddit gig subs, remote job boards, HN hiring threads) for fresh postings matching your skills, then drafts a tailored pitch for any lead.
+  tags = freelance, gigs, jobs, leads, prompt engineering, ai, automation
+
+// ── Plugins ──────────────────────────────────────────────────────────────
+superFetch = {import:super-fetch-plugin}
+generateText = {import:ai-text-plugin}
+kv = {import:kv-plugin}
+
+// ── First-run keyword filter ─────────────────────────────────────────────
+// These are just the starting suggestions. The user edits + saves their own
+// list in the app UI (stored via kv-plugin), so tweak freely here too.
+defaultKeywords
+  prompt engineer
+  prompt writing
+  prompt
+  ai automation
+  chatgpt
+  gpt-4
+  midjourney
+  stable diffusion
+  content writing
+  copywriting
+  automation
+  no-code
+  zapier
+  make.com
+  n8n
+
+// Leads containing any of these are hidden as noise.
+defaultExcludes
+  unpaid
+  commission only
+  equity only
+  volunteer
+  crypto giveaway

@@ -1,0 +1,224 @@
+<style>
+  :root {
+    --bg: #0b0f16;
+    --panel: #131a26;
+    --panel-2: #182131;
+    --line: #26324a;
+    --text: #e7edf6;
+    --muted: #8fa0bb;
+    --accent: #4f9dff;
+    --accent-2: #7c5cff;
+    --good: #33d17a;
+    --warn: #ffb454;
+    --danger: #ff6b6b;
+    --radius: 14px;
+  }
+  html { color-scheme: dark; }
+  body {
+    text-align: left;
+    margin: 0;
+    background: radial-gradient(1200px 700px at 80% -10%, #1a2540 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 22px 18px 90px; }
+
+  .topbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .brand { display: flex; align-items: center; gap: 14px; margin-right: auto; }
+  .logo {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 22px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+    box-shadow: 0 6px 24px rgba(79,157,255,.35);
+  }
+  h1 { font-size: 21px; margin: 0; letter-spacing: .2px; }
+  .sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+
+  .btn {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    padding: 8px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+    transition: .15s; text-decoration: none; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { border-color: #3b4d70; transform: translateY(-1px); }
+  .btn:disabled { opacity: .6; cursor: default; transform: none; }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; color: #fff; }
+  .btn.danger { color: var(--danger); }
+  .btn.link { background: transparent; border-color: transparent; color: var(--accent); }
+  .btn.link:hover { text-decoration: underline; transform: none; }
+  #scanBtn { padding: 11px 20px; font-size: 14.5px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 4px 0 16px; }
+  .chip { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--panel); }
+  .chip-ok { color: var(--good); border-color: #1f4936; }
+  .chip-err { color: var(--danger); border-color: #4a2430; }
+  .chip-loading { color: var(--warn); border-color: #4a3d20; }
+
+  details.settings { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 16px; margin-bottom: 18px; }
+  details.settings summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-bottom: 18px; }
+  label.field { display: block; font-size: 13px; color: var(--muted); font-weight: 600; }
+  label.field small { font-weight: 400; color: #6d7f9c; }
+  label.field.full { grid-column: 1 / -1; }
+  label.field.check { display: flex; align-items: flex-start; gap: 9px; grid-column: 1 / -1; }
+  label.field.check input { margin: 3px 0 0; }
+  .settings-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  textarea, input[type="text"], select {
+    width: 100%; box-sizing: border-box; margin-top: 6px; background: #0e1521; color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font: inherit; font-size: 13.5px;
+  }
+  textarea { resize: vertical; }
+  fieldset.sources { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 0; }
+  fieldset.sources legend { padding: 0 6px; font-size: 12.5px; color: var(--muted); }
+  .src-group { margin-bottom: 8px; }
+  .src-group-name { font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; color: #6d7f9c; margin-bottom: 3px; }
+  .src { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin: 0 16px 4px 0; color: var(--text); }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font: inherit; font-weight: 600; padding: 9px 12px; cursor: pointer; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .count { color: var(--muted); font-weight: 500; }
+
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar #searchInput { flex: 1; min-width: 180px; margin: 0; }
+  .toolbar select { width: auto; margin: 0; }
+
+  .leads { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .card { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 16px; display: flex; flex-direction: column; }
+  .card.is-contacted { opacity: .62; }
+  .card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .badge { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: #cfe1ff; background: #1d3355; border: 1px solid #2b4a78; padding: 2px 8px; border-radius: 999px; }
+  .new-flag { font-size: 10px; font-weight: 800; color: #06210f; background: var(--good); border-radius: 999px; padding: 2px 7px; }
+  .time { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .card-title { font-size: 15.5px; margin: 0 0 4px; line-height: 1.35; }
+  .card-title a { color: var(--text); text-decoration: none; }
+  .card-title a:hover { color: var(--accent); }
+  .company { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+  .snippet { color: #b9c6db; font-size: 13px; margin: 0 0 10px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; }
+  .tag { font-size: 11px; color: #9fb3d1; background: #172033; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+  .budget { font-size: 12px; font-weight: 700; color: var(--good); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+  .actions .btn { padding: 6px 11px; font-size: 12.5px; }
+
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 60px 20px; border: 1px dashed var(--line); border-radius: var(--radius); }
+  .spinner { width: 22px; height: 22px; border: 3px solid rgba(255,255,255,.18); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
+  .spinner.sm { width: 13px; height: 13px; border-width: 2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .overlay { position: fixed; inset: 0; background: rgba(4,7,12,.72); backdrop-filter: blur(4px); display: grid; place-items: center; padding: 18px; z-index: 50; }
+  .pitch-modal { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; width: min(680px, 100%); max-height: 90vh; overflow: auto; padding: 18px 20px 20px; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
+  .pitch-modal header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .icon-btn { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; }
+  .pitch-modal h2 { font-size: 16.5px; margin: 4px 0 6px; }
+  .pitch-modal h2 a { color: var(--text); text-decoration: none; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .pitch-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .pitch-controls select { width: auto; margin: 0; }
+  #pitchOut { min-height: 220px; font-size: 14px; line-height: 1.6; }
+  #pitchStatus { font-size: 12.5px; color: var(--muted); margin-top: 8px; min-height: 18px; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); background: #1b2436; border: 1px solid var(--line); color: var(--text); padding: 11px 18px; border-radius: 12px; font-size: 13.5px; font-weight: 600; opacity: 0; pointer-events: none; transition: .25s; z-index: 60; max-width: 90vw; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.good { border-color: #1f4936; }
+  .toast.warn { border-color: #4a3d20; }
+
+  .foot { margin-top: 34px; color: #6d7f9c; font-size: 12px; text-align: center; }
+
+  @media (max-width: 720px) {
+    .settings-grid { grid-template-columns: 1fr; }
+    .leads { grid-template-columns: 1fr; }
+    h1 { font-size: 18px; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">&#9672;</div>
+      <div>
+        <h1>Gig Lead Radar</h1>
+        <p class="sub">Fresh freelance gigs pulled from public sources, filtered to your skills &mdash; then pitched for you.</p>
+      </div>
+    </div>
+    <button id="scanBtn" class="btn primary">Scan for leads</button>
+  </div>
+
+  <div id="status"></div>
+
+  <details class="settings">
+    <summary>&#9881;&#65039; Your filters &amp; pitch profile</summary>
+    <div class="settings-grid">
+      <label class="field">Keywords <small>&mdash; a lead must mention at least one (comma separated)</small>
+        <textarea id="keywordsInput" rows="2"></textarea>
+      </label>
+      <label class="field">Exclude words <small>&mdash; hide any lead containing these</small>
+        <textarea id="excludesInput" rows="2"></textarea>
+      </label>
+      <label class="field full">Your profile &amp; proof <small>&mdash; what you do, results, tools you use, links. The AI pitches using THIS, so make it concrete.</small>
+        <textarea id="profileInput" rows="5" placeholder="e.g. I write production-grade prompts and build AI automations. Past work: cut a client's content costs 60% with a GPT pipeline; built 40+ no-code automations in Make/Zapier..."></textarea>
+      </label>
+      <label class="field">Your name / signature
+        <input id="nameInput" type="text" placeholder="Alex">
+      </label>
+      <label class="field">Rate to mention <small>(optional)</small>
+        <input id="rateInput" type="text" placeholder="$60/hr or from $500/project">
+      </label>
+      <label class="field check">
+        <input type="checkbox" id="strictInput">
+        <span>Only show leads that match my keywords. <small>Leave off to also see everything posted in the gig subreddits (they're already gig-focused).</small></span>
+      </label>
+      <fieldset class="sources" id="sourcesBox"></fieldset>
+      <div class="settings-actions">
+        <button id="saveSettingsBtn" class="btn primary">Save settings</button>
+        <span class="muted small" id="saveSettingsHint">Filters and profile also save automatically as you type.</span>
+      </div>
+    </div>
+  </details>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="new">Leads <span class="count" id="newCount"></span></button>
+    <button class="tab" data-tab="saved">Saved <span class="count" id="savedCount"></span></button>
+    <button class="tab" data-tab="hidden">Hidden</button>
+  </nav>
+
+  <div class="toolbar">
+    <input id="searchInput" type="text" placeholder="Filter these leads&hellip;">
+    <select id="sortSelect">
+      <option value="match">Best match</option>
+      <option value="new">Newest</option>
+    </select>
+    <button id="exportBtn" class="btn">Export CSV</button>
+  </div>
+
+  <div id="leads" class="leads"></div>
+
+  <p class="foot">Leads from public feeds (Reddit, Hacker News, RemoteOK, Remotive, We Work Remotely, Arbeitnow). Always read each post before replying &mdash; and never pay to apply.</p>
+</div>
+
+<div id="pitchOverlay" class="overlay" hidden>
+  <div class="pitch-modal">
+    <header>
+      <span class="badge" id="pitchSource"></span>
+      <span class="muted small" id="pitchTime"></span>
+      <button class="icon-btn" id="pitchClose" title="Close">&#10005;</button>
+    </header>
+    <h2><a id="pitchTitle" href="#" target="_blank" rel="noopener noreferrer"></a></h2>
+    <p class="muted small" id="pitchSnippet"></p>
+    <div class="pitch-controls">
+      <select id="pitchType">
+        <option value="dm">Short DM (Reddit / chat)</option>
+        <option value="proposal" selected>Full proposal (job board)</option>
+        <option value="followup">Follow-up bump</option>
+      </select>
+      <button id="pitchGenBtn" class="btn primary">Draft pitch</button>
+      <button id="pitchCopyBtn" class="btn">Copy</button>
+      <a id="pitchOpenLink" class="btn link" href="#" target="_blank" rel="noopener noreferrer">Open the post &#8599;</a>
+    </div>
+    <textarea id="pitchOut" placeholder="Your pitch will stream in here&hellip;"></textarea>
+    <div id="pitchStatus"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module" src="src/app.js"></script>
