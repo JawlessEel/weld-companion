@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.56.1
+// @version      1.56.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.56.1';
+  var WC_VERSION = '1.56.2';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -8314,9 +8314,27 @@
     } catch (e) {}
     return ['scrapbook', 'clipRing', 'capsules', 'timeTrack', 'ratings', 'genNotes', 'outRules', 'recent', 'favorites'];
   }
+  // Credentials and consent never travel in a state file: the GitHub token and Skybridge
+  // grants are skipped outright, and the AI config keeps its preferences but drops keys.
+  // On import the local keys/endpoints win, so a crafted file can't point a saved API key
+  // at another host (every provider honours a custom endpoint, and @connect is *).
+  var STATE_SECRET_KEYS = ['ghToken', 'sb:perm'];
+  function stateIsSecret(k) { return STATE_SECRET_KEYS.indexOf(k) !== -1; }
+  function stateScrubOut(k, v) {
+    if (k !== 'ai' || !v || typeof v !== 'object') return v;
+    var c = Object.assign({}, v); delete c.keys; return c;
+  }
+  function stateScrubIn(k, v, cur) {
+    if (k !== 'ai' || !v || typeof v !== 'object') return v;
+    var c = Object.assign({}, v), local = (cur && typeof cur === 'object') ? cur : {};
+    delete c.keys; delete c.endpoints;
+    if (local.keys) c.keys = local.keys;
+    if (local.endpoints) c.endpoints = local.endpoints;
+    return c;
+  }
   function exportState() {
     var data = {};
-    stateKeys().forEach(function (k) { var v = gget(k, undefined); if (v !== undefined) data[k] = v; });
+    stateKeys().forEach(function (k) { if (stateIsSecret(k)) return; var v = gget(k, undefined); if (v !== undefined) data[k] = stateScrubOut(k, v); });
     var env = { meta: { type: 'weld-companion-state-v1', t: Date.now(), keys: Object.keys(data).length }, data: data };
     download('weld-companion-state.' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(env, null, 1), 'application/json');
     toast('\u2713 Exported ' + env.meta.keys + ' keys');
@@ -8326,9 +8344,10 @@
       var env;
       try { env = JSON.parse(txt); } catch (e) { toast('Not a JSON file'); return; }
       if (!env || !env.meta || env.meta.type !== 'weld-companion-state-v1' || !env.data) { toast('Not a Weld Companion state file'); return; }
-      var current = {};
-      stateKeys().forEach(function (k) { var v = gget(k, undefined); if (v !== undefined) current[k] = v; });
-      var merged = core.stateMerge(current, env.data, mode);
+      var current = {}, incoming = {};
+      stateKeys().forEach(function (k) { if (stateIsSecret(k)) return; var v = gget(k, undefined); if (v !== undefined) current[k] = v; });
+      Object.keys(env.data).forEach(function (k) { if (!stateIsSecret(k)) incoming[k] = stateScrubIn(k, env.data[k], current[k]); });
+      var merged = core.stateMerge(current, incoming, mode);
       Object.keys(merged).forEach(function (k) { gset(k, merged[k]); });
       toast('\u2713 Imported ' + Object.keys(env.data).length + ' keys (' + mode + ') \u2014 reopen the drawer to see everything');
       if (done) done();
