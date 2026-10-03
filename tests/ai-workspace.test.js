@@ -65,6 +65,7 @@ assert.doesNotMatch(instructionSource, /aiHelperInputEl/);
 
 // Exercise actual asynchronous request and review handlers without a browser.
 let pending, aborts = 0, writes = 0, throwsOnStart = false;
+let provider = 'localai', nativeRequest = '', nativeFailure = false;
 let doc = 'original';
 const view = {};
 const roots = [];
@@ -76,7 +77,8 @@ const runtime = load(
   ['AI_WORKSPACE', 'aiAskWorkspace', 'aiStopWorkspace', 'renderAIReviewModal'],
   between('var AI_WORKSPACE =', 'function renderAI(body)'),
   {
-    aiConfig: () => ({ provider: 'localai', maxTokens: 8192 }),
+    aiConfig: () => ({ provider, maxTokens: 8192 }),
+    openPerchanceAI(prompt) { if (nativeFailure) throw new Error('Native input missing'); nativeRequest = prompt; },
     PROVIDERS: { localai: { label: 'Local' } },
     WC_TAB: null, $: () => null, toast() {},
     dslView: () => view, htmlView: () => view, viewText: () => doc,
@@ -115,6 +117,53 @@ runtime.aiAskWorkspace();
 assert.equal(state.busy, false, 'synchronous errors release the busy state');
 assert.match(state.status, /transport unavailable/);
 assert.equal(state.response, 'new answer', 'failure preserves the previous reply');
+provider = 'builtin'; state.context = 'none';
+assert.equal(runtime.aiAskWorkspace(), true, 'built-in provider opens native helper');
+assert.match(nativeRequest, /REQUEST:\nretry/);
+assert.match(state.status, /Perchance AI helper/);
+assert.equal(state.busy, false, 'native draft handoff starts no model request');
+nativeFailure = true;
+assert.equal(runtime.aiAskWorkspace(), false);
+assert.match(state.status, /Native input missing/);
+provider = 'localai';
+
+// Test the real native adapter with both current and legacy helper controls.
+let nativeInput, nativePanel, nativeToggle, drawerCloses = 0, toggles = 0, workspaceOpens = 0, routed = 0;
+const nativeEvents = [];
+const nativeAdapter = load(['openPerchanceAI', 'routeAgentToWorkspace'], between('function aiAgentButton(', '// ============================================================ bootstrap'), {
+  $(selector) { return ({ '#aiAgentInputEl': nativeInput, '#aiHelperInputEl': nativeInput, '#aiAgentPanelEl': nativePanel, '#perchanceConsoleEl button[title="Switch to the AI helper"]': nativeToggle })[selector] || null; },
+  aiConfig: () => ({ interceptAgent: true, provider: 'localai' }),
+  closeDrawer() { drawerCloses++; }, toast() {},
+  openWindow() { workspaceOpens++; }, aiAskWorkspace() { routed++; }, AI_WORKSPACE: { busy: false },
+});
+function makeNativeInput(value) {
+  return { value, ownerDocument: { defaultView: { Event: class { constructor(type) { this.type = type; } } } },
+    dispatchEvent(e) { nativeEvents.push(e.type); }, focus() {}, setSelectionRange() {}, scrollIntoView() {} };
+}
+nativeInput = makeNativeInput('My existing draft'); nativePanel = { hidden: true };
+nativeToggle = { click() { toggles++; nativePanel.hidden = false; } };
+assert.equal(nativeAdapter.openPerchanceAI('Repair findings'), true);
+assert.equal(nativeInput.value, 'My existing draft\n\nRepair findings');
+assert.equal(toggles, 1);
+assert.deepEqual(nativeEvents, ['input', 'change']);
+assert.equal(drawerCloses, 1);
+nativeAdapter.openPerchanceAI('Repair findings');
+assert.equal(nativeInput.value, 'My existing draft\n\nRepair findings', 'repeated handoff does not duplicate the report');
+const sendEvent = { preventDefault() { throw new Error('native send must not be intercepted'); } };
+assert.equal(nativeAdapter.routeAgentToWorkspace(sendEvent), false);
+assert.equal(workspaceOpens, 0); assert.equal(routed, 0);
+nativeInput.value = 'A different request';
+nativeAdapter.routeAgentToWorkspace({ stopImmediatePropagation() {}, preventDefault() {} });
+assert.equal(routed, 1, 'normal opt-in interception still works for other requests');
+nativeInput = null;
+assert.throws(() => nativeAdapter.openPerchanceAI('fix'), /input was not found/);
+nativeInput = makeNativeInput(''); nativeInput.disabled = true;
+assert.throws(() => nativeAdapter.openPerchanceAI('fix'), /unavailable/);
+nativeInput.disabled = false; nativePanel.hidden = true; nativeToggle = null;
+assert.throws(() => nativeAdapter.openPerchanceAI('fix'), /toggle was not found/);
+nativePanel = null;
+assert.equal(nativeAdapter.openPerchanceAI('legacy repair'), true, 'legacy helper without the new panel is supported');
+assert.equal(nativeInput.value, 'legacy repair');
 
 function findApply(n) {
   if (n.attrs.text === 'Apply to DSL') return n;

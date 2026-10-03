@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.58.2
+// @version      1.58.3
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.58.2';
+  var WC_VERSION = '1.58.3';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2597,7 +2597,13 @@
   function aiAskWorkspace() {
     var cfg = aiConfig(), prompt = String(AI_WORKSPACE.prompt || '').trim();
     if (!prompt) { AI_WORKSPACE.status = 'Enter a request first.'; refreshAIWorkspace(); return false; }
-    if (cfg.provider === 'builtin') { AI_WORKSPACE.status = 'Choose an external or local provider for the review workspace. Perchance built-in continues to use its native AI Agent UI.'; refreshAIWorkspace(); return false; }
+    if (cfg.provider === 'builtin') {
+      try {
+        openPerchanceAI(aiWorkspaceUser(prompt, AI_WORKSPACE.context));
+        AI_WORKSPACE.status = 'Request placed in Perchance AI helper. Press its Send button to continue.';
+        return true;
+      } catch (err) { AI_WORKSPACE.status = err.message; toast(err.message, 7000); refreshAIWorkspace(); return false; }
+    }
     if (AI_WORKSPACE.busy) return false;
     AI_WORKSPACE.busy = true;
     var sequence = ++AI_WORKSPACE.sequence;
@@ -2692,7 +2698,7 @@
       keyWrap.innerHTML = ''; modelWrap.innerHTML = '';
       var pk = provider.value;
       if (pk === 'builtin') {
-        keyWrap.appendChild(el('div', { class: 'wc-section-note', text: 'Uses Perchance\u2019s native AI Agent. The review workspace below requires one of your own providers.' })); return;
+        keyWrap.appendChild(el('div', { class: 'wc-section-note', text: 'Uses Perchance\u2019s native AI Agent. Ask selected model places the request in its input box; press Send there to continue.' })); return;
       }
       var p = PROVIDERS[pk];
       var key = el('input', { class: 'wc-field', type: 'password', placeholder: p.keyHint, value: cfg.keys[pk] || '', autocomplete: 'off' });
@@ -2785,9 +2791,42 @@
   function aiAgentButton() { return $('#aiAgentSendBtn') || $('#aiHelperSubmitBtn'); }
   function aiAgentInput() { return $('#aiAgentInputEl') || $('#aiHelperInputEl'); }
   function aiAgentPrompt(input) { return String(input && ('value' in input ? input.value : input.textContent) || '').trim(); }
+  var AI_NATIVE_DRAFT = null;
+  function openPerchanceAI(prompt) {
+    var input = aiAgentInput();
+    if (!input || !('value' in input)) throw new Error('Perchance AI input was not found. Open the generator editor (#edit) and its AI helper, then try again.');
+    if (input.disabled || input.readOnly) throw new Error('Perchance AI input is unavailable. Wait for the helper to finish loading, then try again.');
+    var panel = $('#aiAgentPanelEl'), toggle = $('#perchanceConsoleEl button[title="Switch to the AI helper"]') || $('#showAiHelperBtn');
+    if (panel && panel.hidden) {
+      if (!toggle) throw new Error('Perchance AI helper toggle was not found. Open the helper manually, then try again.');
+      toggle.click();
+      if (panel.hidden) throw new Error('Perchance AI helper did not open. Open it manually, then try again.');
+    }
+    prompt = String(prompt || '').trim();
+    if (!prompt) throw new Error('There are no findings or instructions to send.');
+    var draft = String(input.value || '');
+    var next = draft.includes(prompt) ? draft : (draft ? draft + '\n\n' : '') + prompt;
+    input.value = next;
+    var EventCtor = input.ownerDocument.defaultView.Event;
+    input.dispatchEvent(new EventCtor('input', { bubbles: true }));
+    input.dispatchEvent(new EventCtor('change', { bubbles: true }));
+    if (input.value !== next) throw new Error('Perchance did not retain the AI draft. Try again after the helper finishes loading.');
+    // This explicit native handoff must also stay native when interception is enabled.
+    AI_NATIVE_DRAFT = { input: input, text: next };
+    closeDrawer();
+    input.focus();
+    if (input.setSelectionRange) input.setSelectionRange(next.length, next.length);
+    input.scrollIntoView({ block: 'nearest' });
+    toast('Findings placed in Perchance AI helper. Press Send to ask it to fix them.', 7000);
+    return true;
+  }
   function aiAgentTouchMode() { try { return window.innerWidth < 700 || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; } }
   function routeAgentToWorkspace(e) {
     var cfg = aiConfig(), input = aiAgentInput(), prompt = aiAgentPrompt(input);
+    if (AI_NATIVE_DRAFT && AI_NATIVE_DRAFT.input === input) {
+      if (input.value === AI_NATIVE_DRAFT.text) return false;
+      AI_NATIVE_DRAFT = null;
+    }
     if (!cfg.interceptAgent || cfg.provider === 'builtin' || !prompt) return false;
     if (e) { e.stopImmediatePropagation(); e.preventDefault(); }
     if (AI_WORKSPACE.busy) { toast('A request is already running. Stop it before sending another.'); return true; }
@@ -2795,7 +2834,7 @@
     openWindow('tools'); aiAskWorkspace(); return true;
   }
   // Current Perchance uses aiAgent* ids; retain the legacy aiHelper* selectors.
-  // Interception is opt-in and always routes to review instead of modifying code.
+  // Interception is opt-in; explicit native drafts bypass it.
   function hookHelperSubmit() {
     var btn = aiAgentButton(), input = aiAgentInput();
     if (btn && !btn.dataset.wcHook) { btn.dataset.wcHook = '1'; btn.addEventListener('click', routeAgentToWorkspace, true); }
@@ -3689,6 +3728,7 @@
       AI_WORKSPACE.context = context || AI_WORKSPACE.context; AI_WORKSPACE.status = '';
       openWindow('tools');
     },
+    openPerchanceAI: openPerchanceAI,
     // Re-roll the generator inside its sandbox frame and read each result (see the 'sample' agent op).
     sample: function (slug, via, opts) {
       var dm = window.weldDataManager;
@@ -11132,13 +11172,12 @@
       confirmSendOrThrow();
       H.openAI('Review the automatic findings below, tell me which are real problems and which are false alarms, and propose minimal fixes.', 'pack');
     }, { mini: true, title: 'Opens the AI helper with this generator and its findings as context. Nothing is sent until you press Ask.' }),
-    btn('Fix issues with AI', () => {
-      confirmSendOrThrow();
+    btn('Send findings to Perchance AI', () => {
       // Include every warning/error, even those hidden by the filter or Show more.
       const issues = a.findings.filter(f => f.severity === 'error' || f.severity === 'warn');
       const report = issues.map(f => '[' + f.severity.toUpperCase() + '] ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message + (f.hint ? '\n  Hint: ' + f.hint : '')).join('\n');
-      H.openAI('Fix the confirmed issues in generator "' + S.project.name + '" using the attached generator context. Verify each automatic finding against the current source first; explain false alarms and do not change working code to silence them. Preserve existing features, shared names, imports, and behavior. Make the smallest complete fixes. Provide the COMPLETE replacement for each affected pane in exactly one fenced code block labeled perchance or html, without omissions or placeholders, and explain how to verify the fixes. If source is missing or truncated, ask for it before proposing a replacement.\n\nAUTOMATIC FINDINGS (' + issues.length + ' warnings/errors; analyzed ' + S.project.source + ' source):\n' + report, 'pack');
-    }, { mini: true, accent: true, disabled: !a.findings.some(f => f.severity === 'error' || f.severity === 'warn'), title: 'Send all warnings and errors to the AI helper as a repair request. Review it and press Ask, then review the diff before applying fixes.' })]);
+      H.openPerchanceAI('Check and fix the confirmed issues in generator "' + S.project.name + '". Read the current generator source first: these automatic findings may be stale or false alarms. Explain false alarms and preserve working code, existing features, shared names, imports, and behavior. Make the smallest complete fixes and verify them in the live preview. Do not publish the generator.\n\nAUTOMATIC FINDINGS (' + issues.length + ' warnings/errors; analyzed ' + S.project.source + ' source):\n' + report);
+    }, { mini: true, accent: true, disabled: !H.isEdit() || !a.findings.some(f => f.severity === 'error' || f.severity === 'warn'), title: 'Put all warnings and errors into the native Perchance AI helper input. Existing draft text is kept. Press its Send button when ready. Requires the editor (#edit).' })]);
     if (!list.length) { note(parent, S.filter === 'info' ? 'No findings.' : 'No warnings. Switch the filter to see notes.'); return; }
     if (!canJump()) note(parent, 'Click-to-jump needs the editor open with the live version analyzed.');
     list.slice(0, S.findingsMax).forEach(f => {
