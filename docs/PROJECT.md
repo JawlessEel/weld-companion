@@ -31,6 +31,8 @@ Click a finding or an outline row to jump to that line in the editor (needs the 
 
 With **Perchance built-in** selected in Tools, **Ask selected model** also puts the prepared request into the native helper input. External and local providers continue to use Weld's review workspace.
 
+Each native Perchance AI reply has a **Copy reply** button. It copies that reply's text with paragraph and code formatting, independently of the preview's busy overlay. If the browser blocks clipboard access, Weld tries its fallback and reports failure instead of claiming success.
+
 ## Estimates and sampling
 
 **About N distinct outputs** multiplies choices through references and sums over items, ignoring odds. It is marked *rough* when imports or dynamic parts could not be counted.

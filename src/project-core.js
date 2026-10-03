@@ -350,7 +350,8 @@
     html = String(html || '');
     const scripts = [], styles = [];
     let masked = html;
-    const re = /<(script|style)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi; let m;
+    // HTML raw-text elements may run to EOF without an explicit closing tag.
+    const re = /<(script|style)\b([^>]*)>([\s\S]*?)(?:<\/\1\s*>|$)/gi; let m;
     while ((m = re.exec(html))) {
       const attrs = m[2] || '', bodyStart = m.index + m[0].indexOf('>') + 1, code = m[3];
       const typeM = /\btype\s*=\s*["']?([^\s"'>]+)/i.exec(attrs), srcM = /\bsrc\s*=\s*["']?([^\s"'>]+)/i.exec(attrs);

@@ -128,6 +128,17 @@ assert.ok(ids(full).includes('duplicate-id'));
 assert.match(P.htmlMap(html), /Element ids \(1\): out/);
 assert.match(P.htmlMap(html), /root\.\* used: aiTextPlugin/);
 
+// A module script ending at EOF must not turn JS indexing/regex into list refs.
+const eofHtml = '<p>[reallyMissing]</p>\n<script type="module">\nconst tiles = {};\nfunction render(id) { return tiles[id] || tiles[v.id]; }\nconst escape = /[&<>"\']/g;';
+const eofAnalysis = P.analyze({ dsl: 'output\n  hello\n', html: eofHtml });
+assert.equal(eofAnalysis.stats.scripts, 1);
+assert.deepEqual(eofAnalysis.findings.filter(f => f.id === 'html-unresolved-ref').map(f => [f.line, f.message]), [[1, '[reallyMissing] in the HTML panel refers to "reallyMissing", which is not defined.']]);
+assert.ok(!eofAnalysis.findings.some(f => f.id === 'html-in-square'));
+const closedHtml = eofHtml + '\n</script>\n<p>[afterMissing]</p>';
+const closedAnalysis = P.analyze({ dsl: 'output\n  hello\n', html: closedHtml });
+assert.equal(closedAnalysis.findings.filter(f => f.id === 'html-unresolved-ref').length, 2, 'real markup references on both sides remain checked');
+assert.ok(!P.analyzeHtml('<style>p { color: var(--palette[k]); }').squareRefs.length);
+
 // ---- dependencies ----------------------------------------------------------
 const deps = P.normalizeDeps({ success: true, generators: {
   top: { name: 'top', imports: ['a', 'b', 'top'], code: 'x'.repeat(10), lastEditTime: 5 },

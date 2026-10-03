@@ -249,6 +249,41 @@ const DevCore = require('../src/dev-core.js');
   assert.ok(full.endsWith('REQUEST:\nfix it'));
 }
 (async () => {
+  // Native reply copying uses the reply body, keeps formatting, and reports real clipboard failures.
+  let copied = '', clipboardMode = 'ok', fallbackOk = true, latestReply = 'First paragraph\n\nSecond paragraph\n  code';
+  const copyNotices = [], replyButtons = [];
+  let copyField;
+  const reply = {
+    textContent: 'reply',
+    get innerText() { return latestReply + replyButtons.filter(b => b.style.display !== 'none').map(() => '\nCopy reply').join(''); },
+    querySelector() { return replyButtons[0] || null; },
+    querySelectorAll() { return replyButtons; },
+    appendChild(b) { replyButtons.push(b); }
+  };
+  const clipboardHost = {
+    navigator: { clipboard: { writeText(text) { return clipboardMode === 'ok' ? (copied = text, Promise.resolve()) : Promise.reject(new Error('denied')); } } },
+    document: { activeElement: { focus() {} }, body: { appendChild(ta) { copyField = ta; } }, execCommand() { if (fallbackOk) copied = copyField.value; return fallbackOk; } },
+    toast(text) { copyNotices.push(text); },
+    el(tag, attrs) { return { attrs, style: attrs?.style || {}, select() {}, remove() {} }; },
+    $(selector) { return selector === '#aiAgentMsgsEl' ? { querySelectorAll() { return [reply]; } } : null; },
+  };
+  const nativeCopy = load(['copyText', 'enhanceNativeAIReplies', 'nativeAIReplyText'],
+    between('function copyText(', 'function download(') + between('function nativeAIReplyText(', 'var AI_NATIVE_DRAFT'), clipboardHost);
+  nativeCopy.enhanceNativeAIReplies(); nativeCopy.enhanceNativeAIReplies();
+  assert.equal(replyButtons.length, 1, 'enhancing an existing reply adds no duplicate buttons');
+  replyButtons[0].attrs.onclick({ stopPropagation() {} }); await Promise.resolve();
+  assert.equal(copied, latestReply, 'copy contains only the reply, preserving paragraphs and code');
+  latestReply = 'Updated streaming reply ending with Copy reply';
+  assert.equal(nativeCopy.nativeAIReplyText(reply), latestReply, 'a literal Copy reply in the answer is preserved');
+  assert.equal(replyButtons[0].style.display, 'block', 'copy restores button visibility');
+  clipboardMode = 'denied';
+  assert.equal(await nativeCopy.copyText('fallback reply'), true);
+  assert.equal(copied, 'fallback reply');
+  fallbackOk = false; copyNotices.length = 0;
+  assert.equal(await nativeCopy.copyText('cannot copy'), false);
+  assert.ok(copyNotices.every(n => n !== 'Copied'), 'a denied clipboard must never report fake success');
+  assert.match(copyNotices.at(-1), /Copy failed/);
+  console.log('Native AI reply controls, formatting, streaming updates and clipboard fallback tests passed');
   // investigate mode: the model asks for a lookup, gets the real answer, then replies
   const seen = []; let n = 0, aborted = 0;
   const iw = load(['AI_WORKSPACE', 'aiAskWorkspace', 'aiStopWorkspace'], between('var AI_WORKSPACE =', 'function renderAI(body)'), {
