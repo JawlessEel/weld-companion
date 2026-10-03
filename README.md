@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.58.4-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.59.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -31,6 +31,7 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
   - [Sync with GitHub — Pull & Push](#sync-with-github--pull--push)
   - [Library — for readers & players](#library--for-readers--players)
   - [Project — read, check & export any generator](#project--read-check--export-any-generator-v1570)
+  - [Skills - generator upgrade presets](#skills--generator-upgrade-presets-v1590)
   - [Dev — folder sync, AI agents & GitHub](#dev--folder-sync-ai-agents--github-v1580)
   - [Tools — AI Helper & character files](#tools--ai-helper--character-files)
   - [Data Manager — browse, edit & back up every generator's IndexedDB](#data-manager--browse-edit--back-up-every-generators-indexeddb)
@@ -56,10 +57,11 @@ No account and no configuration are needed to start. GitHub sync and a custom AI
 
 ## Features
 
-Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled like a native item, so nothing of Perchance's is replaced, displaced, or covered. It opens the **Weld drawer**, which holds a result-tools row in its header (copy / save / pin / undo-reroll) and seven tabs:
+Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled like a native item, so nothing of Perchance's is replaced, displaced, or covered. It opens the **Weld drawer**, which holds a result-tools row in its header (copy / save / pin / undo-reroll) and feature tabs:
 
 | Tab | What's in it |
 | :-- | :----------- |
+| **Skills** | 48 searchable generator presets for debugging, modernization, features and more, with favorites, editable prompts and direct native Perchance AI handoff. |
 | ★ **Generators** | Your whole generator directory grouped by your real Perchance folders, plus favorites & recents — with search, sort (incl. **Edited** / **Views**), per-row open/edit, and a **Stats** button that pulls real **view counts + last-edited times** from Perchance's public API. A **This Generator** panel shows the open generator's status and an **About this page** card (public stats — views, last edited, title, imports — for *any* generator, even ones you don't own), plus owner actions. |
 | 📒 **Library** | The reader's home, grouped by task. **📚 Collect**: a permanent **Scrapbook** of saved results (searchable, taggable, exportable), **Chat stories** (read or export any AICC thread as styled HTML, Markdown, or text), **clipboard history**, and your **👍/👎 ratings**. **🛡 Care**: a **backup guardian**, a **time tracker** (per-generator minutes, CSV export), a **time capsule**, **output rules** (post-processing on save), and **Move everything** (full state export/import). Plus **search everything**, **session replay**, and a **spaced-repetition review queue** in Collect; **My Perchance** stats, **tab snapshots**, **My boundaries**, and a **Ctrl/Cmd+Shift+S** quick-save hotkey; a **keepsake HTML archive** and **recommendation bundles** to share generators; **lore link health** (catches removed/quarantined uploads before they break a character), **generator watch** (update notifications for favorites), and a one-click **platform speed check**; night light gains an **ambient mode** that follows hour and season. A sticky header keeps save / read-aloud / rate / random-favorite in reach. |
 | 🗃 **Data** | A launcher for the **Data Manager**: browse, edit, back up, export and import the IndexedDB databases of every generator you've visited — full CRUD, deep-scan search, sweep backup, undo for destructive actions. When an AI Character Chat database is open, the **AICC pack** panels appear automatically. |
@@ -234,6 +236,12 @@ The **🔬 Project** tab works on whatever generator you are looking at. It read
 - **exports it** as a ZIP bundle (source, imports, findings, manifest), Markdown, or a budgeted **AI context pack**, and adds the pack, a "selected code" option and a token estimate to the AI Helper.
 
 See [the Project guide](docs/PROJECT.md).
+
+### Skills — generator upgrade presets (v1.59.0)
+
+The **Skills** tab provides **48 searchable presets** across debugging, design, features, AI/media, persistence, performance, accessibility and engineering. Favorite useful skills, add your goal, optionally include freshly analyzed editor findings, and edit the complete prompt before sending it directly to Perchance's native AI input. Existing helper drafts are preserved; press **Send** in the helper to run the skill. Review presets explicitly request an audit without code changes; implementation presets request complete, targeted changes and verification.
+
+See [the Skills guide](docs/SKILLS.md). No separate model configuration is required for the native handoff.
 
 ### Dev — folder sync, AI agents & GitHub (v1.58.0)
 
@@ -580,7 +588,7 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 
 ## Development
 
-The installable script is `weld-companion.user.js`. The Studio and Project tabs are maintained as modules in `src/` and built into it, so edit `src/` and then run:
+The installable script is `weld-companion.user.js`. The Studio, Project, Dev and Skills tabs are maintained as modules in `src/` and built into it, so edit `src/` and then run:
 
 ```bash
 npm run build   # regenerate the embedded modules in the userscript
