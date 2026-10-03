@@ -241,7 +241,14 @@
     row(parent, [sel, btn('Ask AI about these', () => {
       confirmSendOrThrow();
       H.openAI('Review the automatic findings below, tell me which are real problems and which are false alarms, and propose minimal fixes.', 'pack');
-    }, { mini: true, title: 'Opens the AI helper with this generator and its findings as context. Nothing is sent until you press Ask.' })]);
+    }, { mini: true, title: 'Opens the AI helper with this generator and its findings as context. Nothing is sent until you press Ask.' }),
+    btn('Fix issues with AI', () => {
+      confirmSendOrThrow();
+      // Include every warning/error, even those hidden by the filter or Show more.
+      const issues = a.findings.filter(f => f.severity === 'error' || f.severity === 'warn');
+      const report = issues.map(f => '[' + f.severity.toUpperCase() + '] ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message + (f.hint ? '\n  Hint: ' + f.hint : '')).join('\n');
+      H.openAI('Fix the confirmed issues in generator "' + S.project.name + '" using the attached generator context. Verify each automatic finding against the current source first; explain false alarms and do not change working code to silence them. Preserve existing features, shared names, imports, and behavior. Make the smallest complete fixes. Provide the COMPLETE replacement for each affected pane in exactly one fenced code block labeled perchance or html, without omissions or placeholders, and explain how to verify the fixes. If source is missing or truncated, ask for it before proposing a replacement.\n\nAUTOMATIC FINDINGS (' + issues.length + ' warnings/errors; analyzed ' + S.project.source + ' source):\n' + report, 'pack');
+    }, { mini: true, accent: true, disabled: !a.findings.some(f => f.severity === 'error' || f.severity === 'warn'), title: 'Send all warnings and errors to the AI helper as a repair request. Review it and press Ask, then review the diff before applying fixes.' })]);
     if (!list.length) { note(parent, S.filter === 'info' ? 'No findings.' : 'No warnings. Switch the filter to see notes.'); return; }
     if (!canJump()) note(parent, 'Click-to-jump needs the editor open with the live version analyzed.');
     list.slice(0, S.findingsMax).forEach(f => {
