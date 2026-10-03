@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.58.0
+// @version      1.58.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.58.0';
+  var WC_VERSION = '1.58.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1228,8 +1228,8 @@
     '  color:var(--wc-dim);font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:color .15s,background .15s,border-color .15s;}',
     '.wc-close:hover{color:#fff;background:#c0392b;border-color:#c0392b;}',
     // drawer tab strip
-    '.wc-menu{display:flex;gap:2px;padding:8px 10px;border-bottom:1px solid var(--wc-line-2);flex:none;}',
-    '.wc-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:9px 8px;border-radius:9px;cursor:pointer;',
+    '.wc-menu{display:flex;flex-wrap:wrap;gap:2px;padding:8px 10px;border-bottom:1px solid var(--wc-line-2);flex:none;}',
+    '.wc-tab{flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:7px;padding:9px 8px;border-radius:9px;cursor:pointer;',
     '  font:600 12px/1 var(--wc-sans);letter-spacing:.2px;color:var(--wc-dim);border:1px solid transparent;transition:color .15s,background .15s,border-color .15s;}',
     '.wc-tab:hover{color:var(--wc-ink);background:var(--wc-surface-2);}',
     '.wc-tab.wc-on{color:var(--wc-ink);background:var(--wc-surface-3);box-shadow:inset 0 -2px 0 var(--wc-arc);}',
@@ -12517,7 +12517,7 @@
       check('Reconnect automatically when I open Perchance', B.cfg.auto, v => { B.cfg.auto = v; saveBridgeCfg(); })]);
     row(parent, [check('Let agents propose edits (they still need your approval)', B.cfg.allowPropose, v => { B.cfg.allowPropose = v; saveBridgeCfg(); }),
       check('Let agents run samples (re-rolls the generator)', B.cfg.allowSample, v => { B.cfg.allowSample = v; saveBridgeCfg(); }, 'Off by default: update() can have side effects on some generators.')]);
-    note(parent, 'Start the bridge with "npm run bridge" in the project folder. It prints the token and the one-line setup for each agent. See docs/DEV.md.');
+    note(parent, 'To start the bridge, double-click start-bridge.cmd in your Weld Companion project folder (or run "npm run bridge" there in a terminal). A window opens, shows the setup line for each agent and copies the token to your clipboard: paste it above. Keep that window open while you use it. See docs/DEV.md.');
   }
   function proposalsSection(parent) {
     if (!S.proposals.length) return note(parent, 'Nothing yet. When an agent proposes a change it appears here with a diff.');

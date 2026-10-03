@@ -267,6 +267,10 @@ if (require.main === module) {
   const bridge = createBridge({ token: cfg.token, log: m => process.stderr.write('[weld-bridge] ' + m + '\n') });
   bridge.listen(cfg.port, '127.0.0.1').then(addr => {
     console.log(configHelp(addr.port, cfg.token));
+    if (args.includes('--copy')) {   // put the token on the clipboard so it can be pasted into Weld
+      const tool = process.platform === 'win32' ? ['clip'] : process.platform === 'darwin' ? ['pbcopy'] : ['xclip', '-selection', 'clipboard'];
+      try { const r = require('node:child_process').spawnSync(tool[0], tool.slice(1), { input: cfg.token }); console.log(r.status === 0 ? '\nThe token is copied to your clipboard: paste it into Weld (Dev tab, Agent bridge).' : '\n(Could not copy the token automatically; copy it from above.)'); } catch (e) { console.log('\n(Could not copy the token automatically; copy it from above.)'); }
+    }
     console.log('\nWaiting for Weld and agents. Press Ctrl+C to stop.');
   }).catch(e => { console.error(e.code === 'EADDRINUSE' ? 'Port ' + cfg.port + ' is already in use. Use --port <n>.' : e.message); process.exit(1); });
   process.on('SIGINT', () => bridge.close().then(() => process.exit(0)));
