@@ -150,3 +150,44 @@ assert.equal(calls.at(-1).method, 'PATCH');
 assert.match(calls.at(-1).path, /\/refs\/heads\/main$/);
 
 console.log('skybridge and GitHub push contract tests passed');
+
+// Pull/Diff must work on PRIVATE repos: with a token the file is read through the Contents API
+// (token only to api.github.com); without one, or if the API refuses, the anonymous raw URL is used.
+{
+  const sent = [];
+  function world(token, responses) {
+    sent.length = 0;
+    return load(['ghFetch', 'ghFetchRaw'], between('function ghFetchRaw(', 'function cmText('), {
+      ghToken: () => token,
+      parseGitHubUrl: load(['parseGitHubUrl'], between('function parseGitHubUrl(', '// global defaults overlaid')).parseGitHubUrl,
+      encodeURIComponent, Date,
+      GM_xmlhttpRequest(o) { sent.push(o); const r = responses.shift(); setTimeout(() => (r.err ? o.onerror() : o.onload({ status: r.status, responseText: r.text })), 0); },
+    });
+  }
+  const raw = 'https://raw.githubusercontent.com/me/private repo/refs/heads/main/dad chat/a b.txt?_=1'.replace(/ /g, '-');
+  const run = (w, url) => new Promise((resolve) => w.ghFetch(url, (err, text) => resolve({ err, text })));
+  (async () => {
+    let w = world('tok123', [{ status: 200, text: 'SECRET LISTS' }]);
+    assert.deepEqual(await run(w, raw), { err: null, text: 'SECRET LISTS' });
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].url, /^https:\/\/api\.github\.com\/repos\/me\/private-repo\/contents\/dad-chat\/a-b\.txt\?ref=main&_=\d+$/);
+    assert.equal(sent[0].headers.Authorization, 'Bearer tok123');
+    assert.match(sent[0].headers.Accept, /raw/);
+    w = world('', [{ status: 200, text: 'PUBLIC' }]);
+    assert.deepEqual(await run(w, raw), { err: null, text: 'PUBLIC' });
+    assert.equal(sent.length, 1);
+    assert.ok(sent[0].url.startsWith('https://raw.githubusercontent.com/') && !(sent[0].headers && sent[0].headers.Authorization), 'no token: anonymous raw, no Authorization');
+    w = world('tok', [{ status: 401, text: '' }, { status: 200, text: 'PUBLIC OK' }]);
+    assert.deepEqual(await run(w, raw), { err: null, text: 'PUBLIC OK' }, 'a rejected token falls back to the public file');
+    assert.ok(!(sent[1].headers && sent[1].headers.Authorization), 'the token is never sent to raw.githubusercontent.com');
+    w = world('tok', [{ status: 404, text: '' }, { status: 404, text: '' }]);
+    const failed = await run(w, raw);
+    assert.match(failed.err, /^HTTP 404 \(private repo\? the token needs access to me\/private-repo/);
+    w = world('tok', [{ err: true }, { status: 200, text: 'X' }]);
+    assert.equal((await run(w, raw)).text, 'X');
+    w = world('tok', [{ status: 200, text: 'Y' }]);
+    await run(w, 'https://example.com/file.txt');
+    assert.ok(sent[0].url.startsWith('https://example.com/') && !(sent[0].headers && sent[0].headers.Authorization), 'non-GitHub URLs never get the token');
+    console.log('Private-repo Pull/Diff fetch tests passed');
+  })().catch((e) => { console.error(e); process.exit(1); });
+}

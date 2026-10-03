@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.57.0
+// @version      1.57.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.57.0';
+  var WC_VERSION = '1.57.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -136,7 +136,7 @@
     };
     return { cfg: cfg, overridden: !!map[name], dslUrl: ghRawUrl(cfg, cfg.dslPath, name), htmlUrl: ghRawUrl(cfg, cfg.htmlPath, name) };
   }
-  function ghFetch(url, cb) {
+  function ghFetchRaw(url, cb) {
     try {
       GM_xmlhttpRequest({
         method: 'GET', url: url,
@@ -145,6 +145,31 @@
         ontimeout: function () { cb('timeout', ''); }
       });
     } catch (e) { cb(String((e && e.message) || e), ''); }
+  }
+  // Private repos: raw.githubusercontent.com answers 404 to anyone not logged in, so when a
+  // GitHub token is saved, read the file through the Contents API instead (Authorization goes
+  // ONLY to api.github.com). If that fails -- e.g. an expired token on a PUBLIC repo -- fall back
+  // to the anonymous raw URL, so existing public setups keep working exactly as before.
+  function ghFetch(url, cb) {
+    var token = ghToken(), p = token ? parseGitHubUrl(url) : null;
+    if (!p || !p.owner || !p.repo || !p.branch || !p.path || !/^https?:\/\/raw\.githubusercontent\.com\//i.test(url)) { ghFetchRaw(url, cb); return; }
+    var api = 'https://api.github.com/repos/' + encodeURIComponent(p.owner) + '/' + encodeURIComponent(p.repo) + '/contents/'
+      + p.path.split('/').map(encodeURIComponent).join('/') + '?ref=' + encodeURIComponent(p.branch) + '&_=' + Date.now();
+    function viaRaw(apiErr) {
+      ghFetchRaw(url, function (err, text) {
+        if (!err) { cb(null, text); return; }
+        cb(apiErr && /^HTTP (401|403|404)$/.test(apiErr) ? (apiErr + ' (private repo? the token needs access to ' + p.owner + '/' + p.repo + ' with Contents: read)') : (apiErr || err), '');
+      });
+    }
+    try {
+      GM_xmlhttpRequest({
+        method: 'GET', url: api, timeout: 30000,
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github.raw+json', 'X-GitHub-Api-Version': '2022-11-28' },
+        onload: function (r) { if (r.status >= 200 && r.status < 300) cb(null, r.responseText || ''); else viaRaw('HTTP ' + r.status); },
+        onerror: function () { viaRaw('network error'); },
+        ontimeout: function () { viaRaw('timeout'); }
+      });
+    } catch (e) { viaRaw(String((e && e.message) || e)); }
   }
   function cmText(elx) { try { return (elx.innerText || elx.textContent || ''); } catch (e) { return ''; } }
   // Drive CM6's own input pipeline: synthetic paste first (CM6 reads clipboardData and
@@ -1738,7 +1763,7 @@
 
     var cardTok = el('div', { class: 'wc-card' });
     cardTok.appendChild(head('GitHub push token'));
-    cardTok.appendChild(note('Push commits the editor to GitHub, which needs a Personal Access Token. Use a fine-grained token scoped to this one repo with Contents: read & write. Stored locally; sent only to api.github.com; never logged.'));
+    cardTok.appendChild(note('Push commits the editor to GitHub, which needs a Personal Access Token. Use a fine-grained token scoped to this one repo with Contents: read & write. The same token lets Pull and Diff read a PRIVATE repo; without one they use public files only. Stored locally; sent only to api.github.com; never logged.'));
     var tokIn = el('input', { class: 'wc-field', type: 'password', placeholder: ghToken() ? '\u2022\u2022\u2022\u2022 token saved \u2014 type to replace' : 'github_pat_\u2026 / ghp_\u2026', 'aria-label': 'GitHub personal access token', autocomplete: 'off' });
     cardTok.appendChild(tokIn);
     cardTok.appendChild(row([

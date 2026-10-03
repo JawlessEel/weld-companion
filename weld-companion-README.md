@@ -37,7 +37,7 @@ The **⚡ Weld** drawer has a result-tools header (copy / save / pin / undo-rero
 
 From the **⇅ GitHub** tab (or the **⇅ GitHub** button in the *This Generator* panel):
 
-- **⬇ Pull** — fetch the generator's DSL + HTML from your repo's public `raw.githubusercontent.com` files and fill the editor's two panes (undoable); you review and **Save**. Optional backup-before-pull.
+- **⬇ Pull** — fetch the generator's DSL + HTML from your repo (public raw files, or the GitHub API with your token for a private repo) and fill the editor's two panes (undoable); you review and **Save**. Optional backup-before-pull.
 - **⬆ Push** — commit the editor's DSL and HTML together to your repo through GitHub's Git Data API, behind a confirm dialog. Needs a **fine-grained Personal Access Token** (single repo, Contents read & write), stored locally and sent only to `api.github.com` — never logged. Set it under **⚙ → GitHub push (token)**.
 
 Set `owner` / `repo` / `branch` and path templates once under the gear (paste a GitHub file URL to auto-fill); per-generator overrides re-point slugs that don't match their filenames.
@@ -51,7 +51,7 @@ Set `owner` / `repo` / `branch` and path templates once under the gear (paste a 
 - Favorites, history, comfort, pins, and the cached directory are stored **only in your browser**.
 - Your **AI key** goes only to the provider you pick; your **GitHub token** only to `api.github.com`. Neither is ever logged.
 - **Your Perchance login is never handled by this script** — directory loading, rename, and delete drive Perchance's *own* controls, which carry their own credentials.
-- Pull is read-only and anonymous (public raw files, no cookies).
+- Pull is read-only: anonymous public raw files by default, or your saved token via GitHub's API so private repos work.
 - **Skybridge** — to Weld generators that import `weld-skybridge-plugin`, the Companion offers consent-gated capabilities (durable storage, your own streaming AI model **— cloud or local**, a cross-tab message bus, web fetch, web search, and model-info), each asked once per generator and remembered. So a generator can run on your **free local model** with no key. See [README.md](README.md) for details.
 - Every feature is feature-detected and fail-soft, so it never breaks the host page; Focus mode hides *your own* clutter and is not an ad blocker.
 

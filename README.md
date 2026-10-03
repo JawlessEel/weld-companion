@@ -7,7 +7,7 @@
 Favorites · reading comfort · save & pin results · undo-reroll · a full generator manager with your real folders · **two-way GitHub sync (Pull & Push)** · rename/delete that drive Perchance's own controls · a **Library** tab for readers and players — a permanent cross-generator **Scrapbook**, AICC **chat-story export** (styled HTML / Markdown / text), a **backup guardian**, night light, and read-aloud · a **Tools** tab housing the AI Helper (edit it, *point at your own GPT, or run a free local model*), AICC character file import/export, and a one-click **self-test** · a **federated Data Manager** that browses, edits and backs up every generator's IndexedDB · an **AICC pack** for AI Character Chat with a Lore Library, character GitHub round-trip, and database repair & recovery with quarantine.
 
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.57.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.57.1-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -413,7 +413,7 @@ Two consent-free **meta-requests** help a plugin introspect the link without cat
   - Your **AI key** is sent only to the provider you pick — and a **local model** (Ollama / OpenAI-compatible) needs no key at all, reaching only `localhost`.
   - Your **GitHub token** is sent only to `api.github.com`, in the `Authorization` header — never logged, never placed in commit messages or file content. Use a fine-grained, single-repo, Contents-read/write token.
 - **Your Perchance login is never handled by this script.** Directory loading, rename, and delete all drive Perchance's own controls, which carry their own credentials. The Companion reads the results but never reads or transmits your session token.
-- **Pull is read-only and anonymous** — it fetches `raw.githubusercontent.com` files with no auth or cookies, fills the editor locally, and never saves or pushes on its own.
+- **Pull is read-only** — with no token it fetches public `raw.githubusercontent.com` files with no auth or cookies; with a saved GitHub token it reads through GitHub's API instead, so **private repos work** (the token goes only to `api.github.com`). It fills the editor locally and never saves or pushes on its own.
 - **Declared `@connect` hosts:**
 
   ```
