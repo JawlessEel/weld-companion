@@ -7,7 +7,7 @@
 Favorites · reading comfort · save & pin results · undo-reroll · a full generator manager with your real folders · **two-way GitHub sync (Pull & Push)** · rename/delete that drive Perchance's own controls · a **Library** tab for readers and players — a permanent cross-generator **Scrapbook**, AICC **chat-story export** (styled HTML / Markdown / text), a **backup guardian**, night light, and read-aloud · a **Tools** tab housing the AI Helper (edit it, *point at your own GPT, or run a free local model*), AICC character file import/export, and a one-click **self-test** · a **federated Data Manager** that browses, edits and backs up every generator's IndexedDB · an **AICC pack** for AI Character Chat with a Lore Library, character GitHub round-trip, and database repair & recovery with quarantine.
 
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.54.2-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.57.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -29,6 +29,7 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
   - [Generator manager, directory & CRUD](#generator-manager-directory--crud)
   - [Sync with GitHub — Pull & Push](#sync-with-github--pull--push)
   - [Library — for readers & players](#library--for-readers--players)
+  - [Project — read, check & export any generator](#project--read-check--export-any-generator-v1570)
   - [Tools — AI Helper & character files](#tools--ai-helper--character-files)
   - [Data Manager — browse, edit & back up every generator's IndexedDB](#data-manager--browse-edit--back-up-every-generators-indexeddb)
   - [AICC pack — Lore Library, character round-trip & repair](#aicc-pack--lore-library-character-round-trip--repair)
@@ -217,6 +218,19 @@ If you've saved a note on a generator, a small floating 🗒 badge appears when 
 The **Studio** tab adds guided character editing, shared world lore with activation and knowledge rules, relationships, timelines, five chatbot templates, model-connected conversation tests, side-by-side reply comparisons, approved playthrough memory, consistency checking, and project export/import with snapshots. It uses your existing AI provider settings and character/lore interfaces.
 
 See [the Studio guide](STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
+
+### Project — read, check & export any generator (v1.57.0)
+
+The **🔬 Project** tab works on whatever generator you are looking at. It reads the **published** lists panel, HTML panel and whole import tree of any public generator (or your live editor, including unsaved edits) and then:
+
+- **checks it** for the mistakes that usually break at runtime: undefined names, silent no-op blocks, re-randomizing stored selections, id/list collisions, bad handlers, insecure addresses, mixed indentation, and Perchance parser traps, each with a click-to-jump line;
+- **maps it**: list and function outline, an estimate of how many distinct outputs it can make, every external host and storage key, and the import tree with sizes and last-edit times;
+- **watches it**: warns when an import changed since you last reviewed it, keeps local snapshots you can compare or restore, and flags starred generators that were edited;
+- **samples it**: re-rolls the generator N times to measure real output variety;
+- **checks its links** (anonymous requests, on your confirmation);
+- **exports it** as a ZIP bundle (source, imports, findings, manifest), Markdown, or a budgeted **AI context pack**, and adds the pack, a "selected code" option and a token estimate to the AI Helper.
+
+See [the Project guide](PROJECT.md).
 
 ### Tools — AI Helper & character files
 
@@ -448,7 +462,7 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 *All offline unless noted.*
 
 - **Companion-to-Companion sync** — encode full state as a QR code or short link; scan on another device to import. No server. *(offline)*
-- **Asset manager** — inventory every external asset a generator loads, check liveness, offer to re-host dead ones to user.uploads.dev, maintain a personal asset library reusable across generators. *(online)*
+- **Asset manager** — inventory every external asset a generator loads, check liveness, offer to re-host dead ones to user.uploads.dev, maintain a personal asset library reusable across generators. *(online)* *(1.57.0 inventories every external address and checks liveness from the Project tab; re-hosting is still open.)*
 - **Grief recovery / session archaeology** — given any IndexedDB dump, reconstruct a human-readable timeline including deleted rows. Not just "here are your characters" but the full database history. *(offline)*
 
 ---
@@ -489,9 +503,9 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 
 - **Ritual and habit support** — honour daily creative rituals; quiet streak tracking; gentle prompt if you haven't done your morning pull. *(offline)*
 - **Living style guide** — extract implicit consistency rules from saved outputs ("all your northern city names end in -vik"), surface them, flag when a new output breaks your canon. *(offline)*
-- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)*
+- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)* *(1.57.0 adds an on-demand analyzer with click-to-jump findings in the Project tab; live underlining is still open.)*
 - **Accessibility audit** — basic check of output contrast ratio, font size, `prefers-reduced-motion` compliance. One-line result in the Generators tab. *(offline)*
-- **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)*
+- **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)* *(1.57.0 keeps local snapshots with compare and restore; a per-edit history is still open.)*
 - **Contextual platform tutorial** — "how does this work?" panel explaining the DSL, HTML panel, and imports for the specific generator you're looking at. *(offline)*
 - **DSL reader / explainer** — "explain this generator in plain English," "what does this line do." The AI Helper writes code; this reads it. *(online — uses AI)*
 - **Atomic GitHub commits** — push DSL + HTML as a single commit rather than two. *(online)*
