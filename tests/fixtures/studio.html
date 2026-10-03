@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Studio development fixture</title>
+<link rel="stylesheet" href="/style.css">
+<style>body{background:#0c1016;margin:0;padding:16px}main{max-width:1000px;margin:auto;background:#13171e;padding:20px;border-radius:14px}pre{overflow-wrap:anywhere}#notice{color:#ffcd4d}</style>
+<main class="wc-root"><p>Development fixture — simulated model; no Perchance account data.</p><p id="notice" role="status"></p><div id="app"></div></main>
+<script src="/el.js"></script>
+<script src="/core.js"></script>
+<script>
+window.weldStudioHost = {
+  el,
+  get: (key, fallback) => JSON.parse(localStorage.getItem(key) || 'null') || fallback,
+  set: (key, value) => { localStorage.setItem(key, JSON.stringify(value)); return true; },
+  toast: message => { document.getElementById('notice').textContent = message; },
+  model: () => 'Simulated fixture model',
+  download: (name, content) => {
+    const a = document.createElement('a'); a.download = name; a.href = URL.createObjectURL(new Blob([content]));
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  ask: (system, user, callback) => {
+    const t = setTimeout(() => callback(null, system.includes('JSON array') ?
+      '["The traveler asked about the harbor."]' : 'Welcome to Silver Harbor. What would you like to explore?'), 700);
+    return { abort: () => clearTimeout(t) };
+  }
+};
+</script>
+<script src="/ui.js"></script>
+<script>window.weldStudio.render(document.getElementById('app'));</script>
+</html>
