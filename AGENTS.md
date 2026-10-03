@@ -12,9 +12,10 @@ the host page.
 
 - `weld-companion.user.js` is the installable script. Users auto-update from
   the raw GitHub URL in `@updateURL`, so whatever lands on `main` ships.
-- `src/studio-*.js` (Studio), `src/project-*.js` (Project tab) and `src/dev-*.js`
-  (Dev tab) are copied into the userscript between `/* BEGIN GENERATED STUDIO */`
-  ... `/* END GENERATED STUDIO */` and the matching `PROJECT` and `DEV` markers by
+- `src/studio-*.js` (Studio), `src/project-*.js` (Project tab), `src/dev-*.js`
+  (Dev tab) and `src/skills-*.js` (Skills tab) are copied into the userscript between
+  `/* BEGIN GENERATED STUDIO */` ... `/* END GENERATED STUDIO */` and the matching
+  `PROJECT`, `DEV` and `SKILLS` markers by
   `npm run build`. Edit `src/`, then build. Don't hand-edit the generated blocks.
 - `bridge/weld-bridge.js` is the local MCP bridge for AI agents (Node, no
   dependencies; `npm run bridge`). It binds to 127.0.0.1 only and its token lives in
