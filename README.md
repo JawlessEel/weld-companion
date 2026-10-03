@@ -6,6 +6,7 @@
 
 Favorites · reading comfort · save & pin results · undo-reroll · a full generator manager with your real folders · **two-way GitHub sync (Pull & Push)** · rename/delete that drive Perchance's own controls · a **Library** tab for readers and players — a permanent cross-generator **Scrapbook**, AICC **chat-story export** (styled HTML / Markdown / text), a **backup guardian**, night light, and read-aloud · a **Tools** tab housing the AI Helper (edit it, *point at your own GPT, or run a free local model*), AICC character file import/export, and a one-click **self-test** · a **federated Data Manager** that browses, edits and backs up every generator's IndexedDB · an **AICC pack** for AI Character Chat with a Lore Library, character GitHub round-trip, and database repair & recovery with quarantine.
 
+[![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
 [![Version](https://img.shields.io/badge/version-1.57.1-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
@@ -38,6 +39,7 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
 - [Privacy & safety](#privacy--safety)
 - [Compatibility & caveats](#compatibility--caveats)
 - [Relationship to Weld](#relationship-to-weld)
+- [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -217,7 +219,7 @@ If you've saved a note on a generator, a small floating 🗒 badge appears when 
 
 The **Studio** tab adds guided character editing, shared world lore with activation and knowledge rules, relationships, timelines, five chatbot templates, model-connected conversation tests, side-by-side reply comparisons, approved playthrough memory, consistency checking, and project export/import with snapshots. It uses your existing AI provider settings and character/lore interfaces.
 
-See [the Studio guide](STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
+See [the Studio guide](docs/STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
 
 ### Project — read, check & export any generator (v1.57.0)
 
@@ -230,7 +232,7 @@ The **🔬 Project** tab works on whatever generator you are looking at. It read
 - **checks its links** (anonymous requests, on your confirmation);
 - **exports it** as a ZIP bundle (source, imports, findings, manifest), Markdown, or a budgeted **AI context pack**, and adds the pack, a "selected code" option and a token estimate to the AI Helper.
 
-See [the Project guide](PROJECT.md).
+See [the Project guide](docs/PROJECT.md).
 
 ### Tools — AI Helper & character files
 
@@ -563,6 +565,17 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 - **Mental health awareness** — opt-in, private session pattern tracking. Gentle check-in if patterns suggest distress. *(offline)*
 - **Bereavement and attachment care** — treat cherished characters like photographs; long-term archival in plain readable JSON. *(offline)*
 
+## Development
+
+The installable script is `weld-companion.user.js`. The Studio and Project tabs are maintained as modules in `src/` and built into it, so edit `src/` and then run:
+
+```bash
+npm run build   # regenerate the embedded modules in the userscript
+npm run check   # stale-bundle check + syntax check + all tests (same as CI)
+```
+
+Guides: [Studio](docs/STUDIO.md) · [Project](docs/PROJECT.md). Generator source for the Weld plugin suite lives in `weld-page/` and `weld-skybridge/`.
+
 ## Contributing
 
 Issues and PRs welcome. Because the script leans on undocumented Perchance internals, the most useful reports include:
@@ -574,7 +587,7 @@ Keep changes feature-detected and fail-soft — never break the host page.
 
 ## License
 
-MIT © 2026 **therealwestninja**
+MIT © 2026 **therealwestninja**. This repository is a fork maintained by [JawlessEel](https://github.com/JawlessEel), with additions credited in the commit history; the original project is [therealwestninja/weld-companion](https://github.com/therealwestninja/weld-companion).
 
 - DeviantArt: [west-ninja](https://www.deviantart.com/west-ninja)
 - GitHub: [therealwestninja](https://github.com/therealwestninja)

@@ -17,9 +17,9 @@ the host page.
   `/* BEGIN GENERATED STUDIO */` ... `/* END GENERATED STUDIO */` and the matching
   `PROJECT` markers by `npm run build`. Edit `src/`, then build. Don't hand-edit
   the generated blocks.
-- `dad-chat/`, `dad-llm/`, `only-hope-now/`, `weld-page/`, `weld-skybridge/`
-  hold Perchance generator code. Commits named "Update <name> via Weld
-  Companion" come from the userscript's GitHub sync; don't rewrite them.
+- `weld-page/` and `weld-skybridge/` hold Perchance generator code (not plain JS).
+  Personal generator backups live in the separate `perchance_backups` repo, not here;
+  don't add generator folders to this repo. Guides are in `docs/`.
 - Remotes: `origin` = JawlessEel fork (push here); `upstream` =
   therealwestninja/weld-companion (read-only; send changes as PRs from a branch).
 
