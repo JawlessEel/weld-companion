@@ -175,6 +175,25 @@ const render = () => window.weldProject.render(parent);
   assert.equal(aiCalls.at(-1).ctx, 'pack');
   assert.equal(confirms.filter(c => /another author/.test(c)).length, warned, 'an editor source is yours: no extra warning');
 
+  // Repair handoff includes all issues, independent of the visible filter/limit.
+  const originalFindings = state().analysis.findings;
+  state().analysis.findings = Array.from({ length: 65 }, (_, i) => ({ severity: i === 0 ? 'error' : 'warn', pane: i === 0 ? 'dsl' : 'html', line: i + 1, message: 'Issue ' + i, hint: 'Check ' + i }));
+  state().analysis.findings.push({ severity: 'info', pane: 'dsl', message: 'Informational only' });
+  state().filter = 'error'; render();
+  const writesBeforeRepair = applied.length;
+  click('Fix issues with AI');
+  const repair = aiCalls.at(-1);
+  assert.equal(repair.ctx, 'pack');
+  assert.match(repair.prompt, /Fix the confirmed issues in generator "demo"/);
+  assert.match(repair.prompt, /\[ERROR\] dsl line 1: Issue 0/);
+  assert.match(repair.prompt, /\[WARN\] html line 65: Issue 64\n  Hint: Check 64/);
+  assert.doesNotMatch(repair.prompt, /Informational only/);
+  assert.match(repair.prompt, /false alarms/);
+  assert.equal(applied.length, writesBeforeRepair, 'handoff does not write to the editor');
+  state().analysis.findings = [{ severity: 'info', pane: 'dsl', message: 'Just a note' }]; render();
+  assert.ok(find('button', 'Fix issues with AI').disabled, 'repair is disabled without warnings/errors');
+  state().analysis.findings = originalFindings; state().filter = 'warn'; render();
+
   // ---- starred generators ----
   openSection('Starred generators');
   host.stats = { alpha: { lastEditTime: 100 }, beta: { lastEditTime: 200 } };

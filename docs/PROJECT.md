@@ -27,6 +27,8 @@ When only the lists panel is loaded, unresolved names are downgraded to notes be
 
 Click a finding or an outline row to jump to that line in the editor (needs the **live** copy).
 
+**Fix issues with AI** opens **Tools → AI Helper** with a repair request containing every warning and error, including findings hidden by the filter or **Show more**, plus the generator context pack. Press **Ask** to send it to your configured provider, then review the proposed pane replacements and diff before applying them. The request asks the helper to check for false alarms, preserve existing behavior, and request missing source before proposing replacements. The button is disabled when there are no warnings or errors; **Ask AI about these** remains available for a general review.
+
 ## Estimates and sampling
 
 **About N distinct outputs** multiplies choices through references and sums over items, ignoring odds. It is marked *rough* when imports or dynamic parts could not be counted.
