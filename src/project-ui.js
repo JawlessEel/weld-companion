@@ -566,6 +566,8 @@
   }
   window.weldProject = {
     render,
+    // Download a generator's published lists, HTML and imports without changing what the tab shows.
+    fetchPublished,
     // Source currently loaded for this generator (editor first), for the AI helper.
     current() {
       const slug = H.slug(); if (!slug) return null;

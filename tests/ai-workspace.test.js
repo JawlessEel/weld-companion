@@ -152,3 +152,92 @@ transport.onload({ status: 200, responseText: JSON.stringify({
 assert.deepEqual(adapterResult, { err: null, text: 'complete answer' });
 
 console.log('AI workspace extraction, cancellation, failure recovery, truncation, and stale-review tests passed');
+
+// ---- providers, prompt caching, the Perchance primer and investigate mode ---------------------
+const DevCore = require('../src/dev-core.js');
+{
+  const { PROVIDERS: PV } = load(['PROVIDERS'], between('  var PROVIDERS = {', 'function aiConfig('), {});
+  assert.ok(PV.openrouter && PV.githubmodels, 'the new gateways are offered');
+  assert.equal(PV.openrouter.url(), 'https://openrouter.ai/api/v1/chat/completions');
+  assert.equal(PV.openrouter.headers('k').Authorization, 'Bearer k');
+  const ob = JSON.parse(PV.openrouter.body('m', 'SYS', 'USER', false));
+  assert.equal(ob.model, 'm'); assert.equal(ob.messages[0].role, 'system'); assert.equal(ob.messages[1].content, 'USER');
+  assert.equal(PV.openrouter.extract({ choices: [{ message: { content: 'hi' } }] }), 'hi');
+  assert.equal(PV.githubmodels.url(), 'https://models.github.ai/inference/chat/completions');
+  const gh = PV.githubmodels.headers('tok');
+  assert.equal(gh.Authorization, 'Bearer tok'); assert.equal(gh.Accept, 'application/vnd.github+json'); assert.ok(gh['X-GitHub-Api-Version']);
+  assert.match(PV.githubmodels.defaultModel, /^[a-z]+\/[\w.-]+$/, 'GitHub Models ids look like publisher/model');
+  assert.equal(PV.anthropic.defaultModel, 'claude-sonnet-5-5');
+  assert.equal(JSON.parse(PV.openrouter.body('m', 's', 'u', true)).response_format.type, 'json_object');
+
+  // cache split: Anthropic gets a cacheable block for big context; every other provider gets plain joined text
+  const { aiUserForProvider: split, AI_CACHE_BREAK: BREAK } = load(['aiUserForProvider', 'AI_CACHE_BREAK'], between('var AI_CACHE_BREAK', '// ---- D3:'), {});
+  const big = 'x'.repeat(5000), msg = big + BREAK + 'REQUEST: go';
+  assert.equal(split('openai', msg), big + '\n\nREQUEST: go');
+  assert.equal(split('localai', msg), big + '\n\nREQUEST: go');
+  assert.equal(split('anthropic', 'small' + BREAK + 'REQUEST: go'), 'small\n\nREQUEST: go', 'too small to be worth caching');
+  const blocks = split('anthropic', msg);
+  assert.equal(blocks.length, 2); assert.equal(blocks[0].cache_control.type, 'ephemeral'); assert.equal(blocks[0].text, big); assert.equal(blocks[1].text, 'REQUEST: go');
+  assert.equal(blocks[1].cache_control, undefined, 'only the stable context is cached, never the changing request');
+  assert.equal(split('anthropic', 'no marker here'), 'no marker here');
+  assert.equal(split('anthropic', ['already', 'blocks']).length, 2, 'non-string input passes through');
+
+  // the primer is added to the system prompt unless switched off
+  const sysCtx = { window: { WeldDevCore: DevCore } };
+  const { aiWorkspaceSystem: sys } = load(['aiWorkspaceSystem'], between('function aiWorkspaceSystem(', "// The Project tab's loaded copy"), sysCtx);
+  assert.match(sys({ instruction: '', usePrimer: true }), /PERCHANCE REFERENCE/);
+  assert.match(sys({ instruction: 'Be terse.', usePrimer: true }), /^Be terse\.\n\nPERCHANCE REFERENCE/, 'custom instruction first, primer after');
+  assert.doesNotMatch(sys({ instruction: 'Be terse.', usePrimer: false }), /PERCHANCE REFERENCE/);
+  assert.equal(sys({ instruction: 'x' }).includes('PERCHANCE REFERENCE'), true, 'on unless explicitly disabled');
+  assert.equal(load(['aiWorkspaceSystem'], between('function aiWorkspaceSystem(', "// The Project tab's loaded copy"), {}).aiWorkspaceSystem({ instruction: 'only this' }), 'only this', 'no module, no primer, no crash');
+
+  // context first, request last, with the cache marker between them
+  const userCtx = { AI_CACHE_BREAK: BREAK, dslView: () => ({}), htmlView: () => null, viewText: () => 'output\n  hi', isCmView: () => false, window: {} };
+  const { aiWorkspaceUser: user } = load(['aiWorkspaceUser'], between('function aiProjectSource(', 'function refreshAIWorkspace('), userCtx);
+  assert.equal(user('just a question', 'none'), 'REQUEST:\njust a question', 'no context, no marker');
+  const full = user('fix it', 'dsl');
+  assert.ok(full.indexOf('CURRENT PERCHANCE DSL') < full.indexOf(BREAK) && full.indexOf(BREAK) < full.indexOf('REQUEST:\nfix it'), 'context, marker, request');
+  assert.ok(full.endsWith('REQUEST:\nfix it'));
+}
+(async () => {
+  // investigate mode: the model asks for a lookup, gets the real answer, then replies
+  const seen = []; let n = 0, aborted = 0;
+  const iw = load(['AI_WORKSPACE', 'aiAskWorkspace', 'aiStopWorkspace'], between('var AI_WORKSPACE =', 'function renderAI(body)'), {
+    aiConfig: () => ({ provider: 'localai', maxTokens: 4096, usePrimer: true }),
+    PROVIDERS: { localai: { label: 'Local' } }, WC_TAB: null, $: () => null, toast() {},
+    dslView: () => ({}), htmlView: () => null, viewText: () => 'output\n  [a]\na\n  x\n  y\n', isCmView: () => false,
+    AI_CACHE_BREAK: '\n<<<weld-cache-break>>>\n',
+    window: { WeldDevCore: DevCore, weldProject: { current: () => ({ name: 'zoo', dsl: 'output\n  [a]\na\n  x\n  y\n', html: null, deps: null }) } },
+    callOwnAI(cfg, sys, user, cb) {
+      seen.push({ sys, user }); n++;
+      const reply = n === 1 ? '```weld-tool\n{"tool":"get_outline"}\n```' : 'The list "a" has 2 items.';
+      const t = setTimeout(() => cb(null, reply), 5);
+      return { abort() { aborted++; clearTimeout(t); } };
+    },
+  });
+  const st = iw.AI_WORKSPACE; st.prompt = 'how big is a?'; st.context = 'none'; st.investigate = true;
+  assert.equal(iw.aiAskWorkspace(), true);
+  for (let i = 0; i < 200 && st.busy; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(st.response, 'The list "a" has 2 items.');
+  assert.equal(seen.length, 2, 'one lookup round, then the answer');
+  assert.match(seen[0].sys, /weld-tool/); assert.match(seen[0].sys, /PERCHANCE REFERENCE/);
+  assert.match(seen[1].user, /RESULT of get_outline/); assert.match(seen[1].user, /"name": "a"/);
+  assert.match(st.status, /Reply ready for review/);
+  // stopping mid-investigation aborts the request and ignores the late reply
+  n = 0; seen.length = 0; st.response = ''; st.prompt = 'again';
+  iw.aiAskWorkspace(); await new Promise((r) => setTimeout(r, 1)); iw.aiStopWorkspace(false);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(aborted >= 1, true); assert.equal(st.response, '', 'a late reply after Stop is discarded');
+  // investigate falls back to a plain request when nothing is loaded
+  st.investigate = true; n = 5; seen.length = 0; st.prompt = 'plain';
+  const iw2 = load(['AI_WORKSPACE', 'aiAskWorkspace'], between('var AI_WORKSPACE =', 'function renderAI(body)'), {
+    aiConfig: () => ({ provider: 'localai', maxTokens: 4096, usePrimer: false }), PROVIDERS: { localai: { label: 'Local' } }, WC_TAB: null, $: () => null, toast() {},
+    dslView: () => null, htmlView: () => null, viewText: () => '', isCmView: () => false, AI_CACHE_BREAK: '\n\n',
+    window: { WeldDevCore: DevCore, weldProject: { current: () => null } },
+    callOwnAI(cfg, sys, user, cb) { seen.push({ sys, user }); setTimeout(() => cb(null, 'ok'), 1); return { abort() {} }; },
+  });
+  iw2.AI_WORKSPACE.investigate = true; iw2.AI_WORKSPACE.prompt = 'plain'; iw2.AI_WORKSPACE.context = 'none'; iw2.aiAskWorkspace();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(seen.length, 1); assert.doesNotMatch(seen[0].sys, /weld-tool/, 'no lookups offered when there is nothing to look at');
+  console.log('AI providers, prompt caching, Perchance primer and investigate mode tests passed');
+})().catch((e) => { console.error(e); process.exit(1); });

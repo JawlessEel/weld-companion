@@ -12,11 +12,15 @@ the host page.
 
 - `weld-companion.user.js` is the installable script. Users auto-update from
   the raw GitHub URL in `@updateURL`, so whatever lands on `main` ships.
-- `src/studio-core.js` / `src/studio-ui.js` (Studio) and `src/project-core.js` /
-  `src/project-ui.js` (Project tab) are copied into the userscript between
-  `/* BEGIN GENERATED STUDIO */` ... `/* END GENERATED STUDIO */` and the matching
-  `PROJECT` markers by `npm run build`. Edit `src/`, then build. Don't hand-edit
-  the generated blocks.
+- `src/studio-*.js` (Studio), `src/project-*.js` (Project tab) and `src/dev-*.js`
+  (Dev tab) are copied into the userscript between `/* BEGIN GENERATED STUDIO */`
+  ... `/* END GENERATED STUDIO */` and the matching `PROJECT` and `DEV` markers by
+  `npm run build`. Edit `src/`, then build. Don't hand-edit the generated blocks.
+- `bridge/weld-bridge.js` is the local MCP bridge for AI agents (Node, no
+  dependencies; `npm run bridge`). It binds to 127.0.0.1 only and its token lives in
+  `bridge/.weld-bridge.json` (git-ignored). Never log the token, put it in a state
+  export (`bridge` is in `STATE_SECRET_KEYS`), or let an agent edit the editor
+  without a diff review: `weld_propose_edit` only queues a proposal.
 - `weld-page/` and `weld-skybridge/` hold Perchance generator code (not plain JS).
   Personal generator backups live in the separate `perchance_backups` repo, not here;
   don't add generator folders to this repo. Guides are in `docs/`.

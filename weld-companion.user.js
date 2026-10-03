@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.57.1
+// @version      1.58.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.57.1';
+  var WC_VERSION = '1.58.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -912,7 +912,9 @@
   // Commit both editor panes through Git's blob/tree/commit/ref APIs, rather than
   // two Contents-API PUTs. If any request fails before the final ref update, the
   // branch stays exactly as it was; it can never contain just one pane's update.
-  function ghPushFilesAtomic(o, repo, branch, files, token, msg, cb) {
+  // opts.newBranch (optional): commit on top of `branch` but publish the commit as a NEW branch instead of
+  // moving `branch` (used by "Push as pull request"). Existing callers pass no opts and behave as before.
+  function ghPushFilesAtomic(o, repo, branch, files, token, msg, cb, opts) {
     var base = '/repos/' + o + '/' + repo + '/git/';
     function api(method, path, body, done) { ghApi(method, base + path, token, body, done); }
     function fail(action, err, st, json) { cb(err || ghApiError(action, st, json)); }
@@ -938,6 +940,13 @@
             if (eTree || (sTree !== 201 && sTree !== 200) || !tree || !tree.sha) return fail('POST tree', eTree, sTree, tree);
             api('POST', 'commits', { message: msg, tree: tree.sha, parents: [parent] }, function (eNew, sNew, commit) {
               if (eNew || (sNew !== 201 && sNew !== 200) || !commit || !commit.sha) return fail('POST commit', eNew, sNew, commit);
+              if (opts && opts.newBranch) {
+                if (!/^[\w.\/-]{1,120}$/.test(opts.newBranch) || /\.\.|\/\/|\.lock$|^\/|\/$/.test(opts.newBranch)) return fail('POST branch', new Error('Unsafe branch name'));
+                return api('POST', 'refs', { ref: 'refs/heads/' + opts.newBranch, sha: commit.sha }, function (eNew2, sNew2, made) {
+                  if (eNew2 || sNew2 !== 201) return fail('POST branch', eNew2, sNew2, made);
+                  cb(null, 'created');
+                });
+              }
               api('PATCH', 'refs/heads/' + branchPath, { sha: commit.sha, force: false }, function (eRef, sRef, updated) {
                 if (eRef || sRef !== 200) return fail('PATCH branch', eRef, sRef, updated);
                 cb(null, 'updated');
@@ -948,6 +957,52 @@
         putBlob();
       });
     });
+  }
+  // Pre-push check with Weld's own analyzer (undefined names, silent no-ops, id collisions, ...). It only
+  // adds lines to the confirmation you already see, never blocks, and can be switched off in Code checks.
+  function ghGateNote(name, dsl, html) {
+    try {
+      var PC = window.WeldProjectCore, DC = window.WeldDevCore;
+      if (gget('ghPushGate', true) === false || !PC || !DC) return '';
+      var g = DC.gateReport(PC.analyze({ name: name, dsl: dsl, html: html }), 'warn');
+      if (!g.count) return '';
+      return '\n\n⚠ Weld found ' + g.count + ' possible problem(s) (heuristic):\n' + g.lines.join('\n') + (g.more ? '\n… and ' + g.more + ' more (see the Project tab)' : '');
+    } catch (e) { return ''; }
+  }
+  // Commit both panes to a NEW branch and open a pull request against the configured branch, so the change
+  // can be reviewed (by you, Copilot, Codex, Claude...) before it reaches main. Needs a token with
+  // Contents + Pull requests: read & write.
+  function pushAsPullRequest(over) {
+    var name = genName();
+    if (!name) { toast('No generator detected -- open one first'); return; }
+    var token = ghToken();
+    if (!token) { toast('Set a GitHub token first (gear → GitHub push)'); return; }
+    var mt = dslView(), ot = htmlView();
+    if (!mt || !ot || !mt.state || !ot.state) { toast('Open the editor (#edit) first -- panes not ready'); return; }
+    var R = ghResolve(name);
+    if (over && (over.dslPath || over.htmlPath || over.owner || over.repo || over.branch)) {
+      R = { cfg: { owner: over.owner || R.cfg.owner, repo: over.repo || R.cfg.repo, branch: over.branch || R.cfg.branch, dslPath: over.dslPath || R.cfg.dslPath, htmlPath: over.htmlPath || R.cfg.htmlPath }, overridden: true };
+    }
+    if (!R.cfg.owner || !R.cfg.repo) { toast('Set your GitHub owner/repo first (open the gear, then Repo defaults)'); return; }
+    var DC = window.WeldDevCore, base = R.cfg.branch || 'main';
+    var branch = DC ? DC.pushBranchName(name) : ('weld/' + name + '-' + Date.now());
+    var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
+    var dslP = R.cfg.dslPath.replace(/\{name\}/g, function () { return name; }), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, function () { return name; });
+    var msg = 'Open a pull request for “' + name + '”?\n\nrepo: ' + R.cfg.owner + '/' + R.cfg.repo + '\nnew branch: ' + branch + '  →  into ' + base + '\nDSL  → ' + dslP + '\nHTML → ' + htmlP
+      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghGateNote(name, dsl, html);
+    if (!confirm(msg)) { toast('Cancelled'); return; }
+    toast('Creating branch and pull request…');
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err) {
+      if (err) { console.error('[weld pr]', err.message); toast('Could not create the branch: ' + err.message, 6000); return; }
+      ghApi('POST', '/repos/' + R.cfg.owner + '/' + R.cfg.repo + '/pulls', token, { title: 'Update ' + name + ' via Weld Companion', head: branch, base: base,
+        body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`.' }, function (e2, st, pr) {
+        if (e2 || (st !== 201 && st !== 200) || !pr || !pr.html_url) {
+          toast('Branch ' + branch + ' was created, but the pull request failed (' + ((pr && pr.message) || e2 && e2.message || st) + '). Open it on GitHub.', 8000); return;
+        }
+        try { copyText(pr.html_url); } catch (e) {}
+        toast('Pull request opened (link copied): ' + pr.html_url, 8000);
+      });
+    }, { newBranch: branch });
   }
   function pushToGitHub(over) {
     var name = genName();
@@ -972,6 +1027,7 @@
       + 'This COMMITS over the GitHub copies of these two files.';
     var pushLint = lintHtmlScripts();
     if (pushLint.length) { console.warn('[weld lint]', pushLint); confirmMsg += '\n\n\u26A0 ' + pushLint.length + ' JavaScript problem(s) in the HTML pane (see console) \u2014 pushing commits them as-is.'; }
+    confirmMsg += ghGateNote(name, dsl, html);
     if (!confirm(confirmMsg)) { toast('Cancelled'); return; }
     toast('Pushing ' + name + ' to GitHub\u2026');
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
@@ -1034,6 +1090,8 @@
       GM_registerMenuCommand('Weld: Insert $meta block at cursor', function () { insertSnippet(snippetById('meta')); });
       GM_registerMenuCommand('Weld: Insert core plugin imports at cursor', function () { insertSnippet(snippetById('imports-core')); });
       GM_registerMenuCommand('Weld: Analyze THIS generator (Project tab)', function () { openWindow('project'); });
+      GM_registerMenuCommand('Weld: Dev tools (folder sync, agents, rename)', function () { openWindow('dev'); });
+      GM_registerMenuCommand('Weld: Push editor as pull request', function () { pushAsPullRequest(); });
       GM_registerMenuCommand('Weld: Lint JS in HTML pane now', lintNow);
       GM_registerMenuCommand('Weld: Find bugs in active pane (AI)', aiBugCheck);
       GM_registerMenuCommand('Weld: Explain Save (what will Save do?)', explainSave);
@@ -1312,6 +1370,7 @@
       { id: 'data', glyph: '\u{1F5C3}', label: 'Data' },
       { id: 'github', glyph: '\u21C5', label: 'GitHub' },
       { id: 'project', glyph: '\u{1F52C}', label: 'Project' },
+      { id: 'dev', glyph: '\u{1F9E9}', label: 'Dev' },
       { id: 'comfort', glyph: '\u{1F441}', label: 'Comfort' },
       { id: 'snippets', glyph: '\u2702', label: 'Snippets' },
       { id: 'studio', glyph: '\u270E', label: 'Studio' },
@@ -1383,6 +1442,10 @@
     else if (WC_TAB === 'project') {
       if (window.weldProject) { try { window.weldProject.render(body); } catch (e) { body.appendChild(el('div', { class: 'wc-section-note', text: 'The Project tab hit an error: ' + ((e && e.message) || e) })); } }
       else body.appendChild(el('div', { class: 'wc-section-note', text: 'Project module is unavailable. Reinstall the complete userscript.' }));
+    }
+    else if (WC_TAB === 'dev') {
+      if (window.weldDev) { try { window.weldDev.render(body); } catch (e) { body.appendChild(el('div', { class: 'wc-section-note', text: 'The Dev tab hit an error: ' + ((e && e.message) || e) })); } }
+      else body.appendChild(el('div', { class: 'wc-section-note', text: 'Dev module is unavailable. Reinstall the complete userscript.' }));
     }
     else if (WC_TAB === 'studio') {
       if (window.weldStudio) window.weldStudio.render(body);
@@ -1733,7 +1796,8 @@
         el('span', { class: 'wc-gslug', style: { flex: '1', minWidth: '0' }, text: name + (map[name] ? '  \u00b7  custom' : '') }),
         el('button', { class: 'wc-btn wc-btn-accent', text: '\u2B07 Pull', title: 'Fetch this generator\u2019s files into the editor (you then Save)', onclick: function () { pullFromGitHub(liveOver()); } }),
         el('button', { class: 'wc-btn', text: '\u2B06 Push', title: 'Commit the editor contents to GitHub (asks first)', onclick: function () { pushToGitHub(liveOver()); } }),
-        el('button', { class: 'wc-btn', text: '\u21C4 Diff', title: 'Compare the editor against the GitHub version (nothing is written)', onclick: function () { diffVsGitHub(liveOver()); } })
+        el('button', { class: 'wc-btn', text: '\u21C4 Diff', title: 'Compare the editor against the GitHub version (nothing is written)', onclick: function () { diffVsGitHub(liveOver()); } }),
+        el('button', { class: 'wc-btn', text: '\u2B06 Push as PR', title: 'Commit to a new branch and open a pull request (the branch you pull from is not changed until you merge)', onclick: function () { pushAsPullRequest(liveOver()); } })
       ]));
 
       var cardA = el('div', { class: 'wc-card' });
@@ -1781,6 +1845,13 @@
     cardLint.appendChild(el('div', { class: 'wc-row', style: { alignItems: 'center', marginTop: '4px' } }, [
       lchk,
       el('label', { class: 'wc-section-note', for: 'wc-lint-save', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Lint JS before each Save (warn on errors)' })
+    ]));
+    var gchk = el('input', { type: 'checkbox', id: 'wc-gate-push', style: { margin: '0 8px 0 0' } });
+    gchk.checked = gget('ghPushGate', true) !== false;
+    gchk.onchange = function () { gset('ghPushGate', !!gchk.checked); toast('Weld check before Push: ' + (gchk.checked ? 'ON' : 'OFF')); };
+    cardLint.appendChild(el('div', { class: 'wc-row', style: { alignItems: 'center', marginTop: '4px' } }, [
+      gchk,
+      el('label', { class: 'wc-section-note', for: 'wc-gate-push', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Show Weld’s analyzer findings in the Push dialog (undefined names, silent no-ops, id clashes)' })
     ]));
     cardLint.appendChild(row([ el('button', { class: 'wc-btn', text: 'Lint JS now', title: 'Check the HTML pane\u2019s <script> blocks now', onclick: lintNow }), el('button', { class: 'wc-btn', text: 'Find bugs (AI)', title: 'AI review of the active pane via Perchance\u2019s editor copilot', onclick: aiBugCheck }) ]));
     colB.appendChild(cardLint);
@@ -2228,7 +2299,7 @@
       extract: function (j) { return j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content; }
     },
     anthropic: {
-      label: 'Anthropic (Claude)', keyHint: 'sk-ant-\u2026', defaultModel: 'claude-sonnet-4-20250514',
+      label: 'Anthropic (Claude)', keyHint: 'sk-ant-\u2026', defaultModel: 'claude-sonnet-5-5',
       url: function () { return 'https://api.anthropic.com/v1/messages'; },
       headers: function (key) { return { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }; },
       body: function (model, sys, user, json) { var msgs = [{ role: 'user', content: user }]; if (json) msgs.push({ role: 'assistant', content: '{' }); return JSON.stringify({ model: model, max_tokens: 4096, system: sys, messages: msgs }); },
@@ -2240,6 +2311,23 @@
       headers: function () { return { 'Content-Type': 'application/json' }; },
       body: function (model, sys, user, json) { var b = { systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [{ text: user }] }] }; if (json) b.generationConfig = { responseMimeType: 'application/json' }; return JSON.stringify(b); },
       extract: function (j) { try { return j.candidates[0].content.parts[0].text; } catch (e) { return null; } }
+    },
+    // Gateways that speak the OpenAI chat format. OpenRouter fronts many hosted models with one key;
+    // GitHub Models uses a GitHub token that has the models:read permission (it is NOT the Push token
+    // unless you add that permission to it).
+    openrouter: {
+      label: 'OpenRouter (many models)', keyHint: 'sk-or-…', defaultModel: 'openrouter/auto',
+      url: function () { return 'https://openrouter.ai/api/v1/chat/completions'; },
+      headers: function (key) { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key, 'X-Title': 'Weld Companion' }; },
+      body: function (model, sys, user, json) { var b = { model: model, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], temperature: 0.7 }; if (json) b.response_format = { type: 'json_object' }; return JSON.stringify(b); },
+      extract: function (j) { return j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content; }
+    },
+    githubmodels: {
+      label: 'GitHub Models', keyHint: 'github_pat_… (models:read)', defaultModel: 'openai/gpt-4.1',
+      url: function () { return 'https://models.github.ai/inference/chat/completions'; },
+      headers: function (key) { return { 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Authorization': 'Bearer ' + key }; },
+      body: function (model, sys, user, json) { var b = { model: model, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], temperature: 0.7 }; if (json) b.response_format = { type: 'json_object' }; return JSON.stringify(b); },
+      extract: function (j) { return j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content; }
     },
     // LOCAL models (from the Rook project): free + private, run on your machine. The userscript's
     // GM_xmlhttpRequest can reach localhost (the in-sandbox bridge cannot) -> needs @connect localhost.
@@ -2266,6 +2354,7 @@
     cfg.endpoints = cfg.endpoints || {};
     cfg.instruction = cfg.instruction || '';
     cfg.interceptAgent = cfg.interceptAgent === true;
+    cfg.usePrimer = cfg.usePrimer !== false;
     cfg.maxTokens = Math.max(256, Math.min(32768, Math.floor(Number(cfg.maxTokens) || 4096)));
     return cfg;
   }
@@ -2273,7 +2362,7 @@
   // companion now honors it (provider-specific field). Merges, so it co-exists with json mode.
   function sbApplyMaxTokens(provider, b, n) {
     n = n | 0; if (n <= 0 || !b) return;
-    if (provider === 'openai' || provider === 'localai') b.max_tokens = n;
+    if (provider === 'openai' || provider === 'localai' || provider === 'openrouter' || provider === 'githubmodels') b.max_tokens = n;
     else if (provider === 'anthropic') b.max_tokens = n;          // overrides the default 4096
     else if (provider === 'google') { b.generationConfig = b.generationConfig || {}; b.generationConfig.maxOutputTokens = n; }
     else if (provider === 'ollama') { b.options = b.options || {}; b.options.num_predict = n; }
@@ -2282,7 +2371,7 @@
   // each provider's established default untouched when the caller does not send one.
   function sbApplyTemperature(provider, b, value) {
     var t = Number(value); if (!b || !isFinite(t)) return;
-    if (provider === 'openai' || provider === 'localai' || provider === 'anthropic') b.temperature = t;
+    if (provider === 'openai' || provider === 'localai' || provider === 'anthropic' || provider === 'openrouter' || provider === 'githubmodels') b.temperature = t;
     else if (provider === 'google') { b.generationConfig = b.generationConfig || {}; b.generationConfig.temperature = t; }
     else if (provider === 'ollama') { b.options = b.options || {}; b.options.temperature = t; }
   }
@@ -2306,7 +2395,7 @@
     var key = (cfg.keys || {})[cfg.provider]; if (!key && !p.noKey) return cb('No API key set for ' + p.label, null);
     var endpoint = (cfg.endpoints || {})[cfg.provider] || p.defaultEndpoint;
     var model = (cfg.models || {})[cfg.provider] || p.defaultModel;
-    var bodyStr = p.body(model, sys, user, json);
+    var bodyStr = p.body(model, sys, aiUserForProvider(cfg.provider, user), json);
     if (maxTokens || temperature != null) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(cfg.provider, bo, maxTokens); if (temperature != null) sbApplyTemperature(cfg.provider, bo, temperature); bodyStr = JSON.stringify(bo); } catch (e) {} }
     return GM_xmlhttpRequest({
       method: 'POST', url: p.url(model, key, endpoint), headers: p.headers(key), data: bodyStr, timeout: 120000,
@@ -2328,6 +2417,16 @@
     });
   }
 
+  // Big context goes BEFORE the request, split by this marker. Anthropic gets it as a cacheable block (repeat
+  // questions about the same code are cheaper and faster); every other provider just gets the text joined.
+  var AI_CACHE_BREAK = '\n<<<weld-cache-break>>>\n';
+  function aiUserForProvider(provider, user) {
+    if (typeof user !== 'string' || user.indexOf(AI_CACHE_BREAK) === -1) return user;
+    var i = user.indexOf(AI_CACHE_BREAK), head = user.slice(0, i), tail = user.slice(i + AI_CACHE_BREAK.length);
+    if (provider === 'anthropic' && head.length > 4000) return [{ type: 'text', text: head, cache_control: { type: 'ephemeral' } }, { type: 'text', text: tail }];
+    return head + '\n\n' + tail;
+  }
+
   // ---- D3: streaming the own-model completion over the bridge ----------------
   // Per-provider streaming: reuse the D2 body() (incl. json prefill) and add the
   // provider's stream switch; Gemini streams via a different ENDPOINT, not a body flag.
@@ -2344,6 +2443,14 @@
       url: function (m, k) { return 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':streamGenerateContent?alt=sse&key=' + encodeURIComponent(k); },
       body: function (m, s, u, j) { return PROVIDERS.google.body(m, s, u, j); }
     },
+    openrouter: {
+      url: function () { return PROVIDERS.openrouter.url(); },
+      body: function (m, s, u, j) { var b = JSON.parse(PROVIDERS.openrouter.body(m, s, u, j)); b.stream = true; return JSON.stringify(b); }
+    },
+    githubmodels: {
+      url: function () { return PROVIDERS.githubmodels.url(); },
+      body: function (m, s, u, j) { var b = JSON.parse(PROVIDERS.githubmodels.body(m, s, u, j)); b.stream = true; return JSON.stringify(b); }
+    },
     localai: {   // OpenAI-compatible local server streams SSE just like OpenAI
       url: function (m, k, endpoint) { return (endpoint || 'http://localhost:1234').replace(/\/+$/, '') + '/v1/chat/completions'; },
       body: function (m, s, u, j) { var b = JSON.parse(PROVIDERS.localai.body(m, s, u, j)); b.stream = true; return JSON.stringify(b); }
@@ -2353,7 +2460,7 @@
   // Pure: pull the text delta out of one parsed SSE data object, per provider. Unit-tested.
   function sbStreamDelta(provider, obj) {
     if (!obj) return '';
-    if (provider === 'openai' || provider === 'localai') return (obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content) || '';
+    if (provider === 'openai' || provider === 'localai' || provider === 'openrouter' || provider === 'githubmodels') return (obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content) || '';
     if (provider === 'anthropic') return (obj.type === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta') ? (obj.delta.text || '') : '';
     if (provider === 'google') { try { return obj.candidates[0].content.parts[0].text || ''; } catch (e) { return ''; } }
     return '';
@@ -2381,7 +2488,7 @@
     var st = STREAM[prov]; if (!st) return callOwnAI(cfg, sys, user, cb, json, maxTokens, temperature);   // no stream cfg (e.g. Ollama NDJSON) -> single-shot
     var endpoint = (cfg.endpoints || {})[prov] || p.defaultEndpoint;
     var model = (cfg.models || {})[prov] || p.defaultModel;
-    var bodyStr = st.body(model, sys, user, json);
+    var bodyStr = st.body(model, sys, aiUserForProvider(prov, user), json);
     if (maxTokens || temperature != null) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(prov, bo, maxTokens); if (temperature != null) sbApplyTemperature(prov, bo, temperature); bodyStr = JSON.stringify(bo); } catch (e) {} }
     var acc = '', buf = '', lastLen = 0, done = false;
     function pump(text) {
@@ -2412,7 +2519,7 @@
       });
     } catch (e) { finish(String((e && e.message) || e)); }
   }
-  var AI_WORKSPACE = { prompt: '', response: '', context: 'dsl', status: '', busy: false, sequence: 0, request: null };
+  var AI_WORKSPACE = { prompt: '', response: '', context: 'dsl', status: '', busy: false, sequence: 0, request: null, investigate: false };
 
   function aiStopWorkspace(clear) {
     var request = AI_WORKSPACE.request;
@@ -2437,7 +2544,13 @@
     if (!matches.length && blocks.length === 1 && ['', 'text', 'plaintext', 'txt'].indexOf(blocks[0].lang) !== -1) return blocks[0].code;
     throw new Error('Use one complete ' + target.toUpperCase() + ' code block for this pane. The reply contains ambiguous or differently labeled blocks.');
   }
+  // The Perchance primer (syntax + editing rules) is added unless switched off in the AI settings.
   function aiWorkspaceSystem(cfg) {
+    var dev = (typeof window !== 'undefined') ? window.WeldDevCore : null;
+    var base = aiWorkspaceSystemBase(cfg);
+    return (cfg.usePrimer !== false && dev && dev.PRIMER) ? base + '\n\n' + dev.PRIMER : base;
+  }
+  function aiWorkspaceSystemBase(cfg) {
     return cfg.instruction || 'You are a Perchance project assistant. Explain your recommendation clearly. If code changes are needed, include the COMPLETE replacement for each affected pane in exactly one fenced code block labeled perchance or html. Preserve existing features and do not use omissions or placeholders. Never claim that you applied a change; the user reviews and applies changes separately.';
   }
   // The Project tab's loaded copy of this generator, used when the editor is not open.
@@ -2453,7 +2566,9 @@
     return out;
   }
   function aiWorkspaceUser(prompt, context) {
-    var parts = ['REQUEST:\n' + String(prompt || '').trim()];
+    // Context first, request last: long material before the question reads better for models, and the
+    // context block can be cached by providers that support it (see aiUserForProvider).
+    var parts = [], request = 'REQUEST:\n' + String(prompt || '').trim();
     var proj = null;
     if (context === 'pack') {
       var pk = null;
@@ -2475,7 +2590,8 @@
       if (htext == null) { proj = proj || aiProjectSource(); if (proj && proj.html != null) htext = proj.html; }
       parts.push('CURRENT HTML PANEL:\n```html\n' + (htext != null ? htext : '[HTML editor is not open]') + '\n```');
     }
-    return parts.join('\n\n');
+    if (!parts.length) return request;
+    return parts.join('\n\n') + (typeof AI_CACHE_BREAK === 'string' ? AI_CACHE_BREAK : '\n\n') + request;
   }
   function refreshAIWorkspace() { if (WC_TAB === 'tools' && $('#wc-body')) renderTab(); }
   function aiAskWorkspace() {
@@ -2495,10 +2611,31 @@
       refreshAIWorkspace();
     }
     try {
-      var request = callOwnAI(cfg, aiWorkspaceSystem(cfg), aiWorkspaceUser(prompt, AI_WORKSPACE.context), complete, false, cfg.maxTokens, 0.4);
+      var request = (AI_WORKSPACE.investigate && aiInvestigate(cfg, prompt, complete)) ||
+        callOwnAI(cfg, aiWorkspaceSystem(cfg), aiWorkspaceUser(prompt, AI_WORKSPACE.context), complete, false, cfg.maxTokens, 0.4);
       if (AI_WORKSPACE.busy && sequence === AI_WORKSPACE.sequence) AI_WORKSPACE.request = request;
     } catch (err) { complete('Could not start request: ' + err.message, null); }
     return true;
+  }
+  // "Investigate" mode: before answering, the model may run read-only lookups (outline, findings, numbered
+  // lines, search, find usages) in a fenced weld-tool block. Works with any provider, including local models
+  // without native tool calling. Returns an abortable handle, or null when it cannot run (then a normal request is made).
+  function aiInvestigate(cfg, prompt, complete) {
+    var Dev = (typeof window !== 'undefined') ? window.WeldDevCore : null;
+    if (!Dev || !window.weldProject || typeof window.weldProject.current !== 'function' || !window.weldProject.current()) return null;
+    var cur = null, cancelled = false;
+    var box = Dev.makeToolbox(function () { return window.weldProject.current(); });
+    Dev.investigate({
+      system: aiWorkspaceSystem(cfg), user: aiWorkspaceUser(prompt, AI_WORKSPACE.context), toolbox: box, maxRounds: 4,
+      isCancelled: function () { return cancelled; },
+      onStep: function (step) { if (cancelled) return; AI_WORKSPACE.status = 'Looked up: ' + step + '…'; refreshAIWorkspace(); },
+      ask: function (s, u) {
+        return new Promise(function (resolve, reject) {
+          cur = callOwnAI(cfg, s, u, function (err, txt) { if (err) reject(new Error(err)); else resolve(txt); }, false, cfg.maxTokens, 0.4);
+        });
+      }
+    }).then(function (r) { if (!cancelled) complete(null, r.reply); }, function (e) { if (!cancelled) complete((e && e.message) || String(e), null); });
+    return { abort: function () { cancelled = true; if (cur && typeof cur.abort === 'function') cur.abort(); } };
   }
   function renderAIReviewModal(target) {
     var view = target === 'html' ? htmlView() : dslView();
@@ -2549,6 +2686,7 @@
     var keyWrap = el('div', {}), modelWrap = el('div', {});
     var instruction = el('textarea', { class: 'wc-field', rows: '4', placeholder: 'Optional system instruction for the selected provider.' }); instruction.value = cfg.instruction;
     var intercept = el('input', { type: 'checkbox' }); intercept.checked = cfg.interceptAgent;
+    var primer = el('input', { type: 'checkbox' }); primer.checked = cfg.usePrimer;
     var maxTokens = el('input', { class: 'wc-field', type: 'number', min: '256', max: '32768', step: '1', value: cfg.maxTokens, 'aria-label': 'Maximum output tokens' });
     function renderProviderFields() {
       keyWrap.innerHTML = ''; modelWrap.innerHTML = '';
@@ -2572,7 +2710,7 @@
     }
     provider.addEventListener('change', renderProviderFields);
     function save(quiet) {
-      cfg.provider = provider.value; cfg.instruction = instruction.value; cfg.interceptAgent = intercept.checked;
+      cfg.provider = provider.value; cfg.instruction = instruction.value; cfg.interceptAgent = intercept.checked; cfg.usePrimer = primer.checked;
       cfg.maxTokens = Math.max(256, Math.min(32768, Math.floor(Number(maxTokens.value) || 4096)));
       maxTokens.value = cfg.maxTokens;
       if (!gset('ai', cfg)) return false;
@@ -2588,6 +2726,8 @@
     var cardP = el('div', { class: 'wc-card wc-col' }, [el('label', { class: 'wc-label', text: 'Provider' }), provider, keyWrap, modelWrap]);
     var cardI = el('div', { class: 'wc-card wc-col' }, [el('label', { class: 'wc-label', text: 'Custom instruction (system prompt)' }), instruction,
       el('label', { class: 'wc-label', text: 'Maximum output tokens (includes model reasoning)' }), maxTokens,
+      el('label', { class: 'wc-check', style: { marginTop: '10px' } }, [primer, el('span', { class: 'wc-sw' }), el('span', { text: 'Teach the model Perchance (syntax primer + editing rules)' })]),
+      el('div', { class: 'wc-section-note', text: 'On by default. It adds about 650 tokens to each request so replies use real Perchance syntax and keep your list names and ids.' }),
       el('label', { class: 'wc-check', style: { marginTop: '10px' } }, [intercept, el('span', { class: 'wc-sw' }), el('span', { text: 'Route Perchance AI Agent sends into this review workspace' })]),
       el('div', { class: 'wc-section-note', text: 'Off by default. When enabled, Send/Enter uses your selected provider and leaves the native prompt intact. Shift+Enter and touch/mobile Enter remain newlines.' })]);
     aicols.appendChild(cardP); aicols.appendChild(cardI); body.appendChild(aicols);
@@ -2612,7 +2752,11 @@
     var response = el('textarea', { class: 'wc-field', rows: '12', placeholder: 'The model reply will appear here for review.' }); response.value = AI_WORKSPACE.response;
     response.readOnly = AI_WORKSPACE.busy;
     response.addEventListener('input', function () { AI_WORKSPACE.response = response.value; });
-    workspace.appendChild(context); workspace.appendChild(contextNote); workspace.appendChild(prompt);
+    var investigate = el('input', { type: 'checkbox' }); investigate.checked = !!AI_WORKSPACE.investigate;
+    investigate.addEventListener('change', function () { AI_WORKSPACE.investigate = investigate.checked; });
+    workspace.appendChild(context); workspace.appendChild(contextNote);
+    workspace.appendChild(el('label', { class: 'wc-check', style: { margin: '6px 0' }, title: 'The model can ask Weld for the outline, findings, specific lines, searches and usages before it answers. Read-only; it can never change anything.' }, [investigate, el('span', { class: 'wc-sw' }), el('span', { text: 'Let the model look things up first (read-only)' })]));
+    workspace.appendChild(prompt);
     var ask = el('button', { class: 'wc-btn wc-btn-accent', text: AI_WORKSPACE.busy ? 'Working\u2026' : 'Ask selected model', onclick: function () { if (!save(true)) return; AI_WORKSPACE.prompt = prompt.value; AI_WORKSPACE.context = context.value; aiAskWorkspace(); } });
     ask.disabled = AI_WORKSPACE.busy;
     workspace.appendChild(el('div', { class: 'wc-row', style: { margin: '8px 0' } }, [
@@ -3473,7 +3617,7 @@
     function fin(err, res) { if (settled) return; settled = true; cb(err, res); }
     try {
       GM_xmlhttpRequest({
-        method: o.method || 'GET', url: o.url, headers: o.headers || {}, timeout: o.timeout || 30000, anonymous: !!o.anonymous,
+        method: o.method || 'GET', url: o.url, headers: o.headers || {}, timeout: o.timeout || 30000, anonymous: !!o.anonymous, data: o.data,
         onload: function (r) { fin(null, { status: r.status, text: typeof r.responseText === 'string' ? r.responseText : '' }); },
         onerror: function () { fin('network error'); }, ontimeout: function () { fin('timeout'); }, onabort: function () { fin('aborted'); }
       });
@@ -3516,6 +3660,26 @@
       return ok;
     },
     diff: function (a, b) { var d = lineDiffOps(a, b); return { rows: diffRows(d, 400), stats: diffStats(d) }; },
+    // ---- used by the Dev tab (folder sync, agent bridge, refactoring, GitHub hand-off) ----
+    version: WC_VERSION,
+    pageWindow: function () { return editorPageWindow(); },
+    views: function () { var d = dslView(), h = htmlView(); return { dsl: isCmView(d) ? d : null, html: isCmView(h) ? h : null }; },
+    // Replace one pane (or both) through CodeMirror's own transaction, so Ctrl+Z undoes it. You still press Save.
+    applyPane: function (pane, text) {
+      var v = pane === 'html' ? htmlView() : dslView();
+      if (!isCmView(v)) return false;
+      var unmute = muteBugFinderError(), ok = viewSet(v, text);
+      setTimeout(unmute, 2000);
+      return ok;
+    },
+    gh: {
+      resolve: function (slug) { return ghResolve(slug); },
+      token: function () { return ghToken() ? true : false; },
+      api: function (method, path, body, cb) { var t = ghToken(); if (!t) return cb(new Error('No GitHub token saved'), 0, null); ghApi(method, path, t, body, cb); },
+      fetch: function (url, cb) { ghFetch(url, cb); }
+    },
+    openTab: function (tab) { openWindow(tab); },
+    refreshTab: function () { if (WC_TAB) renderTab(); },
     favorites: function () { return favorites().slice(); },
     statsMany: function (names, cb) { fetchGenStatsMany(names, cb); },
     // Hand the user's request to the review-first AI workspace. Nothing is sent from here.
@@ -8487,7 +8651,7 @@
   // grants are skipped outright, and the AI config keeps its preferences but drops keys.
   // On import the local keys/endpoints win, so a crafted file can't point a saved API key
   // at another host (every provider honours a custom endpoint, and @connect is *).
-  var STATE_SECRET_KEYS = ['ghToken', 'sb:perm'];
+  var STATE_SECRET_KEYS = ['ghToken', 'sb:perm', 'bridge'];   // 'bridge' holds the agent-bridge token
   function stateIsSecret(k) { return STATE_SECRET_KEYS.indexOf(k) !== -1; }
   function stateScrubOut(k, v) {
     if (k !== 'ai' || !v || typeof v !== 'object') return v;
@@ -11292,6 +11456,8 @@
   }
   window.weldProject = {
     render,
+    // Download a generator's published lists, HTML and imports without changing what the tab shows.
+    fetchPublished,
     // Source currently loaded for this generator (editor first), for the AI helper.
     current() {
       const slug = H.slug(); if (!slug) return null;
@@ -11308,3 +11474,1152 @@
   };
 })();
 /* END GENERATED PROJECT */
+
+/* BEGIN GENERATED DEV */
+/* Dev workflow logic: Perchance primer, read-only tools for AI, refactoring, edit proposals,
+   folder-sync planning and agent hand-off. Pure; no DOM, no network. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./project-core.js'));
+  else root.WeldDevCore = factory(root.WeldProjectCore);
+})(typeof window === 'object' ? window : globalThis, function (P) {
+  'use strict';
+  const VERSION = 1;
+
+  // ------------------------------------------------------------------ primer
+  // Condensed from Perchance's tutorial and known-bugs list. Given to models so they write
+  // Perchance, not generic JavaScript or a guessed dialect.
+  const PRIMER = [
+    'PERCHANCE REFERENCE (follow it exactly)',
+    '',
+    'Lists panel (the DSL):',
+    '- A list is a name at column 0 with its items indented by one tab or two spaces (never mix them). "//" starts a comment. Names use letters, digits and underscores, are case-sensitive and cannot start with a digit.',
+    '- "name = value" is a one-item shorthand. Imports look like: alias = {import:generator-name}.',
+    '- [list] picks a random item. Odds: "item ^2", "^1/10", or dynamic "^[x == 1]" (false means never selected).',
+    '- Curly shorthand: {a|b|c}, weights {a^3|b}, numbers {1-20}, letters {a-f}, {a} for a/an, {s} for plurals. Inside [square blocks] braces are JavaScript, not shorthand.',
+    '- Square blocks hold JavaScript. Commas run several statements and only the last is shown: [a = animal.selectOne, b = a.pluralForm, a]. [x, ""] runs x without showing anything.',
+    '- selectOne does not resolve random parts inside the chosen item. To store a selection for reuse write [f = fruit.evaluateItem] and then [f]. A missing .evaluateItem is the most common bug: reusing the variable re-randomizes it.',
+    '- A list mentioned before the last statement of a block does nothing: use .evaluateItem or make it last. if/else must be in its own square block.',
+    '- Useful: selectMany(n), selectUnique(n), joinItems(", "), consumableList, getLength, pluralForm, singularForm, titleCase, upperCase, pastTense.',
+    '- Indented lists inside items are properties; "this" is the parent. "$output = ..." inside a list changes what it prints. A top-level $output is the generator\'s public export for importers. A $meta block sets title, description and tags.',
+    '- Functions: "name(args) =>" followed by an indented JavaScript body; "async" is allowed.',
+    '',
+    'HTML panel:',
+    '- An ordinary HTML page. [blocks] are evaluated after scripts run. update() re-runs all blocks, update(el) only those inside el. Element ids become globals and must not equal list names.',
+    '- Inputs write variables: oninput="name = this.value" (use Number() for numbers and give the variable a default in the lists panel).',
+    '- Never put an HTML tag inside a square block in the HTML panel (write \\u003c instead). In <script type="module"> reach lists as root.listName and plugins as root.alias.',
+    '- Do not put {import:...}, \\u{...} or brace/bracket HTML entities inside script code: the template parser still reads them.',
+    '',
+    'Editing rules:',
+    '- Keep existing list names, element ids and $output (other generators may import them). Keep two-space indentation.',
+    '- Do not add content filters, refusals or tone changes that were not requested, and match the generator\'s existing register.'
+  ].join('\n');
+
+  const PRIMER_SHORT = [
+    'Perchance reminders: lists are indented items under a column-0 name; [list] picks randomly; store a pick for reuse with .evaluateItem;',
+    'if/else needs its own [block]; keep list names, element ids and $output unchanged; never add HTML tags inside [blocks] in the HTML panel;',
+    'do not add content filters or tone changes that were not requested.'
+  ].join(' ');
+
+  // ------------------------------------------------------- read-only toolbox
+  // One implementation behind three consumers: the AI helper's "investigate" mode, the local
+  // agent bridge (MCP), and the tests. getSource() returns { name, dsl, html, deps }.
+  const MAX_TEXT = 60000, MAX_LINES = 400;
+  function clip(text, n) { text = String(text); return text.length > n ? text.slice(0, n) + '\n… [truncated ' + (text.length - n) + ' characters]' : text; }
+  function num(v, d) { v = Math.floor(Number(v)); return isFinite(v) ? v : d; }
+  function paneText(src, pane) {
+    if (pane === 'html') { if (src.html == null) throw new Error('The HTML panel is not loaded.'); return String(src.html); }
+    return String(src.dsl);
+  }
+  function numbered(text, start, end) {
+    const lines = P.lines(text), total = lines.length;
+    const from = Math.max(1, Math.min(total, num(start, 1))), to = Math.max(from, Math.min(total, num(end, from + MAX_LINES - 1)));
+    const cap = Math.min(to, from + MAX_LINES - 1);
+    let body = lines.slice(from - 1, cap).map((l, i) => (from + i) + ': ' + l).join('\n');
+    body = clip(body, MAX_TEXT);
+    return { total_lines: total, start_line: from, end_line: cap, text: body, more: cap < to || cap < total };
+  }
+  function makeToolbox(getSource) {
+    const src = () => { const s = getSource(); if (!s || s.dsl == null) throw new Error('No generator is loaded.'); return s; };
+    const analysisOf = s => P.analyze({ name: s.name, dsl: s.dsl, html: s.html, deps: s.deps || null });
+    const tools = {
+      get_primer: () => PRIMER,
+      get_outline: () => {
+        const a = analysisOf(src());
+        return { lists: a.lists.map(l => ({ name: l.name, line: l.line, items: l.items, import: l.imported ? (l.alias || true) : undefined })), functions: a.functions, imports: a.imports,
+          distinct_outputs: a.outputSpace ? a.outputSpace.text : null, stats: a.stats };
+      },
+      get_findings: args => {
+        const a = analysisOf(src()), rank = { error: 0, warn: 1, info: 2 }, max = rank[(args && args.min_severity) || 'warn'];
+        const list = a.findings.filter(f => rank[f.severity] <= (max == null ? 1 : max));
+        return { counts: a.counts, findings: list.slice(0, 60).map(f => ({ severity: f.severity, pane: f.pane, line: f.line, message: f.message, hint: f.hint || undefined })), truncated: list.length > 60 };
+      },
+      get_lines: args => {
+        const s = src(), pane = (args && args.pane) === 'html' ? 'html' : 'dsl';
+        const r = numbered(paneText(s, pane), args && args.start, args && args.end);
+        return Object.assign({ pane }, r);
+      },
+      get_source: args => {
+        const s = src(), want = (args && args.pane) || 'both';
+        if (want === 'both') return { dsl: tools.get_lines({ pane: 'dsl', start: args && args.start_line, end: args && args.end_line }), html: s.html == null ? null : tools.get_lines({ pane: 'html', start: args && args.start_line, end: args && args.end_line }) };
+        return tools.get_lines({ pane: want, start: args && args.start_line, end: args && args.end_line });
+      },
+      search: args => {
+        const s = src(), q = String((args && args.query) || '').toLowerCase();
+        if (!q) throw new Error('query is required');
+        const out = [];
+        [['dsl', s.dsl], ['html', s.html]].forEach(([pane, text]) => {
+          if (text == null || (args && args.pane && args.pane !== pane)) return;
+          const ls = P.lines(text);
+          for (let i = 0; i < ls.length && out.length < 80; i++) if (ls[i].toLowerCase().includes(q)) out.push({ pane, line: i + 1, text: ls[i].trim().slice(0, 200) });
+        });
+        return { matches: out, truncated: out.length >= 80 };
+      },
+      find_usages: args => {
+        const s = src(), r = scanName(s.dsl, s.html, String((args && args.name) || ''), null);
+        return { name: args && args.name, uses: r.hits.slice(0, 100), count: r.hits.length, truncated: r.hits.length > 100 };
+      },
+      get_imports: () => {
+        const s = src(), a = analysisOf(s);
+        if (!s.deps) return { imports: a.imports, note: 'The import tree is not loaded. Names only.' };
+        const st = P.dependencyStats(s.deps, s.name);
+        return { imports: a.imports, pulled_in: st.names.map(n => ({ name: n, bytes: s.deps.nodes[n] ? s.deps.nodes[n].bytes : 0 })), total_bytes: st.bytes, unfound: s.deps.unfound };
+      },
+      get_html_map: () => { const s = src(); if (s.html == null) throw new Error('The HTML panel is not loaded.'); return P.htmlMap(s.html); }
+    };
+    return {
+      tools, names: Object.keys(tools),
+      call(name, args) {
+        if (!Object.prototype.hasOwnProperty.call(tools, name)) throw new Error('Unknown tool: ' + name);
+        return tools[name](args || {});
+      }
+    };
+  }
+
+  // -------------------------------------------- "investigate" protocol for any model
+  // Works with every provider (even local models without native tool calling): the model asks
+  // for read-only lookups in a fenced weld-tool block, Weld answers, the model continues.
+  const INVESTIGATE_TOOLS = [
+    ['get_outline', 'no args: lists with item counts, functions, imports'],
+    ['get_findings', '{"min_severity":"warn"|"info"}: automatic findings'],
+    ['get_lines', '{"pane":"dsl"|"html","start":1,"end":60}: numbered source lines (max 400 per call)'],
+    ['search', '{"query":"text","pane":"dsl"|"html"}: matching lines'],
+    ['find_usages', '{"name":"listName"}: every definition and use of a name'],
+    ['get_imports', 'no args: imported generators and sizes'],
+    ['get_html_map', 'no args: structure of the HTML panel (ids, functions, root.* use)']
+  ];
+  const INVESTIGATE_PROTOCOL = [
+    'You may look things up before answering. To run lookups reply with ONLY one or more fenced blocks, each holding one JSON request:',
+    '```weld-tool',
+    '{"tool":"get_lines","args":{"pane":"dsl","start":1,"end":40}}',
+    '```',
+    'Weld runs them (read-only) and replies with the results, then you continue. Available tools:',
+    INVESTIGATE_TOOLS.map(t => '- ' + t[0] + ' ' + t[1]).join('\n'),
+    'When you have enough information, give your final answer with no weld-tool block. You can never change anything with these tools.'
+  ].join('\n');
+  function parseToolCalls(reply) {
+    const calls = [], errors = [], re = /```weld-tool[^\n]*\n([\s\S]*?)```/g; let m;
+    while ((m = re.exec(String(reply || '')))) {
+      try {
+        const j = JSON.parse(m[1].trim());
+        if (!j || typeof j.tool !== 'string') throw new Error('missing "tool"');
+        calls.push({ tool: j.tool, args: (j.args && typeof j.args === 'object') ? j.args : {} });
+      } catch (e) { errors.push('Could not read a weld-tool block: ' + e.message); }
+    }
+    return { calls: calls.slice(0, 6), errors };
+  }
+  function formatToolResults(results) {
+    return results.map(r => 'RESULT of ' + r.tool + ' ' + JSON.stringify(r.args) + ':\n' + (r.error ? 'ERROR: ' + r.error : clip(typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 1), 14000))).join('\n\n');
+  }
+  // ask(system, user) -> Promise<string>. Never calls a tool outside INVESTIGATE_TOOLS.
+  async function investigate(o) {
+    const allowed = new Set(INVESTIGATE_TOOLS.map(t => t[0])), maxRounds = o.maxRounds || 4, steps = [];
+    const system = o.system + '\n\n' + INVESTIGATE_PROTOCOL;
+    let transcript = o.user, reply = '';
+    for (let round = 0; round <= maxRounds; round++) {
+      if (o.isCancelled && o.isCancelled()) throw new Error('Stopped.');
+      reply = await o.ask(system, transcript);
+      const { calls, errors } = parseToolCalls(reply);
+      if (!calls.length && !errors.length) return { reply, steps };
+      if (round === maxRounds) return { reply: reply.replace(/```weld-tool[\s\S]*?```/g, '').trim() || 'The model kept asking for lookups. Ask a narrower question.', steps, exhausted: true };
+      const results = calls.map(c => {
+        if (!allowed.has(c.tool)) return { tool: c.tool, args: c.args, error: 'Tool not available' };
+        try { return { tool: c.tool, args: c.args, result: o.toolbox.call(c.tool, c.args) }; } catch (e) { return { tool: c.tool, args: c.args, error: e.message }; }
+      });
+      errors.forEach(e => results.push({ tool: 'parse', args: {}, error: e }));
+      steps.push(results.map(r => r.tool + (r.error ? ' (error)' : '')).join(', '));
+      if (o.onStep) o.onStep(steps[steps.length - 1]);
+      transcript += '\n\nYOUR PREVIOUS REPLY:\n' + reply + '\n\n' + formatToolResults(results) + '\n\nContinue. Give the final answer when ready.';
+    }
+    return { reply, steps };
+  }
+
+  // --------------------------------------------------- find usages and rename
+  const KEYWORDS = new Set('break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new return super switch this throw try typeof var void while with yield await async of true false null undefined NaN Infinity root update'.split(' '));
+  const ID_START = /[A-Za-z_$]/, ID_PART = /[\w$]/;
+  // Replace identifier tokens equal to `old` in a JavaScript-ish fragment, skipping strings, comments,
+  // property names after ".", and object keys. Returns { text, count }.
+  function replaceIdentifiers(code, old, next) {
+    let out = '', i = 0, count = 0, prev = '', braces = 0;
+    const n = code.length;
+    while (i < n) {
+      const c = code[i];
+      if (c === '"' || c === "'" || c === '`') {
+        let j = i + 1; while (j < n && code[j] !== c) { if (code[j] === '\\') j++; j++; }
+        out += code.slice(i, j + 1); i = j + 1; prev = '"'; continue;
+      }
+      if (c === '/' && code[i + 1] === '/') { const e = code.indexOf('\n', i); const j = e === -1 ? n : e; out += code.slice(i, j); i = j; continue; }
+      if (c === '/' && code[i + 1] === '*') { const e = code.indexOf('*/', i + 2); const j = e === -1 ? n : e + 2; out += code.slice(i, j); i = j; continue; }
+      if (ID_START.test(c)) {
+        let j = i + 1; while (j < n && ID_PART.test(code[j])) j++;
+        const id = code.slice(i, j), rest = code.slice(j);
+        const isKey = braces > 0 && (prev === '{' || prev === ',') && /^\s*:/.test(rest);
+        if (id === old && prev !== '.' && !isKey) { out += next; count++; } else out += id;
+        prev = 'a'; i = j; continue;
+      }
+      if (/\d/.test(c)) { let j = i + 1; while (j < n && /[\w.]/.test(code[j])) j++; out += code.slice(i, j); i = j; prev = '0'; continue; }
+      if (c === '{') braces++; else if (c === '}') braces--;
+      if (!/\s/.test(c)) prev = c;
+      out += c; i++;
+    }
+    return { text: out, count };
+  }
+  function validName(name) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !KEYWORDS.has(name); }
+  function mapBlocks(body, old, next) {
+    // Rewrites identifiers inside every top-level [square block] of a line body.
+    const sq = P.squareBlocks(body); let out = '', last = 0, count = 0;
+    sq.blocks.forEach(b => {
+      const r = replaceIdentifiers(b.content, old, next);
+      out += body.slice(last, b.start + 1) + r.text; last = b.end; count += r.count;
+    });
+    return { text: out + body.slice(last), count };
+  }
+  // The single traversal behind both "find usages" and "rename". next === null only collects hits.
+  function scanName(dsl, html, old, next, opts) {
+    opts = opts || {};
+    const hits = [], dslLines = P.lines(dsl), htmlLines = html == null ? null : P.lines(html);
+    const parsed = P.parseDsl(dsl), outDsl = dslLines.slice();
+    const edit = (pane, lineNo, line, replaced, kind) => {
+      if (replaced === line) return line;
+      hits.push({ pane, line: lineNo, kind, text: line.trim().slice(0, 160), after: replaced.trim().slice(0, 160) });
+      return replaced;
+    };
+    const note = (pane, lineNo, line, kind) => hits.push({ pane, line: lineNo, kind, text: line.trim().slice(0, 160) });
+    const want = next != null;
+    // lists panel
+    parsed.nodes.forEach(n => {
+      const idx = n.line - 1, raw = dslLines[idx];
+      if (n.kind === 'comment') return;
+      const indent = raw.length - raw.replace(/^[\t ]+/, '').length, body = raw.slice(indent);
+      if ((n.kind === 'list' || n.kind === 'assign' || n.kind === 'function') && n.top && n.name === old) {
+        const rest = body.slice(old.length);
+        if (want) outDsl[idx] = edit('dsl', n.line, raw, raw.slice(0, indent) + next + rest, 'definition'); else note('dsl', n.line, raw, 'definition');
+      }
+      if (n.kind === 'function') {
+        if (n.name !== old || !n.top) { /* function header parameters are not references */ }
+        n.codeLines.forEach(cl => {
+          const cr = dslLines[cl - 1], r = replaceIdentifiers(cr, old, want ? next : old);
+          if (r.count) { if (want) outDsl[cl - 1] = edit('dsl', cl, cr, r.text, 'code'); else note('dsl', cl, cr, 'code'); }
+        });
+        // inline body after "=>"
+        const arrow = body.indexOf('=>');
+        if (arrow !== -1 && n.value) {
+          const head = body.slice(0, arrow + 2), tail = body.slice(arrow + 2), r = replaceIdentifiers(tail, old, want ? next : old);
+          if (r.count) { if (want) outDsl[idx] = edit('dsl', n.line, outDsl[idx], raw.slice(0, indent) + head + r.text, 'code'); else note('dsl', n.line, raw, 'code'); }
+        }
+        return;
+      }
+      if (n.kind === 'item' || n.kind === 'assign' || (n.kind === 'special' && n.name === '$output')) {
+        const cur = want ? outDsl[idx] : raw, curBody = cur.slice(indent);
+        const r = mapBlocks(curBody, old, want ? next : old);
+        if (r.count) { if (want) outDsl[idx] = edit('dsl', n.line, cur, raw.slice(0, indent) + r.text, 'reference'); else note('dsl', n.line, raw, 'reference'); }
+      }
+    });
+    // HTML panel
+    let outHtml = html;
+    if (htmlLines) {
+      const reg = htmlRegionsFor(html), out = htmlLines.slice();
+      // markup: square blocks outside script/style
+      const maskedLines = P.lines(reg.masked);
+      maskedLines.forEach((ml, i) => {
+        if (ml.indexOf('[') === -1) return;
+        const orig = htmlLines[i], sq = P.squareBlocks(ml);
+        if (!sq.blocks.length) return;
+        let res = '', last = 0, cnt = 0;
+        sq.blocks.forEach(b => { const r = replaceIdentifiers(b.content, old, want ? next : old); res += orig.slice(last, b.start + 1) + r.text; last = b.end; cnt += r.count; });
+        if (cnt) { if (want) out[i] = edit('html', i + 1, orig, res + orig.slice(last), 'reference'); else note('html', i + 1, orig, 'reference'); }
+      });
+      // scripts: root.old always; bare identifiers only when allowed
+      reg.scripts.forEach(s => {
+        if (!/^(|text\/javascript|application\/javascript|module)$/.test(s.type)) return;
+        const startLine = s.line, codeLines = P.lines(s.code), lastK = codeLines.length - 1;
+        codeLines.forEach((cl, k) => {
+          const lineNo = startLine + k, cur = want ? out[lineNo - 1] : htmlLines[lineNo - 1];
+          if (cur == null) return;
+          // Only the part inside the script: the first line may carry the <script> tag, the last the </script>.
+          let from = 0, to = cur.length;
+          if (k === 0) { const tag = /<script\b[^>]*>/gi; let t, end = 0; while ((t = tag.exec(cur))) end = t.index + t[0].length; from = end; }
+          if (k === lastK) { const e = cur.toLowerCase().indexOf('</script', from); if (e !== -1) to = e; }
+          const mid = cur.slice(from, to), target = want ? next : old;
+          let r = mid.replace(new RegExp('(\\broot\\s*\\.\\s*)' + old + '(?![\\w$])', 'g'), (m0, p1) => p1 + target)
+            .replace(new RegExp('(\\broot\\s*\\[\\s*)(["\'])' + old + '\\2(\\s*\\])', 'g'), (m0, p1, q, p2) => p1 + q + target + q + p2);
+          let changed = new RegExp('\\broot\\s*\\.\\s*' + old + '(?![\\w$])').test(mid) || new RegExp('\\broot\\s*\\[\\s*["\']' + old + '["\']').test(mid);
+          if (opts.scriptBare !== false) {
+            const rb = replaceIdentifiers(r, old, target);
+            if (rb.count) { r = rb.text; changed = true; }
+          }
+          if (changed) {
+            const rebuilt = cur.slice(0, from) + r + cur.slice(to);
+            if (want) { if (rebuilt !== cur) out[lineNo - 1] = edit('html', lineNo, cur, rebuilt, 'code'); } else note('html', lineNo, cur, 'code');
+          }
+        });
+      });
+      // inline handlers
+      const attrRe = /(\son[a-z]+\s*=\s*)("([^"]*)"|'([^']*)')/gi;
+      reg.masked.split('\n').forEach((ml, i) => {
+        if (!/\son[a-z]+\s*=/i.test(ml)) return;
+        const cur = want ? out[i] : htmlLines[i];
+        let touched = false;
+        const res = cur.replace(attrRe, (m0, pre, q, d1, d2) => {
+          const val = d1 != null ? d1 : d2, r = replaceIdentifiers(val, old, want ? next : old);
+          if (!r.count) return m0; touched = true; const quote = d1 != null ? '"' : "'"; return pre + quote + r.text + quote;
+        });
+        if (touched) { if (want) { if (res !== cur) out[i] = edit('html', i + 1, cur, res, 'code'); } else note('html', i + 1, cur, 'code'); }
+      });
+      outHtml = out.join('\n');
+    }
+    // de-duplicate hits per pane+line+kind
+    const seen = new Set(), uniqHits = hits.filter(h => { const k = h.pane + ':' + h.line + ':' + h.kind; if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => (a.pane === b.pane ? 0 : a.pane === 'dsl' ? -1 : 1) || a.line - b.line);
+    return { hits: uniqHits, dsl: outDsl.join('\n'), html: outHtml };
+  }
+  function htmlRegionsFor(html) {
+    const scripts = [], re = /<(script|style)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi; let m, masked = String(html);
+    while ((m = re.exec(html))) {
+      const bodyStart = m.index + m[0].indexOf('>') + 1, code = m[3], typeM = /\btype\s*=\s*["']?([^\s"'>]+)/i.exec(m[2] || '');
+      if (m[1].toLowerCase() === 'script') scripts.push({ start: bodyStart, code, line: P.lineOf(html, bodyStart), type: typeM ? typeM[1].toLowerCase() : '' });
+      masked = masked.slice(0, bodyStart) + code.replace(/[^\n]/g, ' ') + masked.slice(bodyStart + code.length);
+    }
+    return { scripts, masked };
+  }
+  function findUsages(dsl, html, name) {
+    if (!validName(name)) return { error: '"' + name + '" is not a valid list name.', hits: [] };
+    return scanName(dsl, html, name, null);
+  }
+  function rename(dsl, html, oldName, newName, opts) {
+    if (!validName(oldName)) return { error: '"' + oldName + '" is not a valid list name.' };
+    if (!validName(newName)) return { error: '"' + newName + '" is not a valid name: use letters, digits and underscores, not starting with a digit, and not a JavaScript keyword.' };
+    if (oldName === newName) return { error: 'The new name is the same as the old one.' };
+    const a = P.analyze({ dsl, html });
+    const defined = new Set(a.lists.map(l => l.name).concat(a.functions.map(f => f.name)));
+    if (!defined.has(oldName)) return { error: '"' + oldName + '" is not defined as a list, import or function at the top level.' };
+    if (defined.has(newName)) return { error: 'A list, import or function named "' + newName + '" already exists.' };
+    if (a.html && a.html.ids.indexOf(newName) !== -1) return { error: 'An element in the HTML panel already has the id "' + newName + '".' };
+    const r = scanName(dsl, html, oldName, newName, opts);
+    const counts = { definition: 0, reference: 0, code: 0 }; r.hits.forEach(h => { counts[h.kind] = (counts[h.kind] || 0) + 1; });
+    return { dsl: r.dsl, html: r.html, changes: r.hits, counts, total: r.hits.length };
+  }
+
+  // ------------------------------------------------------------ sampling diffs
+  function compareSamples(base, cur) {
+    const bs = P.sampleStats(base), cs = P.sampleStats(cur);
+    if (!bs.n || !cs.n) return { error: 'Both runs need at least one result.' };
+    const presence = list => { const m = new Map(); list.forEach(s => { new Set((String(s).toLowerCase().match(/[a-zÀ-ɏ']{3,}/g) || [])).forEach(w => m.set(w, (m.get(w) || 0) + 1)); }); return m; };
+    const bp = presence(base), cp = presence(cur), lost = [], gained = [];
+    bp.forEach((c, w) => { if (c / bs.n >= 0.05 && !cp.has(w)) lost.push({ word: w, share: Math.round(100 * c / bs.n) }); });
+    cp.forEach((c, w) => { if (c / cs.n >= 0.05 && !bp.has(w)) gained.push({ word: w, share: Math.round(100 * c / cs.n) }); });
+    lost.sort((a, b) => b.share - a.share); gained.sort((a, b) => b.share - a.share);
+    const lines = [];
+    const lenChange = (cs.avgLen - bs.avgLen) / Math.max(1, bs.avgLen);
+    if (Math.abs(lenChange) >= 0.2) lines.push('Typical length ' + (lenChange > 0 ? 'grew' : 'shrank') + ' by ' + Math.round(Math.abs(lenChange) * 100) + '% (' + bs.avgLen + ' → ' + cs.avgLen + ').');
+    const dupDelta = cs.duplicateRate - bs.duplicateRate;
+    if (Math.abs(dupDelta) >= 0.1) lines.push('Repeats ' + (dupDelta > 0 ? 'increased' : 'decreased') + ' from ' + Math.round(bs.duplicateRate * 100) + '% to ' + Math.round(cs.duplicateRate * 100) + '%.');
+    if (lost.length) lines.push(lost.length + ' common word(s) no longer appear: ' + lost.slice(0, 6).map(w => w.word + ' (' + w.share + '%)').join(', ') + '.');
+    if (gained.length) lines.push(gained.length + ' new common word(s): ' + gained.slice(0, 6).map(w => w.word + ' (' + w.share + '%)').join(', ') + '.');
+    if (!lines.length) lines.push('No meaningful change in length, variety or vocabulary.');
+    return { base: bs, current: cs, lost, gained, lengthChange: lenChange, duplicateDelta: dupDelta, lines, changed: lines.length > 1 || !/^No meaningful/.test(lines[0]) };
+  }
+
+  // ------------------------------------------------------------ edit proposals
+  const MAX_DOC = 2 * 1048576;
+  function norm(text) { return String(text == null ? '' : text).replace(/\r\n?/g, '\n'); }
+  // edits: [{ start_line, end_line, text }] replace lines start..end (1-based, inclusive).
+  // end_line = start_line - 1 inserts before start_line. Ranges must not overlap.
+  function applyLineEdits(text, edits) {
+    const lines = norm(text).split('\n');
+    if (!Array.isArray(edits) || !edits.length) throw new Error('edits must be a non-empty array.');
+    if (edits.length > 200) throw new Error('Too many edits in one proposal.');
+    const list = edits.map((e, i) => {
+      const s = Math.floor(Number(e.start_line)), en = Math.floor(Number(e.end_line));
+      if (!isFinite(s) || !isFinite(en)) throw new Error('Edit ' + (i + 1) + ' needs start_line and end_line numbers.');
+      if (s < 1 || s > lines.length + 1) throw new Error('Edit ' + (i + 1) + ': start_line ' + s + ' is outside the document (1-' + (lines.length + 1) + ').');
+      if (en < s - 1 || en > lines.length) throw new Error('Edit ' + (i + 1) + ': end_line ' + en + ' is invalid (use ' + (s - 1) + ' to insert before line ' + s + ').');
+      return { s, en, text: norm(e.text) };
+    }).sort((a, b) => a.s - b.s);
+    for (let i = 1; i < list.length; i++) if (list[i].s <= list[i - 1].en) throw new Error('Edits overlap near line ' + list[i].s + '.');
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i], repl = e.text === '' ? [] : e.text.replace(/\n$/, '').split('\n');
+      lines.splice(e.s - 1, e.en - e.s + 1, ...repl);
+    }
+    const out = lines.join('\n');
+    if (out.length > MAX_DOC) throw new Error('The result would exceed the size limit.');
+    return out;
+  }
+  function makeProposal(o) {
+    const pane = o.pane === 'html' ? 'html' : 'dsl', current = norm(o.current);
+    let after;
+    if (o.new_text != null && o.edits != null) throw new Error('Send either new_text or edits, not both.');
+    if (o.new_text == null && o.edits == null) throw new Error('Send new_text (the whole new panel) or edits (line ranges to replace).');
+    if (o.new_text != null) { after = norm(o.new_text); if (after.length > MAX_DOC) throw new Error('new_text exceeds the size limit.'); }
+    else after = applyLineEdits(current, o.edits);
+    if (after === current) throw new Error('The proposal does not change anything.');
+    return { id: o.id, pane, base: P.hash(current), before: current, after, note: String(o.note || '').slice(0, 500), agent: String(o.agent || 'agent').slice(0, 60), createdAt: o.now || Date.now(), status: 'pending' };
+  }
+  function proposalState(p, currentText) {
+    // Is the editor still what the proposal was written against?
+    return P.hash(norm(currentText)) === p.base ? 'fresh' : 'stale';
+  }
+
+  // ------------------------------------------------------------- folder sync
+  function safeSlug(slug) { return /^[A-Za-z0-9_-]{1,100}$/.test(String(slug || '')) ? String(slug) : null; }
+  function folderPaths(slug, cfg) {
+    const s = safeSlug(slug); if (!s) throw new Error('"' + slug + '" is not a safe folder name.');
+    cfg = cfg || {};
+    const fill = t => String(t).replace(/\{name\}/g, () => s);
+    const dsl = fill(cfg.dslPath || '{name}/{name}-top-panel.txt'), html = fill(cfg.htmlPath || '{name}/{name}-html-panel.html');
+    [dsl, html].forEach(p => { if (/(^|\/)\.\.?(\/|$)/.test(p) || /^\/|^[A-Za-z]:|\\/.test(p)) throw new Error('Unsafe path in the folder template: ' + p); });
+    return { dsl, html };
+  }
+  const normForCompare = t => norm(t).replace(/\n+$/, '');
+  function same(a, b) { return normForCompare(a) === normForCompare(b); }
+  // editor/disk/base: { dsl, html } | null. Returns what changed since the last sync point.
+  function syncPlan(editor, disk, base) {
+    if (!editor) return { state: 'no-editor' };
+    if (!disk || disk.dsl == null) return { state: 'no-disk', action: 'write' };
+    const eq = same(editor.dsl, disk.dsl) && (editor.html == null || disk.html == null || same(editor.html, disk.html));
+    if (eq) return { state: 'in-sync' };
+    if (!base) return { state: 'unknown' };
+    const diskSame = same(disk.dsl, base.dsl) && (disk.html == null || base.html == null || same(disk.html, base.html));
+    const editorSame = same(editor.dsl, base.dsl) && (editor.html == null || base.html == null || same(editor.html, base.html));
+    if (diskSame) return { state: 'editor-ahead' };
+    if (editorSame) return { state: 'disk-ahead' };
+    return { state: 'conflict' };
+  }
+
+  // ----------------------------------------------------------- agent hand-off
+  const AGENTS = {
+    copilot: { label: 'GitHub Copilot cloud agent', how: 'Assigns the issue to Copilot, which opens a pull request.' },
+    claude: { label: 'Claude (Claude Code GitHub Action)', how: 'Comments "@claude ..." on the issue. Needs the Claude GitHub app/action in the repo.' },
+    codex: { label: 'Codex cloud', how: 'Comments "@codex ..." on the issue. Needs Codex cloud connected to the repo.' },
+    plain: { label: 'Plain issue (no agent)', how: 'Just creates the issue.' }
+  };
+  function oneLine(s, n) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function buildAgentIssue(o) {
+    const slug = safeSlug(o.slug); if (!slug) throw new Error('Open a generator with a normal name first.');
+    const req = String(o.request || '').trim(); if (!req) throw new Error('Describe what you want changed.');
+    const agent = AGENTS[o.agent] ? o.agent : 'plain', paths = o.paths, repo = o.repo;
+    const findings = (o.findings || []).filter(f => f.severity !== 'info').slice(0, 10);
+    const rules = [
+      'Edit only these two files, and only what the request needs:',
+      '- `' + paths.dsl + '` (Perchance lists panel)',
+      '- `' + paths.html + '` (Perchance HTML panel)',
+      'Keep list names, element ids and `$output` unchanged unless the request says otherwise. Do not add content filters or tone changes. Keep the existing indentation style.',
+      PRIMER_SHORT
+    ].join('\n');
+    const body = [
+      '## Request', '', req, '',
+      '## Where', '', 'Generator `' + slug + '` in `' + repo.owner + '/' + repo.repo + '` on branch `' + repo.branch + '`.', '',
+      '## Rules for the change', '', rules, '',
+      findings.length ? '## Automatic findings (heuristic)\n\n' + findings.map(f => '- ' + f.severity + ' ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message).join('\n') + '\n' : '',
+      '_Created by Weld Companion. After the change is merged, use Pull in the Weld GitHub tab to load it into the editor._'
+    ].filter(x => x !== '').join('\n');
+    const out = { title: '[Weld] ' + slug + ': ' + oneLine(req, 70), body, agent, assignees: [], comment: '', agent_assignment: null };
+    if (agent === 'copilot') {
+      out.assignees = ['copilot-swe-agent[bot]'];
+      out.agent_assignment = { target_repo: repo.owner + '/' + repo.repo, base_branch: repo.branch, custom_instructions: rules };
+    } else if (agent === 'claude') out.comment = '@claude please implement the request in this issue and open a pull request. ' + oneLine(req, 300);
+    else if (agent === 'codex') out.comment = '@codex please implement the request in this issue and open a pull request. ' + oneLine(req, 300);
+    return out;
+  }
+  function pushBranchName(slug, when) {
+    const d = new Date(when || Date.now()), p = n => String(n).padStart(2, '0');
+    return 'weld/' + (safeSlug(slug) || 'generator') + '-' + d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + '-' + p(d.getUTCHours()) + p(d.getUTCMinutes());
+  }
+
+  // ------------------------------------------------------------- push gate
+  function gateReport(analysis, level) {
+    const rank = { error: 0, warn: 1, info: 2 }, max = rank[level || 'warn'];
+    const list = analysis.findings.filter(f => rank[f.severity] <= max);
+    return { count: list.length, lines: list.slice(0, 6).map(f => '• ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message), more: Math.max(0, list.length - 6) };
+  }
+
+  // --------------------------------------------------- bridge tool definitions
+  const paneEnum = { type: 'string', enum: ['dsl', 'html'], description: 'dsl = the lists panel, html = the HTML panel' };
+  const BRIDGE_TOOLS = [
+    { name: 'weld_status', description: 'Which Weld tab(s) are connected, which generator each has open, and whether its editor is open (writable) or not.', inputSchema: { type: 'object', properties: {} }, readOnly: true },
+    { name: 'weld_get_primer', description: 'Perchance syntax reference and editing rules. Read this before writing Perchance code.', inputSchema: { type: 'object', properties: {} }, readOnly: true, run: 'get_primer' },
+    { name: 'weld_get_source', description: 'Read the open generator\'s source with line numbers (live editor contents, including unsaved edits). Reads up to 400 lines per call; use start_line/end_line for more.', inputSchema: { type: 'object', properties: { pane: { type: 'string', enum: ['dsl', 'html', 'both'] }, start_line: { type: 'integer', minimum: 1 }, end_line: { type: 'integer', minimum: 1 } } }, readOnly: true, run: 'get_source' },
+    { name: 'weld_get_findings', description: 'Automatic findings for the open generator (undefined names, silent no-ops, re-randomizing stored selections, id collisions, ...). Heuristic: verify before acting.', inputSchema: { type: 'object', properties: { min_severity: { type: 'string', enum: ['error', 'warn', 'info'] } } }, readOnly: true, run: 'get_findings' },
+    { name: 'weld_get_outline', description: 'Lists with item counts, functions, imports and an estimate of how many distinct outputs the generator can make.', inputSchema: { type: 'object', properties: {} }, readOnly: true, run: 'get_outline' },
+    { name: 'weld_find_usages', description: 'Every definition and use of a list/function name across both panels.', inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }, readOnly: true, run: 'find_usages' },
+    { name: 'weld_search', description: 'Case-insensitive text search across the panels.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, pane: paneEnum }, required: ['query'] }, readOnly: true, run: 'search' },
+    { name: 'weld_get_imports', description: 'Imported generators and their sizes (full tree only if it has been loaded in Weld).', inputSchema: { type: 'object', properties: {} }, readOnly: true, run: 'get_imports' },
+    { name: 'weld_get_html_map', description: 'Structure of the HTML panel: element ids, functions, root.* use, storage, hosts. Useful when the panel is too big to read.', inputSchema: { type: 'object', properties: {} }, readOnly: true, run: 'get_html_map' },
+    { name: 'weld_sample', description: 'Re-roll the generator through its own update() and return the results plus variety statistics. Only runs when the user has the generator open in Weld; may be refused for chat/AI generators.', inputSchema: { type: 'object', properties: { count: { type: 'integer', minimum: 5, maximum: 100 } } }, readOnly: true },
+    { name: 'weld_propose_edit', description: 'Propose a change to one panel. NOTHING is applied: the user reviews a diff in Weld and accepts or rejects it. Send either new_text (the complete new panel) or edits (line ranges to replace; end_line = start_line-1 inserts). The editor must be open.', inputSchema: { type: 'object', properties: { pane: paneEnum, new_text: { type: 'string' }, edits: { type: 'array', items: { type: 'object', properties: { start_line: { type: 'integer' }, end_line: { type: 'integer' }, text: { type: 'string' } }, required: ['start_line', 'end_line', 'text'] } }, note: { type: 'string', description: 'Why, in one or two sentences, shown to the user.' } }, required: ['pane'] }, readOnly: false },
+    { name: 'weld_proposal_status', description: 'Check a proposal: pending, applied, rejected or stale.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }, readOnly: true }
+  ];
+
+  return {
+    VERSION, PRIMER, PRIMER_SHORT, INVESTIGATE_TOOLS, INVESTIGATE_PROTOCOL, BRIDGE_TOOLS, AGENTS,
+    makeToolbox, parseToolCalls, formatToolResults, investigate,
+    findUsages, rename, replaceIdentifiers, validName, compareSamples,
+    applyLineEdits, makeProposal, proposalState,
+    safeSlug, folderPaths, syncPlan, normForCompare,
+    buildAgentIssue, pushBranchName, gateReport
+  };
+});
+
+/* Dev tab: folder sync, agent bridge, edit proposals, GitHub agent hand-off, refactoring, editor markers
+   and regression checks. Every change to the editor is shown as a diff and needs your click. */
+(function () {
+  'use strict';
+  if (window.top !== window) return;
+  const P = window.WeldProjectCore, D = window.WeldDevCore, H = window.weldProjectHost;
+  if (!P || !D || !H) return;
+  const E = H.el;
+  const GM_KEYS = { bridge: 'bridge', folder: 'folderSync', agents: 'agentHandoff', markers: 'devMarkers', baseline: 'baseline:' };
+  const MARK_COLORS = { error: '#e5534b', warn: '#d29922', info: '#768390' };
+
+  const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, dslPath: '', htmlPath: '' },
+    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false };
+  const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
+    cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
+  const S = { proposals: [], seq: 0, view: null, markers: false, markInfo: false, refactor: { name: '', to: '', usages: null, preview: null, error: '' },
+    agents: { request: '', agent: 'copilot', result: null, busy: false, repoState: '', error: '' }, regress: { n: 30, via: 'visible', busy: false, result: null, error: '' }, open: {}, status: '' };
+
+  function notice(m) { S.status = m; H.toast(m, 6000); }
+  function draw() { const host = document.getElementById('wc-dev-body'); if (host && host.isConnected && host.parentNode) render(host.parentNode); }
+  const norm = t => String(t == null ? '' : t).replace(/\r\n?/g, '\n');
+  const ago = t => { const s = Math.round((Date.now() - (+t || 0)) / 1000); if (s < 60) return s + 's ago'; const m = Math.round(s / 60); if (m < 90) return m + ' min ago'; return Math.round(m / 60) + ' h ago'; };
+  const source = () => (window.weldProject && window.weldProject.current && window.weldProject.current()) || null;
+
+  // ------------------------------------------------------------ small storage
+  let dbp = null; const mem = new Map();
+  function kvdb() {
+    if (dbp) return dbp;
+    dbp = new Promise(resolve => {
+      try {
+        const open = indexedDB.open('weldCompanionFolder', 1);
+        open.onupgradeneeded = () => open.result.createObjectStore('kv');
+        open.onsuccess = () => resolve(open.result); open.onerror = () => resolve(null); open.onblocked = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+    return dbp;
+  }
+  function kvOp(mode, fn) {
+    return kvdb().then(d => new Promise((resolve, reject) => {
+      if (!d) return reject(new Error('no-db'));
+      try { const t = d.transaction('kv', mode), r = fn(t.objectStore('kv')); t.oncomplete = () => resolve(r && 'result' in r ? r.result : undefined); t.onerror = () => reject(t.error); t.onabort = () => reject(t.error); } catch (e) { reject(e); }
+    }));
+  }
+  const kvGet = k => kvOp('readonly', s => s.get(k)).then(v => (v === undefined ? mem.get(k) : v), () => mem.get(k));
+  const kvSet = (k, v) => kvOp('readwrite', s => s.put(v, k)).catch(() => { mem.set(k, v); });
+  const kvDel = k => kvOp('readwrite', s => s.delete(k)).catch(() => {}).then(() => { mem.delete(k); });
+
+  // ------------------------------------------------------------- folder sync
+  const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
+  function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
+  async function dirFor(root, rel, create) {
+    const segs = rel.split('/'), name = segs.pop(); let dir = root;
+    for (const s of segs) dir = await dir.getDirectoryHandle(s, { create });
+    return { dir, name };
+  }
+  async function fsRead(root, rel) {
+    try {
+      const { dir, name } = await dirFor(root, rel, false), f = await (await dir.getFileHandle(name)).getFile();
+      return { text: await f.text(), mtime: f.lastModified };
+    } catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return null; throw e; }
+  }
+  async function fsWrite(root, rel, text) {
+    const { dir, name } = await dirFor(root, rel, true), w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    await w.write(text); await w.close();
+  }
+  const paths = slug => D.folderPaths(slug, F.cfg);
+  async function readPair(slug) {
+    const p = paths(slug), a = await fsRead(F.handle, p.dsl);
+    if (!a) return null;
+    const b = await fsRead(F.handle, p.html);
+    return { dsl: norm(a.text), html: b ? norm(b.text) : null, mtime: Math.max(a.mtime, b ? b.mtime : 0) };
+  }
+  async function writePair(slug, dsl, html) {
+    const p = paths(slug);
+    await fsWrite(F.handle, p.dsl, dsl);
+    if (html != null) await fsWrite(F.handle, p.html, html);
+  }
+  async function permission(handle, ask) {
+    try {
+      let st = await handle.queryPermission({ mode: 'readwrite' });
+      if (st !== 'granted' && ask) st = await handle.requestPermission({ mode: 'readwrite' });
+      return st;
+    } catch (e) { return 'denied'; }
+  }
+  async function connectFolder() {
+    if (!F.supported) return notice('This browser cannot open folders. Use Chrome or Edge.');
+    try {
+      const h = await win().showDirectoryPicker({ id: 'weld-folder-sync', mode: 'readwrite' });
+      F.handle = h; F.name = h.name; F.perm = await permission(h, true); F.error = '';
+      await kvSet('handle', h); folderCfg(); F.plan = null; F.folders = null;
+      notice(F.perm === 'granted' ? 'Folder connected: ' + h.name : 'Folder chosen, but write permission was not granted.');
+      await tick(true);
+    } catch (e) { if (!(e && e.name === 'AbortError')) { F.error = e.message || String(e); } }
+    draw();
+  }
+  async function reconnectFolder() {
+    if (!F.handle) return;
+    F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.';
+    if (F.perm === 'granted') await tick(true);
+    draw();
+  }
+  async function disconnectFolder() {
+    F.handle = null; F.name = ''; F.perm = 'none'; F.plan = null; F.folders = null;
+    await kvDel('handle'); notice('Folder disconnected. Nothing in it was deleted.'); draw();
+  }
+  async function bootFolder() {
+    if (F.bootDone) return; F.bootDone = true;
+    F.supported = typeof win().showDirectoryPicker === 'function'; folderCfg();
+    try {
+      const h = await kvGet('handle');
+      if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); }
+    } catch (e) {}
+    startWatch(); draw();
+  }
+  let watchTimer = null;
+  function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
+  async function tick(force) {
+    if (!F.handle || F.perm !== 'granted' || F.busy || (!force && (!F.cfg.watch || (typeof document !== 'undefined' && document.hidden)))) return;
+    const slug = H.slug();
+    if (!D.safeSlug(slug)) { F.plan = null; F.slug = ''; return; }
+    F.busy = true;
+    try {
+      const live = H.isEdit() ? H.live() : null, editor = live && live.dsl != null ? { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) } : null;
+      const disk = await readPair(slug), base = await kvGet('base:' + slug);
+      let plan = D.syncPlan(editor, disk, base);
+      if (plan.state === 'in-sync' && editor) {
+        // both sides agree: remember this as the last sync point (only when it actually moved)
+        const bk = slug + ':' + P.hash(D.normForCompare(editor.dsl)) + P.hash(D.normForCompare(editor.html || ''));
+        if (F.baseKey !== bk) { F.baseKey = bk; await kvSet('base:' + slug, { dsl: editor.dsl, html: editor.html }); }
+      } else if ((plan.state === 'editor-ahead' || plan.state === 'no-disk') && editor && F.cfg.autoMirror) {
+        await writePair(slug, editor.dsl, editor.html); await kvSet('base:' + slug, { dsl: editor.dsl, html: editor.html }); plan = { state: 'in-sync', mirrored: true };
+      }
+      const key = plan.state + ':' + (disk ? P.hash(D.normForCompare(disk.dsl)) + P.hash(D.normForCompare(disk.html || '')) : '-');
+      if ((plan.state === 'disk-ahead' || plan.state === 'conflict') && F.notified !== key) { F.notified = key; H.toast('The folder copy of "' + slug + '" changed. Open Weld, then the Dev tab, to review it.', 7000); }
+      const changed = !F.plan || F.plan.state !== plan.state || F.slug !== slug;
+      F.plan = plan; F.slug = slug; F.lastCheck = Date.now(); F.error = '';
+      if (changed || force) draw();
+    } catch (e) { F.error = (e && e.message) || String(e); }
+    F.busy = false;
+  }
+  async function mirrorNow() {
+    const slug = H.slug(), live = H.isEdit() ? H.live() : null;
+    if (!live || live.dsl == null) return notice('Open the generator\u2019s editor first.');
+    if (F.plan && (F.plan.state === 'disk-ahead' || F.plan.state === 'conflict') && !window.confirm('The folder copy has changes that are not in the editor. Overwrite them with the editor?')) return;
+    await writePair(slug, norm(live.dsl), live.html == null ? null : norm(live.html));
+    await kvSet('base:' + slug, { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) });
+    notice('Wrote the editor to the folder.'); await tick(true);
+  }
+  async function applyFolder() {
+    const slug = H.slug(), live = H.isEdit() ? H.live() : null;
+    if (!live || live.dsl == null) return notice('Open the generator\u2019s editor first.');
+    const disk = await readPair(slug); if (!disk) return notice('No folder copy of this generator yet.');
+    if (!window.confirm('Replace the editor with the folder copy of "' + slug + '"?\n\nCtrl+Z undoes it, and you still press Save in Perchance.')) return;
+    const ok = H.applyPane('dsl', disk.dsl) && (disk.html == null || H.applyPane('html', disk.html));
+    if (ok) { await kvSet('base:' + slug, { dsl: disk.dsl, html: disk.html }); notice('Applied the folder copy. Review it, then Save.'); } else notice('Could not write to the editor.');
+    S.view = null; await tick(true);
+  }
+  async function showFolderDiff() {
+    const slug = H.slug(), live = H.isEdit() ? H.live() : null, disk = await readPair(slug);
+    if (!live || !disk) return notice('Both an open editor and a folder copy are needed to compare.');
+    S.view = { kind: 'folder', title: 'Editor \u2192 folder copy of ' + slug + ' (\u2212 only in the editor, + only in the folder)',
+      panes: [['Lists panel', norm(live.dsl), disk.dsl], ['HTML panel', norm(live.html || ''), disk.html == null ? norm(live.html || '') : disk.html]] };
+    draw();
+  }
+  async function useFolderAsBase() { const disk = await readPair(H.slug()); if (disk) { await kvSet('base:' + H.slug(), disk); await tick(true); } }
+  async function useEditorAsBase() { const live = H.live(); if (live) { await kvSet('base:' + H.slug(), { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) }); await tick(true); } }
+  async function listFolders() {
+    if (!F.handle || F.perm !== 'granted') return;
+    const out = [];
+    try {
+      for await (const [name, h] of F.handle.entries()) {
+        if (h.kind !== 'directory' || !D.safeSlug(name)) continue;
+        const has = await fsRead(F.handle, D.folderPaths(name, F.cfg).dsl).catch(() => null);
+        if (has) out.push({ slug: name, mtime: has.mtime });
+      }
+    } catch (e) { F.error = e.message || String(e); }
+    out.sort((a, b) => b.mtime - a.mtime); F.folders = out; draw();
+  }
+  async function seedFromPublished(slug) {
+    if (!window.weldProject || !window.weldProject.fetchPublished) throw new Error('The Project module is not loaded.');
+    const proj = await window.weldProject.fetchPublished(slug);
+    await writePair(slug, norm(proj.dsl), proj.html == null ? null : norm(proj.html));
+    return proj;
+  }
+  async function seedStarred() {
+    const names = H.favorites().filter(n => D.safeSlug(n));
+    if (!names.length) return notice('Star some generators first.');
+    if (!window.confirm('Download the published copy of ' + names.length + ' starred generator(s) into the folder?\n\nThis makes two requests to Perchance for each. Existing files with the same names are overwritten.')) return;
+    let ok = 0, bad = [];
+    for (const n of names) {
+      F.seeding = n + ' (' + (ok + bad.length + 1) + '/' + names.length + ')'; draw();
+      try { await seedFromPublished(n); ok++; } catch (e) { bad.push(n); }
+    }
+    F.seeding = ''; F.folders = null; notice('Wrote ' + ok + ' generator(s) to the folder' + (bad.length ? '; failed: ' + bad.join(', ') : '.')); draw(); listFolders();
+  }
+
+  // ------------------------------------------------------------ agent bridge
+  function bridgeCfg() { B.cfg = Object.assign({ url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, H.get(GM_KEYS.bridge, {}) || {}); return B.cfg; }
+  function saveBridgeCfg() { H.set(GM_KEYS.bridge, B.cfg); }
+  function bridgeBase() { return B.cfg.url.replace(/\/+$/, '') + '/weld/' + B.cfg.token; }
+  function loopbackUrl(u) { try { const x = new URL(u); return /^https?:$/.test(x.protocol) && /^(127\.0\.0\.1|localhost|\[::1\])$/.test(x.hostname === '::1' ? '[::1]' : x.hostname); } catch (e) { return false; } }
+  function startBridge() {
+    bridgeCfg();
+    if (!loopbackUrl(B.cfg.url)) { B.state = 'error'; B.error = 'The bridge URL must point to this computer (127.0.0.1 or localhost). Weld never sends editor contents to another host.'; return draw(); }
+    if (!/^[0-9a-f]{16,128}$/i.test(B.cfg.token)) { B.state = 'error'; B.error = 'Paste the token printed by the bridge.'; return draw(); }
+    if (B.running) return;
+    B.running = true; B.gen = (B.gen || 0) + 1; B.state = 'connecting'; B.error = ''; B.backoff = 0; draw(); poll(B.gen);
+  }
+  function stopBridge() {
+    const was = B.running; B.running = false; B.state = 'off';
+    if (was) { try { H.request({ method: 'POST', url: bridgeBase() + '/bye', data: JSON.stringify({ cid: B.cid }), headers: { 'Content-Type': 'application/json' }, timeout: 5000 }, () => {}); } catch (e) {} }
+    draw();
+  }
+  function poll(gen) {
+    if (!B.running || gen !== B.gen) return;   // a stale loop from before a disconnect/reconnect ends here
+    const live = H.isEdit() && H.live(), url = bridgeBase() + '/poll?cid=' + B.cid + '&slug=' + encodeURIComponent(H.slug() || '') + '&mode=' + (live ? 'edit' : 'view') + '&v=' + encodeURIComponent(H.version || '') + '&wait=25';
+    H.request({ method: 'GET', url, timeout: 35000 }, (err, res) => {
+      if (!B.running || gen !== B.gen) return;
+      if (err || !res || res.status !== 200) {
+        B.state = 'error'; B.error = err ? 'Cannot reach the bridge. Is it running?' : (res.status === 404 ? 'The bridge rejected the URL or token.' : 'The bridge answered HTTP ' + res.status + '.'); draw();
+        B.backoff = Math.min(15000, (B.backoff || 1000) * 2); return void setTimeout(() => poll(gen), B.backoff);
+      }
+      B.backoff = 0; if (B.state !== 'connected') { B.state = 'connected'; B.error = ''; draw(); }
+      let cmds = []; try { cmds = JSON.parse(res.text).commands || []; } catch (e) {}
+      cmds.forEach(runCommand); poll(gen);
+    });
+  }
+  function reply(id, body) { H.request({ method: 'POST', url: bridgeBase() + '/reply', data: JSON.stringify(Object.assign({ id }, body)), headers: { 'Content-Type': 'application/json' }, timeout: 15000 }, () => {}); }
+  function runCommand(cmd) {
+    Promise.resolve().then(() => exec(cmd)).then(result => reply(cmd.id, { ok: true, result }), e => reply(cmd.id, { ok: false, error: (e && e.message) || String(e) }));
+  }
+  function pendingCount() { return S.proposals.filter(p => p.status === 'pending').length; }
+  async function exec(cmd) {
+    const def = D.BRIDGE_TOOLS.find(t => t.name === cmd.tool);
+    if (!def) throw new Error('Unknown tool: ' + cmd.tool);
+    const args = (cmd.args && typeof cmd.args === 'object') ? cmd.args : {};
+    B.calls++; B.last = def.name.replace(/^weld_/, '') + ' ' + new Date().toLocaleTimeString(); draw();
+    if (def.run) return D.makeToolbox(source).call(def.run, args);
+    if (cmd.tool === 'weld_propose_edit') return propose(args);
+    if (cmd.tool === 'weld_proposal_status') {
+      const p = S.proposals.find(x => x.id === args.id); if (!p) throw new Error('No proposal with that id (the list is cleared when the page reloads).');
+      const live = H.isEdit() ? H.live() : null, cur = live ? (p.pane === 'html' ? live.html : live.dsl) : null;
+      return { id: p.id, status: p.status === 'pending' && cur != null && D.proposalState(p, cur) === 'stale' ? 'stale' : p.status };
+    }
+    if (cmd.tool === 'weld_sample') return sampleForAgent(args);
+    throw new Error('Not implemented: ' + cmd.tool);
+  }
+  async function sampleForAgent(args) {
+    bridgeCfg();
+    if (!B.cfg.allowSample) throw new Error('The user has not allowed agents to run samples. They can enable it in Weld, Dev tab, Agent bridge.');
+    const n = Math.max(5, Math.min(100, Math.floor(Number(args.count)) || 30)), slug = H.slug();
+    const res = await H.sample(slug, document.querySelector && document.querySelector('#outputIframeEl') ? 'visible' : 'published', { n, ms: 25000 });
+    const src = source(), a = src ? P.analyze({ name: src.name, dsl: src.dsl, html: src.html }) : null;
+    return { stats: P.sampleStats(res.samples, a && a.outputSpace), samples: res.samples.slice(0, 30).map(s => s.slice(0, 300)) };
+  }
+  function propose(args) {
+    bridgeCfg();
+    if (!B.cfg.allowPropose) throw new Error('The user has turned off agent proposals in Weld.');
+    const live = H.isEdit() ? H.live() : null;
+    if (!live || live.dsl == null) throw new Error('The generator\u2019s editor is not open in Weld, so edits cannot be proposed. Ask the user to open the generator with #edit.');
+    const pane = args.pane === 'html' ? 'html' : 'dsl', current = pane === 'html' ? live.html : live.dsl;
+    if (current == null) throw new Error('The HTML editor pane is not available.');
+    if (pendingCount() >= 20) throw new Error('Too many proposals are waiting for the user. Wait for them to review some.');
+    const p = D.makeProposal({ id: 'p' + (++S.seq), pane, current, new_text: args.new_text, edits: args.edits, note: args.note, agent: args._agent });
+    p.slug = H.slug(); S.proposals.unshift(p);
+    H.toast((p.agent || 'An agent') + ' proposed a change to the ' + (pane === 'html' ? 'HTML' : 'lists') + ' panel. Review it in Weld, Dev tab.', 7000); draw();
+    return { id: p.id, status: 'pending', message: 'Queued. The user must review and accept it in Weld; check weld_proposal_status for the outcome.' };
+  }
+  function reviewProposal(p) { S.view = { kind: 'proposal', id: p.id, title: (p.agent || 'agent') + ' proposes a change to the ' + (p.pane === 'html' ? 'HTML' : 'lists') + ' panel of ' + p.slug + (p.note ? ': ' + p.note : ''), panes: [[p.pane === 'html' ? 'HTML panel' : 'Lists panel', p.before, p.after]] }; draw(); }
+  function acceptProposal(p) {
+    const live = H.isEdit() ? H.live() : null;
+    if (!live || p.slug !== H.slug()) return notice('Open the editor of "' + p.slug + '" to accept this.');
+    const cur = p.pane === 'html' ? live.html : live.dsl;
+    if (D.proposalState(p, cur) === 'stale') return notice('The editor changed after this was proposed, so it cannot be applied safely. Reject it and ask the agent again.');
+    if (!window.confirm('Apply this change to the ' + (p.pane === 'html' ? 'HTML' : 'lists') + ' panel?\n\nCtrl+Z undoes it, and you still press Save in Perchance.')) return;
+    if (H.applyPane(p.pane, p.after)) { p.status = 'applied'; S.view = null; notice('Applied. Review it, then Save.'); } else notice('Could not write to the editor.');
+    draw();
+  }
+  function rejectProposal(p) { p.status = 'rejected'; if (S.view && S.view.id === p.id) S.view = null; draw(); }
+
+  // ------------------------------------------------------ GitHub agent hand-off
+  function repoPaths() { const slug = H.slug(), r = H.gh.resolve(slug); return { slug, cfg: r.cfg, files: D.folderPaths(slug, { dslPath: r.cfg.dslPath, htmlPath: r.cfg.htmlPath }), r }; }
+  function fetchText(url) { return new Promise((resolve, reject) => H.gh.fetch(url, (e, t) => (e ? reject(new Error(e)) : resolve(t)))); }
+  async function checkRepoCopy() {
+    const A = S.agents; A.repoState = 'Checking\u2026'; A.error = ''; draw();
+    try {
+      const rp = repoPaths(), live = H.live();
+      if (!rp.cfg.owner || !rp.cfg.repo) throw new Error('Set your repo in the GitHub tab first.');
+      const a = await fetchText(rp.r.dslUrl), b = await fetchText(rp.r.htmlUrl).catch(() => null);
+      if (!live) A.repoState = 'The repo has the files. Open the editor to compare them.';
+      else if (D.syncPlan({ dsl: live.dsl, html: live.html }, { dsl: a, html: b }, null).state === 'in-sync') A.repoState = '\u2713 The repo copy matches your editor.';
+      else A.repoState = '\u26A0 The repo copy differs from your editor. Push first so the agent starts from your latest version.';
+    } catch (e) { A.repoState = ''; A.error = e.message || String(e); }
+    draw();
+  }
+  async function createAgentIssue() {
+    const A = S.agents; A.error = ''; A.result = null;
+    try {
+      const rp = repoPaths();
+      if (!rp.cfg.owner || !rp.cfg.repo) throw new Error('Set your repo in the GitHub tab first.');
+      if (!H.gh.token()) throw new Error('Save a GitHub token in the GitHub tab first.');
+      const src = source(), analysis = src ? P.analyze({ name: src.name, dsl: src.dsl, html: src.html }) : null;
+      const issue = D.buildAgentIssue({ slug: rp.slug, request: A.request, agent: A.agent, repo: rp.cfg, paths: rp.files, findings: analysis ? analysis.findings : [] });
+      const label = D.AGENTS[issue.agent].label;
+      if (!window.confirm('Create an issue in ' + rp.cfg.owner + '/' + rp.cfg.repo + ' for ' + label + '?\n\n' + issue.title + '\n\n' + D.AGENTS[issue.agent].how + '\n\nThe issue text includes your request and the rules for the change. No token or code is included.')) return;
+      A.busy = true; draw();
+      const body = { title: issue.title, body: issue.body };
+      if (issue.assignees.length) { body.assignees = issue.assignees; body.agent_assignment = issue.agent_assignment; }
+      const made = await new Promise((resolve, reject) => H.gh.api('POST', '/repos/' + rp.cfg.owner + '/' + rp.cfg.repo + '/issues', body, (e, st, j) => {
+        if (e || (st !== 201 && st !== 200) || !j) reject(new Error('GitHub refused (' + (e ? e.message : st) + (j && j.message ? ': ' + j.message : '') + '). The token needs Issues' + (issue.agent === 'copilot' ? ', Pull requests, Actions and Contents' : '') + ' read & write on this repo.')); else resolve(j);
+      }));
+      if (issue.comment) await new Promise((resolve, reject) => H.gh.api('POST', '/repos/' + rp.cfg.owner + '/' + rp.cfg.repo + '/issues/' + made.number + '/comments', { body: issue.comment }, (e, st, j) => (e || (st !== 201 && st !== 200) ? reject(new Error('The issue was created, but the @-mention comment failed (' + (e ? e.message : st) + '). Add it on GitHub: ' + made.html_url)) : resolve())));
+      A.result = { url: made.html_url, number: made.number, agent: issue.agent };
+      try { H.copy(made.html_url); } catch (e) {}
+      notice('Issue #' + made.number + ' created (link copied).');
+    } catch (e) { A.error = e.message || String(e); }
+    A.busy = false; draw();
+  }
+
+  // ------------------------------------------------------ refactor and usages
+  function liveSource() {
+    const live = H.isEdit() ? H.live() : null;
+    if (live && live.dsl != null) return { dsl: live.dsl, html: live.html, live: true };
+    const s = source(); return s && s.dsl != null ? { dsl: s.dsl, html: s.html, live: false } : null;
+  }
+  function listNames() { const s = liveSource(); if (!s) return []; return P.analyze({ dsl: s.dsl, html: s.html }).lists.filter(l => D.validName(l.name)).map(l => l.name); }
+  function findUsagesUi() {
+    const R = S.refactor, s = liveSource(); R.error = ''; R.preview = null;
+    if (!s) { R.error = 'Open the editor or load the generator in the Project tab first.'; return draw(); }
+    const r = D.findUsages(s.dsl, s.html, R.name);
+    if (r.error) { R.error = r.error; R.usages = null; } else R.usages = r.hits;
+    draw();
+  }
+  function previewRename() {
+    const R = S.refactor, s = liveSource(); R.error = ''; R.usages = null;
+    if (!s || !s.live) { R.error = 'Renaming needs the editor open (#edit), because the result is applied to it.'; return draw(); }
+    const r = D.rename(s.dsl, s.html, R.name, R.to);
+    if (r.error) { R.error = r.error; R.preview = null; } else { R.preview = r; R.previewBase = { dsl: s.dsl, html: s.html }; }
+    draw();
+  }
+  function applyRename() {
+    const R = S.refactor, r = R.preview, s = liveSource(); if (!r || !s || !s.live) return;
+    if (!R.previewBase || norm(s.dsl) !== norm(R.previewBase.dsl) || norm(s.html || '') !== norm(R.previewBase.html || '')) { R.preview = null; draw(); return notice('The editor changed after the preview. Preview again.'); }
+    if (!window.confirm('Rename "' + R.name + '" to "' + R.to + '" in ' + r.total + ' place(s)?\n\nCtrl+Z undoes it, and you still press Save in Perchance.')) return;
+    const ok = H.applyPane('dsl', r.dsl) && (s.html == null || H.applyPane('html', r.html));
+    if (ok) { notice('Renamed. Review it, then Save.'); R.preview = null; R.name = R.to; R.to = ''; } else notice('Could not write to the editor.');
+    draw();
+  }
+  function jumpTo(h) { if (H.isEdit() && H.jump) H.jump(h.pane, h.line); }
+
+  // ------------------------------------------------------------ editor markers
+  let markTimer = null, lastMarkKey = '', markAnalysis = null, paintQueued = false;
+  const hooked = new WeakSet();
+  function schedulePaint() {
+    if (paintQueued) return; paintQueued = true;
+    const run = () => { paintQueued = false; paintMarkers(); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else setTimeout(run, 16);
+  }
+  function layerFor(view) {
+    const scroller = view && view.scrollDOM; if (!scroller) return null;
+    let layer = null;
+    for (const c of Array.from(scroller.children || [])) if (c.className === 'weld-marks') layer = c;
+    if (!layer) { layer = document.createElement('div'); layer.className = 'weld-marks'; layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:5'; scroller.appendChild(layer); }
+    return layer;
+  }
+  function paintMarkers() {
+    try {
+      const views = H.views ? H.views() : {}, live = H.isEdit() ? H.live() : null;
+      ['dsl', 'html'].forEach(pane => {
+        const view = views[pane]; if (!view) return;
+        const layer = layerFor(view); if (!layer) return;
+        if (!hooked.has(view) && view.scrollDOM && view.scrollDOM.addEventListener) {   // lines scrolling into view need drawing
+          hooked.add(view); view.scrollDOM.addEventListener('scroll', () => { if (S.markers) schedulePaint(); }, { passive: true });
+        }
+        while (layer.firstChild) layer.removeChild(layer.firstChild);
+        if (!S.markers || !markAnalysis) return;
+        const byLine = {};
+        markAnalysis.findings.filter(f => f.pane === pane && f.line).forEach(f => { (byLine[f.line] = byLine[f.line] || []).push(f); });
+        Object.keys(byLine).slice(0, 150).forEach(k => {
+          try {
+            const n = +k; if (n > view.state.doc.lines) return;
+            const fs = byLine[k], worst = fs.some(f => f.severity === 'error') ? 'error' : fs.some(f => f.severity === 'warn') ? 'warn' : 'info';
+            if (worst === 'info' && !S.markInfo) return;
+            // Measure from the DOM: CodeMirror's cached line heights can lag behind what is rendered (verified on
+            // the real editor). coordsAtPos is null for lines that are scrolled out of view, so those are skipped
+            // and drawn when they scroll in.
+            const from = view.state.doc.line(n).from, sr = view.scrollDOM.getBoundingClientRect(), scale = view.scaleY || 1;
+            let top, height;
+            if (typeof view.coordsAtPos === 'function') {
+              const c = view.coordsAtPos(from); if (!c) return;
+              top = (c.top - sr.top) / scale + view.scrollDOM.scrollTop; height = (c.bottom - c.top) / scale;
+            } else { const blk = view.lineBlockAt(from); top = ((view.documentPadding && view.documentPadding.top) || 0) + blk.top; height = blk.height; }
+            const m = document.createElement('div');
+            m.style.cssText = 'position:absolute;left:0;top:' + top + 'px;width:5px;height:' + Math.max(8, height) + 'px;background:' + MARK_COLORS[worst] + ';border-radius:0 3px 3px 0;pointer-events:auto;cursor:help;opacity:.9';
+            m.title = fs.map(f => f.message).join('\n'); layer.appendChild(m);
+          } catch (e) {}
+        });
+      });
+    } catch (e) {}
+  }
+  function markTick() {
+    try {
+      const live = H.isEdit() ? H.live() : null;
+      if (!live || live.dsl == null) return;
+      const key = P.hash(live.dsl) + '|' + P.hash(live.html || '');
+      if (key !== lastMarkKey) { lastMarkKey = key; markAnalysis = P.analyze({ name: H.slug(), dsl: live.dsl, html: live.html }); }
+      paintMarkers();
+    } catch (e) {}
+  }
+  function setMarkers(on) {
+    S.markers = !!on; H.set(GM_KEYS.markers, { on: S.markers, info: S.markInfo });
+    if (on && !markTimer) { markTimer = setInterval(markTick, 1500); markTick(); }
+    if (!on) { if (markTimer) { clearInterval(markTimer); markTimer = null; } lastMarkKey = ''; paintMarkers(); }
+  }
+
+  // ------------------------------------------------------- regression baseline
+  function baselineKey() { return GM_KEYS.baseline + H.slug(); }
+  async function runBaselineSample() {
+    const R = S.regress, slug = H.slug(); R.busy = true; R.error = ''; draw();
+    try {
+      const res = await H.sample(slug, R.via, { n: R.n, ms: 25000 }); return res.samples;
+    } catch (e) { R.error = e.message || String(e); return null; } finally { R.busy = false; }
+  }
+  async function saveBaseline() {
+    const samples = await runBaselineSample(); if (!samples) return draw();
+    H.set(baselineKey(), { t: Date.now(), via: S.regress.via, samples: samples.map(s => s.slice(0, 400)) });
+    S.regress.result = null; notice('Saved ' + samples.length + ' results as the baseline for this generator.'); draw();
+  }
+  async function compareBaseline() {
+    const base = H.get(baselineKey(), null); if (!base) { S.regress.error = 'Save a baseline first.'; return draw(); }
+    const samples = await runBaselineSample(); if (!samples) return draw();
+    S.regress.result = Object.assign(D.compareSamples(base.samples, samples), { baseT: base.t }); draw();
+  }
+
+  // --------------------------------------------------------------------- UI
+  function btn(label, action, opts) {
+    opts = opts || {};
+    const b = E('button', { class: 'wc-btn' + (opts.accent ? ' wc-btn-accent' : '') + (opts.mini ? ' wc-mini' : ''), text: label, title: opts.title || '', onclick: () => {
+      try { const r = action(); if (r && typeof r.catch === 'function') r.catch(e => { notice((e && e.message) || String(e)); draw(); }); } catch (err) { notice(err.message || String(err)); draw(); }
+    } });
+    b.disabled = !!opts.disabled; return b;
+  }
+  const note = (parent, text, style) => parent.appendChild(E('div', { class: 'wc-section-note', text, style: style || {} }));
+  const row = (parent, kids, style) => parent.appendChild(E('div', { class: 'wc-row', style: Object.assign({ flexWrap: 'wrap', gap: '8px', margin: '8px 0', alignItems: 'center' }, style || {}) }, kids));
+  function field(label, value, onInput, attrs) {
+    const i = E('input', Object.assign({ class: 'wc-field', type: 'text', 'aria-label': label, value: value == null ? '' : value }, attrs || {}));
+    i.addEventListener('input', () => onInput(i.value)); return i;
+  }
+  function check(label, checked, onChange, title) {
+    const c = E('input', { type: 'checkbox' }); c.checked = !!checked; c.addEventListener('change', () => onChange(c.checked));
+    return E('label', { class: 'wc-check', title: title || '', style: { margin: '4px 0' } }, [c, E('span', { class: 'wc-sw' }), E('span', { text: label })]);
+  }
+  function section(parent, id, title, count, build, openDefault) {
+    const open = id in S.open ? S.open[id] : !!openDefault;
+    const d = E('details', { class: 'wc-card', style: { marginTop: '10px' }, ontoggle: ev => { S.open[id] = !!(ev && ev.target ? ev.target.open : d.open); } });
+    if (open) d.setAttribute('open', '');
+    d.appendChild(E('summary', { style: { cursor: 'pointer', fontWeight: '600' }, text: title + (count != null && count !== '' ? '  \u00b7  ' + count : '') }));
+    const body = E('div', { style: { marginTop: '8px' } }); d.appendChild(body);
+    if (open) build(body); else d.addEventListener('toggle', () => { if (d.open && !body.firstChild) { try { build(body); } catch (e) { note(body, 'Could not render: ' + e.message); } } });
+    parent.appendChild(d);
+  }
+  function diffBlock(parent, title, before, after) {
+    const d = H.diff(before, after);
+    parent.appendChild(E('div', { class: 'wc-subhead', style: { marginTop: '8px' }, text: title + (d.stats.add + d.stats.del ? '  (+' + d.stats.add + ' \u2212' + d.stats.del + ')' : '  (identical)') }));
+    if (!d.stats.add && !d.stats.del) return;
+    const box = E('div', { style: { font: '12px/1.45 ui-monospace,Menlo,Consolas,monospace', border: '1px solid var(--wc-line,#333)', borderRadius: '8px', overflow: 'auto', maxHeight: '40vh', marginTop: '4px' } });
+    d.rows.forEach(rw => box.appendChild(E('div', { style: { display: 'flex', gap: '8px', padding: '0 8px', background: rw.cls === 'add' ? 'rgba(63,185,80,0.16)' : rw.cls === 'del' ? 'rgba(248,81,73,0.16)' : 'transparent', whiteSpace: 'pre-wrap', wordBreak: 'break-word', opacity: rw.cls === 'gap' ? '0.6' : '1' } }, [
+      E('span', { style: { width: '40px', textAlign: 'right', opacity: '0.5', flex: '0 0 auto' }, text: rw.num != null ? String(rw.num) : '' }),
+      E('span', { style: { width: '10px', flex: '0 0 auto' }, text: rw.cls === 'add' ? '+' : rw.cls === 'del' ? '\u2212' : '' }), E('span', { text: rw.text == null ? '' : rw.text })])));
+    parent.appendChild(box);
+  }
+  function viewPanel(parent) {
+    const v = S.view; if (!v) return false;
+    const card = E('div', { class: 'wc-card', style: { marginTop: '10px', borderColor: 'var(--wc-accent,#f97316)' } });
+    card.appendChild(E('div', { class: 'wc-label', text: v.title }));
+    v.panes.forEach(p => diffBlock(card, p[0], p[1], p[2]));
+    const actions = [btn('\u2190 Back', () => { S.view = null; draw(); }, { mini: true })];
+    if (v.kind === 'proposal') { const p = S.proposals.find(x => x.id === v.id); if (p && p.status === 'pending') actions.push(btn('Apply to editor', () => acceptProposal(p), { accent: true }), btn('Reject', () => rejectProposal(p))); }
+    if (v.kind === 'folder') actions.push(btn('Apply folder copy to editor', applyFolder, { accent: true }), btn('Overwrite folder with editor', mirrorNow));
+    row(card, actions); parent.appendChild(card); return true;
+  }
+
+  const STATE_TEXT = {
+    'in-sync': ['\u2713 In sync: the editor and the folder copy match.', '#3fb950'],
+    'no-disk': ['The folder has no copy of this generator yet.', '#d29922'],
+    'editor-ahead': ['The editor has changes the folder does not.', '#d29922'],
+    'disk-ahead': ['\u26A0 The folder copy changed (an agent or editor saved it). Review it before applying.', '#d29922'],
+    'conflict': ['\u26A0 Both the editor and the folder changed since the last sync.', '#e5534b'],
+    'unknown': ['The editor and the folder differ and Weld has no earlier sync point to tell which is newer.', '#d29922'],
+    'no-editor': ['Open the generator\u2019s editor (#edit) to sync it.', '#768390']
+  };
+  function folderSection(parent) {
+    if (!F.supported) { note(parent, 'This browser cannot give web pages a folder to work in. Use Chrome, Edge or another Chromium browser.', { color: '#d29922' }); return; }
+    note(parent, 'Mirrors the open generator to plain files in a folder you choose, so any editor or AI agent can work on them live. Changes from the folder are never applied automatically: you review a diff first.');
+    if (!F.handle) {
+      note(parent, 'Pick the folder once (for example D:\\projects\\perch_backups_folder_sync). The browser remembers it, and asks you to confirm access after you restart it.');
+      row(parent, [btn('Choose folder\u2026', connectFolder, { accent: true })]);
+      if (F.error) note(parent, F.error, { color: '#e5534b' });
+      return;
+    }
+    parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Folder: ' + F.name + (F.perm === 'granted' ? '' : '  (access not confirmed)') }));
+    if (F.perm !== 'granted') { note(parent, 'The browser needs you to confirm access to this folder again.'); row(parent, [btn('Allow access', reconnectFolder, { accent: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]); return; }
+    const slug = H.slug(), safe = D.safeSlug(slug);
+    if (!safe) note(parent, 'Open a generator to sync it.');
+    else {
+      const st = F.plan ? STATE_TEXT[F.plan.state] : null;
+      parent.appendChild(E('div', { style: { margin: '6px 0', color: st ? st[1] : '' }, text: slug + ': ' + (st ? st[0] : 'checking\u2026') + (F.plan && F.plan.mirrored ? ' (just mirrored)' : '') }));
+      const state = F.plan && F.plan.state, kids = [];
+      kids.push(btn('Write editor to folder', mirrorNow, { disabled: !H.isEdit(), mini: true, title: 'Save the editor\u2019s two panels as files in the folder.' }));
+      if (state === 'disk-ahead' || state === 'conflict' || state === 'unknown') kids.push(btn('Review changes\u2026', showFolderDiff, { accent: true, mini: true }));
+      if (state === 'disk-ahead') kids.push(btn('Apply folder copy', applyFolder, { mini: true }));
+      if (state === 'unknown') kids.push(btn('Treat folder as latest', useFolderAsBase, { mini: true }), btn('Treat editor as latest', useEditorAsBase, { mini: true }));
+      kids.push(btn('Download published copy', async () => { await seedFromPublished(slug); notice('Wrote the published copy of ' + slug + ' to the folder.'); await tick(true); }, { mini: true, title: 'Fetch the saved version from Perchance and write it to the folder.' }));
+      row(parent, kids);
+    }
+    row(parent, [check('Write the editor to the folder automatically every few seconds', F.cfg.autoMirror, v => { F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
+      check('Watch the folder for changes', F.cfg.watch, v => { F.cfg.watch = v; saveFolderCfg(); })]);
+    note(parent, 'Files: ' + (safe ? paths(slug).dsl + ' and ' + paths(slug).html : '{name}/{name}-top-panel.txt and {name}/{name}-html-panel.html') + '. Checked ' + (F.lastCheck ? ago(F.lastCheck) : 'not yet') + '.');
+    if (F.error) note(parent, F.error, { color: '#e5534b' });
+    row(parent, [btn('Download all starred generators', seedStarred, { mini: true, disabled: !!F.seeding }), btn('List generators in folder', listFolders, { mini: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]);
+    if (F.seeding) note(parent, 'Downloading ' + F.seeding + '\u2026');
+    if (F.folders) {
+      if (!F.folders.length) note(parent, 'No generator folders yet.');
+      F.folders.slice(0, 60).forEach(f => parent.appendChild(E('div', { style: { display: 'flex', gap: '8px', padding: '2px 0', alignItems: 'center' } }, [E('span', { style: { flex: '1' }, text: f.slug }), E('span', { style: { opacity: '0.6', fontSize: '12px' }, text: ago(f.mtime) }), btn('Open editor', () => { window.location.href = 'https://perchance.org/' + encodeURIComponent(f.slug) + '#edit'; }, { mini: true })])));
+    }
+  }
+  function bridgeSection(parent) {
+    bridgeCfg();
+    note(parent, 'Lets AI agents (Claude Code, Codex, Gemini CLI, Antigravity, Copilot agent mode) read the generator open here and propose changes through a small program running on your computer. Agents can never apply anything: every proposal appears below for your review.');
+    const colors = { off: '#768390', connecting: '#d29922', connected: '#3fb950', error: '#e5534b' };
+    parent.appendChild(E('div', { style: { margin: '4px 0', color: colors[B.state] }, text: 'Bridge: ' + (B.state === 'connected' ? 'connected' + (B.calls ? ' \u00b7 ' + B.calls + ' request(s), last: ' + B.last : '') : B.state === 'connecting' ? 'connecting\u2026' : B.state === 'error' ? B.error : 'off') }));
+    parent.appendChild(field('Bridge URL', B.cfg.url, v => { B.cfg.url = v.trim(); saveBridgeCfg(); }, { placeholder: 'http://127.0.0.1:8765' }));
+    parent.appendChild(field('Bridge token', B.cfg.token, v => { B.cfg.token = v.trim(); saveBridgeCfg(); }, { type: 'password', placeholder: 'token printed by: npm run bridge', autocomplete: 'off' }));
+    row(parent, [B.running ? btn('Disconnect', stopBridge) : btn('Connect', startBridge, { accent: true }),
+      check('Reconnect automatically when I open Perchance', B.cfg.auto, v => { B.cfg.auto = v; saveBridgeCfg(); })]);
+    row(parent, [check('Let agents propose edits (they still need your approval)', B.cfg.allowPropose, v => { B.cfg.allowPropose = v; saveBridgeCfg(); }),
+      check('Let agents run samples (re-rolls the generator)', B.cfg.allowSample, v => { B.cfg.allowSample = v; saveBridgeCfg(); }, 'Off by default: update() can have side effects on some generators.')]);
+    note(parent, 'Start the bridge with "npm run bridge" in the project folder. It prints the token and the one-line setup for each agent. See docs/DEV.md.');
+  }
+  function proposalsSection(parent) {
+    if (!S.proposals.length) return note(parent, 'Nothing yet. When an agent proposes a change it appears here with a diff.');
+    S.proposals.slice(0, 20).forEach(p => {
+      const live = H.isEdit() ? H.live() : null, cur = live && p.slug === H.slug() ? (p.pane === 'html' ? live.html : live.dsl) : null;
+      const stale = p.status === 'pending' && cur != null && D.proposalState(p, cur) === 'stale';
+      const d = H.diff(p.before, p.after);
+      parent.appendChild(E('div', { style: { padding: '6px 0', borderBottom: '1px solid var(--wc-line,#2a2a2a)' } }, [
+        E('div', {}, [E('b', { text: p.agent }), E('span', { text: '  \u00b7  ' + p.slug + ' \u00b7 ' + (p.pane === 'html' ? 'HTML' : 'lists') + ' panel \u00b7 +' + d.stats.add + ' \u2212' + d.stats.del + ' \u00b7 ' + ago(p.createdAt) }),
+          E('span', { style: { marginLeft: '6px', color: p.status === 'applied' ? '#3fb950' : p.status === 'rejected' ? '#768390' : stale ? '#e5534b' : '#d29922' }, text: stale ? 'out of date' : p.status })]),
+        p.note ? E('div', { style: { opacity: '0.8', fontSize: '12px' }, text: p.note }) : null,
+        p.status === 'pending' ? E('div', { class: 'wc-row', style: { gap: '6px', marginTop: '4px', flexWrap: 'wrap' } }, [btn('Review diff', () => reviewProposal(p), { mini: true, accent: !stale }), btn('Apply', () => acceptProposal(p), { mini: true, disabled: stale || !live, title: stale ? 'The editor changed since this was proposed.' : '' }), btn('Reject', () => rejectProposal(p), { mini: true })]) : null]));
+    });
+  }
+  function agentsSection(parent) {
+    const A = S.agents; let rp = null;
+    try { rp = H.slug() ? repoPaths() : null; } catch (e) { rp = null; }
+    note(parent, 'Hands a task to a coding agent that works on your GitHub repo and sends back a pull request. You review and merge it on GitHub, then use Pull in the GitHub tab to load it here. Nothing in your editor changes until then.');
+    if (!rp || !rp.cfg.owner) return note(parent, 'Open a generator and set your repo in the GitHub tab first.');
+    parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Repo: ' + rp.cfg.owner + '/' + rp.cfg.repo + '@' + rp.cfg.branch + '  \u00b7  ' + rp.files.dsl + ', ' + rp.files.html }));
+    const sel = E('select', { class: 'wc-field', 'aria-label': 'Agent' }, Object.keys(D.AGENTS).map(k => { const o = E('option', { value: k, text: D.AGENTS[k].label }); if (k === A.agent) o.selected = true; return o; }));
+    sel.addEventListener('change', () => { A.agent = sel.value; draw(); });
+    parent.appendChild(sel);
+    note(parent, D.AGENTS[A.agent].how);
+    const ta = E('textarea', { class: 'wc-field', rows: '4', 'aria-label': 'What should the agent change?', placeholder: 'Example: add 20 more entries to the greetings list and fix any unresolved names.' }); ta.value = A.request;
+    ta.addEventListener('input', () => { A.request = ta.value; }); parent.appendChild(ta);
+    row(parent, [btn('Check repo copy', checkRepoCopy, { mini: true, title: 'Compares the repo files with your editor.' }), btn(A.busy ? 'Working\u2026' : 'Create issue', createAgentIssue, { accent: true, disabled: A.busy })]);
+    if (A.repoState) note(parent, A.repoState);
+    if (A.error) note(parent, A.error, { color: '#e5534b' });
+    if (A.result) row(parent, [E('span', { text: 'Issue #' + A.result.number + ' created.' }), btn('Open', () => { window.open(A.result.url, '_blank'); }, { mini: true }), btn('Copy link', () => H.copy(A.result.url), { mini: true })]);
+    note(parent, 'Needs a fine-grained token with Contents and Issues (read & write). For Copilot also Pull requests and Actions. The agent\u2019s GitHub app or action must be set up on the repo.');
+  }
+  function refactorSection(parent) {
+    const R = S.refactor, names = listNames();
+    note(parent, 'Find every place a list or function is used, or rename it across both panels. Renames are shown as a diff and applied only when you confirm; Ctrl+Z undoes them.');
+    const sel = E('select', { class: 'wc-field', 'aria-label': 'List to inspect' }, [E('option', { value: '', text: '(choose a list)' })].concat(names.map(n => { const o = E('option', { value: n, text: n }); if (n === R.name) o.selected = true; return o; })));
+    sel.addEventListener('change', () => { R.name = sel.value; R.usages = null; R.preview = null; R.error = ''; draw(); });
+    row(parent, [sel, btn('Find usages', findUsagesUi, { mini: true, disabled: !R.name })]);
+    row(parent, [field('New name', R.to, v => { R.to = v.trim(); }, { placeholder: 'new name', style: { maxWidth: '180px' } }), btn('Preview rename', previewRename, { mini: true, disabled: !R.name })]);
+    if (R.error) note(parent, R.error, { color: '#e5534b' });
+    if (R.usages) {
+      note(parent, R.usages.length + ' place(s) use "' + R.name + '":');
+      R.usages.slice(0, 80).forEach(h => parent.appendChild(E('div', { style: { fontSize: '12px', padding: '2px 0', cursor: H.isEdit() ? 'pointer' : 'default', wordBreak: 'break-word' }, onclick: () => jumpTo(h) }, [E('b', { text: h.pane + ' ' + h.line + '  ' }), E('span', { style: { opacity: '0.7' }, text: h.kind + '  ' }), E('span', { text: h.text })])));
+    }
+    if (R.preview) {
+      const p = R.preview, s = R.previewBase;
+      note(parent, p.total + ' change(s): ' + p.counts.definition + ' definition, ' + p.counts.reference + ' in lists, ' + p.counts.code + ' in code. Check the diff, especially code lines.');
+      diffBlock(parent, 'Lists panel', s.dsl, p.dsl); if (s.html != null) diffBlock(parent, 'HTML panel', s.html, p.html);
+      row(parent, [btn('Apply rename', applyRename, { accent: true })]);
+    }
+  }
+  function markersSection(parent) {
+    note(parent, 'Draws a small coloured bar beside lines in the editor that have findings (orange = warning, red = error); hover it for the reason. It only decorates; it never edits.');
+    row(parent, [check('Show markers in the editor', S.markers, v => { setMarkers(v); draw(); }), check('Include notes', S.markInfo, v => { S.markInfo = v; H.set(GM_KEYS.markers, { on: S.markers, info: S.markInfo }); lastMarkKey = ''; markTick(); })]);
+    if (!H.isEdit()) note(parent, 'Open the generator\u2019s editor to see them.');
+  }
+  function regressSection(parent) {
+    const R = S.regress, base = H.get(baselineKey(), null);
+    note(parent, 'Re-rolls the generator and compares the results with a saved baseline, so you can see what an edit changed in practice (length, repeats, vocabulary). Do not use it on generators whose update() has side effects.');
+    const n = E('input', { class: 'wc-field', type: 'number', min: '10', max: '100', value: R.n, 'aria-label': 'Samples', style: { width: '80px' } }); n.addEventListener('change', () => { R.n = Math.max(10, Math.min(100, Math.floor(+n.value) || 30)); });
+    const via = E('select', { class: 'wc-field', 'aria-label': 'Where to sample', style: { maxWidth: '240px' } }, [['visible', 'The preview on this page'], ['published', 'Published copy (hidden frame)']].map(o => { const op = E('option', { value: o[0], text: o[1] }); if (o[0] === R.via) op.selected = true; return op; }));
+    via.addEventListener('change', () => { R.via = via.value; });
+    row(parent, [n, via]);
+    row(parent, [btn(R.busy ? 'Sampling\u2026' : 'Save baseline', saveBaseline, { mini: true, disabled: R.busy }), btn('Compare with baseline', compareBaseline, { mini: true, accent: true, disabled: R.busy || !base })]);
+    if (base) note(parent, 'Baseline: ' + base.samples.length + ' results saved ' + ago(base.t) + '.');
+    if (R.error) note(parent, R.error, { color: '#e5534b' });
+    if (R.result) { R.result.lines.forEach(l => parent.appendChild(E('div', { style: { margin: '2px 0', color: R.result.changed ? '#d29922' : '#3fb950' }, text: '\u2022 ' + l }))); }
+  }
+
+  // Starts the folder watcher, restores editor markers and (only if you ticked it) reconnects the bridge. Runs at
+  // page load, not when the tab is first opened, so a change an agent makes to the folder is noticed right away.
+  let booted = false;
+  function boot() {
+    if (booted) return; booted = true;
+    bootFolder().catch(() => {}); bridgeCfg();
+    const m = H.get(GM_KEYS.markers, null); if (m && m.on) { S.markInfo = !!m.info; setMarkers(true); }
+    if (B.cfg.auto && B.cfg.token) startBridge();
+  }
+  function render(parent) {
+    boot();
+    while (parent.firstChild) parent.removeChild(parent.firstChild);
+    const wrap = E('div', { id: 'wc-dev-body' });
+    wrap.appendChild(E('label', { class: 'wc-label', text: 'Dev' + (H.slug() ? ' \u2014 ' + H.slug() : '') }));
+    note(wrap, 'Tools for working on a generator with files, AI agents and GitHub. Nothing here changes your editor without showing you a diff first.');
+    if (S.status) note(wrap, S.status);
+    if (!viewPanel(wrap)) {
+      const pend = pendingCount();
+      section(wrap, 'proposals', 'Agent proposals', pend ? pend + ' waiting' : S.proposals.length || '', proposalsSection, pend > 0);
+      section(wrap, 'folder', 'Folder sync', F.handle ? (F.plan && STATE_TEXT[F.plan.state] ? F.plan.state : F.name) : 'off', folderSection, true);
+      section(wrap, 'bridge', 'Agent bridge (MCP)', B.state, bridgeSection);
+      section(wrap, 'agents', 'GitHub agents', '', agentsSection);
+      section(wrap, 'refactor', 'Find usages and rename', '', refactorSection);
+      section(wrap, 'markers', 'Editor markers', S.markers ? 'on' : 'off', markersSection);
+      section(wrap, 'regress', 'Regression check', '', regressSection);
+    }
+    parent.appendChild(wrap);
+  }
+  setTimeout(boot, 1200);
+  window.weldDev = {
+    render, boot, state: { F, B, S }, exec, tick, startBridge, stopBridge,
+    // test hooks
+    _folder: { connectWith(handle) { F.handle = handle; F.name = handle.name || 'folder'; F.perm = 'granted'; F.supported = true; F.bootDone = true; folderCfg(); return kvSet('handle', handle); } }
+  };
+})();
+/* END GENERATED DEV */

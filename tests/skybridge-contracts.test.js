@@ -149,6 +149,61 @@ assert.equal(calls.filter((call) => call.path.endsWith('/blobs')).length, 2);
 assert.equal(calls.at(-1).method, 'PATCH');
 assert.match(calls.at(-1).path, /\/refs\/heads\/main$/);
 
+// Push as pull request: the commit is published as a NEW branch; the base branch is never moved.
+{
+  const prCalls = [];
+  const pr = load(['ghPushFilesAtomic'], between('function ghApiError(', 'function pushToGitHub('), {
+    ghApi(method, path, token, body, done) {
+      prCalls.push({ method, path, body });
+      if (path.endsWith('/ref/heads/main')) return done(null, 200, { object: { sha: 'parent' } });
+      if (path.endsWith('/commits/parent')) return done(null, 200, { tree: { sha: 'base-tree' } });
+      if (path.endsWith('/blobs')) return done(null, 201, { sha: 'blob' });
+      if (path.endsWith('/trees')) return done(null, 201, { sha: 'new-tree' });
+      if (path.endsWith('/commits')) return done(null, 201, { sha: 'new-commit' });
+      if (path.endsWith('/refs')) return done(null, 201, { ref: body.ref });
+      throw new Error(`unexpected API request: ${method} ${path}`);
+    },
+  });
+  let out;
+  pr.ghPushFilesAtomic('o', 'r', 'main', [{ path: 'a/x.txt', content: 'x' }], 't', 'msg', (err, value) => { out = { err, value }; }, { newBranch: 'weld/dad-chat-20261003-0705' });
+  assert.deepEqual(out, { err: null, value: 'created' });
+  assert.equal(prCalls.at(-1).method, 'POST');
+  assert.match(prCalls.at(-1).path, /\/git\/refs$/);
+  assert.equal(JSON.stringify(prCalls.at(-1).body), JSON.stringify({ ref: 'refs/heads/weld/dad-chat-20261003-0705', sha: 'new-commit' }));
+  assert.ok(!prCalls.some((c) => c.method === 'PATCH'), 'the base branch is never moved');
+  assert.ok(prCalls.find((c) => c.path.endsWith('/commits') && c.method === 'POST').body.parents[0] === 'parent', 'the commit sits on top of the base branch');
+  for (const bad of ['../x', 'a..b', 'x.lock', '/abs', 'trail/', 'sp ace', 'a//b']) {
+    prCalls.length = 0; let r;
+    pr.ghPushFilesAtomic('o', 'r', 'main', [{ path: 'a/x.txt', content: 'x' }], 't', 'msg', (err, value) => { r = { err, value }; }, { newBranch: bad });
+    assert.ok(r.err && /Unsafe branch name/.test(r.err.message), bad);
+    assert.ok(!prCalls.some((c) => c.path.endsWith('/refs')), 'no ref is created for ' + bad);
+  }
+}
+
+// The analyzer gate only ever adds text to the Push dialog; it never throws and can be switched off.
+{
+  const P = require('../src/project-core.js'), Dv = require('../src/dev-core.js');
+  let gate = true;
+  const g = load(['ghGateNote'], between('function ghGateNote(', 'function pushAsPullRequest('), {
+    gget: (k, d) => (k === 'ghPushGate' ? gate : d), window: { WeldProjectCore: P, WeldDevCore: Dv },
+  });
+  assert.equal(g.ghGateNote('x', 'output\n  ok\n', '<p>[output]</p>'), '', 'clean code adds nothing');
+  const note = g.ghGateNote('x', 'output\n  [missing]\n', '<p>[output]</p>');
+  assert.match(note, /Weld found 1 possible problem/); assert.match(note, /missing/);
+  gate = false; assert.equal(g.ghGateNote('x', 'output\n  [missing]\n', '<p>[output]</p>'), '', 'can be switched off');
+  gate = true;
+  const broken = load(['ghGateNote'], between('function ghGateNote(', 'function pushAsPullRequest('), { gget: () => true, window: { WeldProjectCore: { analyze() { throw new Error('boom'); } }, WeldDevCore: Dv } });
+  assert.equal(broken.ghGateNote('x', 'a', 'b'), '', 'an analyzer failure never blocks a push');
+  assert.equal(load(['ghGateNote'], between('function ghGateNote(', 'function pushAsPullRequest('), { gget: () => true, window: {} }).ghGateNote('x', 'a', 'b'), '', 'missing modules are tolerated');
+}
+
+// Credentials never travel in a state export: the GitHub token, Skybridge grants and the agent-bridge token.
+{
+  const sec = load(['stateIsSecret'], between('var STATE_SECRET_KEYS', 'function stateScrubOut('), {});
+  ['ghToken', 'sb:perm', 'bridge'].forEach((k) => assert.equal(sec.stateIsSecret(k), true, k + ' is excluded from exports'));
+  ['favorites', 'ai', 'folderSync', 'baseline:zoo'].forEach((k) => assert.equal(sec.stateIsSecret(k), false, k + ' may be exported'));
+}
+
 console.log('skybridge and GitHub push contract tests passed');
 
 // Pull/Diff must work on PRIVATE repos: with a token the file is read through the Contents API
