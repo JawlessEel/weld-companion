@@ -27,7 +27,9 @@ When only the lists panel is loaded, unresolved names are downgraded to notes be
 
 Click a finding or an outline row to jump to that line in the editor (needs the **live** copy).
 
-**Fix issues with AI** opens **Tools → AI Helper** with a repair request containing every warning and error, including findings hidden by the filter or **Show more**, plus the generator context pack. Press **Ask** to send it to your configured provider, then review the proposed pane replacements and diff before applying them. The request asks the helper to check for false alarms, preserve existing behavior, and request missing source before proposing replacements. The button is disabled when there are no warnings or errors; **Ask AI about these** remains available for a general review.
+**Send findings to Perchance AI** sits beside **Ask AI about these** and puts every warning and error, including findings hidden by the filter or **Show more**, directly into the native Perchance AI helper input. It opens the helper, preserves any existing draft, and asks it to inspect the current source, fix confirmed problems, check for false alarms, preserve existing behavior, and verify the live preview. Press the native **Send** button when ready. It does not use Weld's Tools workspace or call a provider. The button requires the editor (`#edit`) and at least one warning or error. An explicit native handoff stays native even if Weld's optional provider interception is enabled. **Ask AI about these** remains available for a general review in Weld's workspace.
+
+With **Perchance built-in** selected in Tools, **Ask selected model** also puts the prepared request into the native helper input. External and local providers continue to use Weld's review workspace.
 
 ## Estimates and sampling
 
