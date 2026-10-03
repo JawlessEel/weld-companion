@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.58.3
+// @version      1.58.4
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.58.3';
+  var WC_VERSION = '1.58.4';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2180,8 +2180,18 @@
     return (node.innerText || node.textContent || '').trim();
   }
   function copyText(t) {
-    try { navigator.clipboard.writeText(t); toast('Copied'); }
-    catch (e) { var ta = el('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copied'); } catch (e2) { toast('Copy failed'); } ta.remove(); }
+    function fallback() {
+      var ta = el('textarea', { style: { position: 'fixed', left: '-9999px' } }), active = document.activeElement;
+      ta.value = t; document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+      ta.remove(); if (active && active.focus) active.focus();
+      toast(ok ? 'Copied' : 'Copy failed — select the reply text and press Ctrl+C');
+      return ok;
+    }
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) return Promise.resolve(fallback());
+      return navigator.clipboard.writeText(t).then(function () { toast('Copied'); return true; }, fallback);
+    } catch (e) { return Promise.resolve(fallback()); }
   }
   function download(name, text) {
     var blob = new Blob([text], { type: 'text/plain' });
@@ -2791,6 +2801,31 @@
   function aiAgentButton() { return $('#aiAgentSendBtn') || $('#aiHelperSubmitBtn'); }
   function aiAgentInput() { return $('#aiAgentInputEl') || $('#aiHelperInputEl'); }
   function aiAgentPrompt(input) { return String(input && ('value' in input ? input.value : input.textContent) || '').trim(); }
+  function nativeAIReplyText(reply) {
+    var buttons = Array.from(reply.querySelectorAll('.wc-native-reply-copy'));
+    var display = buttons.map(function (b) { return b.style.display; });
+    buttons.forEach(function (b) { b.style.display = 'none'; });
+    try {
+      if (typeof reply.innerText === 'string') return reply.innerText.trim();
+      var clone = reply.cloneNode(true);
+      clone.querySelectorAll('.wc-native-reply-copy').forEach(function (n) { n.remove(); });
+      return (clone.textContent || '').trim();
+    } finally { buttons.forEach(function (b, i) { b.style.display = display[i]; }); }
+  }
+  function enhanceNativeAIReplies() {
+    var messages = $('#aiAgentMsgsEl'); if (!messages) return;
+    messages.querySelectorAll('.aa-md').forEach(function (reply) {
+      if (!reply.textContent.trim() || reply.querySelector('.wc-native-reply-copy')) return;
+      var b = el('button', { type: 'button', class: 'wc-native-reply-copy', text: 'Copy reply', title: 'Copy this Perchance AI reply',
+        style: { display: 'block', marginTop: '8px', padding: '3px 8px', cursor: 'pointer', font: '12px system-ui', color: '#d8dbe0', background: '#292d33', border: '1px solid #50545c', borderRadius: '5px' },
+        onclick: function (e) {
+          e.stopPropagation();
+          var text = nativeAIReplyText(reply);
+          if (text) copyText(text); else toast('This reply is empty');
+        } });
+      reply.appendChild(b);
+    });
+  }
   var AI_NATIVE_DRAFT = null;
   function openPerchanceAI(prompt) {
     var input = aiAgentInput();
@@ -3767,7 +3802,7 @@
       if (out) { snapshotOutput();
         new MutationObserver(debounce(function () { snapshotOutput(); if (WC_TAB) renderResultTools(); }, 250)).observe(out, { childList: true, subtree: true, characterData: true });
       }
-      var enhance = debounce(function () { enhanceInputs(); applyHelperInstruction(); hookHelperSubmit(); }, 400);
+      var enhance = debounce(function () { enhanceInputs(); applyHelperInstruction(); hookHelperSubmit(); enhanceNativeAIReplies(); }, 400);
       enhance();
       // If Perchance's bar appears after we loaded (or wasn't there yet), add our
       // single Weld item to it then. We never inject a competing bar.
@@ -10399,7 +10434,8 @@
     html = String(html || '');
     const scripts = [], styles = [];
     let masked = html;
-    const re = /<(script|style)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi; let m;
+    // HTML raw-text elements may run to EOF without an explicit closing tag.
+    const re = /<(script|style)\b([^>]*)>([\s\S]*?)(?:<\/\1\s*>|$)/gi; let m;
     while ((m = re.exec(html))) {
       const attrs = m[2] || '', bodyStart = m.index + m[0].indexOf('>') + 1, code = m[3];
       const typeM = /\btype\s*=\s*["']?([^\s"'>]+)/i.exec(attrs), srcM = /\bsrc\s*=\s*["']?([^\s"'>]+)/i.exec(attrs);
