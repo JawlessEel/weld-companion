@@ -536,7 +536,7 @@
       check('Reconnect automatically when I open Perchance', B.cfg.auto, v => { B.cfg.auto = v; saveBridgeCfg(); })]);
     row(parent, [check('Let agents propose edits (they still need your approval)', B.cfg.allowPropose, v => { B.cfg.allowPropose = v; saveBridgeCfg(); }),
       check('Let agents run samples (re-rolls the generator)', B.cfg.allowSample, v => { B.cfg.allowSample = v; saveBridgeCfg(); }, 'Off by default: update() can have side effects on some generators.')]);
-    note(parent, 'Start the bridge with "npm run bridge" in the project folder. It prints the token and the one-line setup for each agent. See docs/DEV.md.');
+    note(parent, 'To start the bridge, double-click start-bridge.cmd in your Weld Companion project folder (or run "npm run bridge" there in a terminal). A window opens, shows the setup line for each agent and copies the token to your clipboard: paste it above. Keep that window open while you use it. See docs/DEV.md.');
   }
   function proposalsSection(parent) {
     if (!S.proposals.length) return note(parent, 'Nothing yet. When an agent proposes a change it appears here with a diff.');

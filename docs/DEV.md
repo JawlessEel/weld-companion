@@ -35,7 +35,7 @@ Lets agents such as Claude Code, Codex, Gemini CLI, Antigravity and Copilot's ag
 agent  --MCP over HTTP-->  bridge (your computer, 127.0.0.1)  <--Weld polls--  the userscript in your browser
 ```
 
-**Start it** from the project folder:
+**Start it** by double-clicking `start-bridge.cmd` in the project folder (Windows). A window opens, prints the setup line for each agent, and copies the token to your clipboard; keep the window open while you use the bridge, and close it to stop. From a terminal in the project folder the equivalent is:
 
 ```bash
 npm run bridge
