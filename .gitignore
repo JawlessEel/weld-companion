@@ -12,3 +12,6 @@ Thumbs.db
 *.zip
 .env
 .env.*
+
+# Agent bridge secret (token + port)
+bridge/.weld-bridge.json

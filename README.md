@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.57.1-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.58.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -31,6 +31,7 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
   - [Sync with GitHub — Pull & Push](#sync-with-github--pull--push)
   - [Library — for readers & players](#library--for-readers--players)
   - [Project — read, check & export any generator](#project--read-check--export-any-generator-v1570)
+  - [Dev — folder sync, AI agents & GitHub](#dev--folder-sync-ai-agents--github-v1580)
   - [Tools — AI Helper & character files](#tools--ai-helper--character-files)
   - [Data Manager — browse, edit & back up every generator's IndexedDB](#data-manager--browse-edit--back-up-every-generators-indexeddb)
   - [AICC pack — Lore Library, character round-trip & repair](#aicc-pack--lore-library-character-round-trip--repair)
@@ -233,6 +234,18 @@ The **🔬 Project** tab works on whatever generator you are looking at. It read
 - **exports it** as a ZIP bundle (source, imports, findings, manifest), Markdown, or a budgeted **AI context pack**, and adds the pack, a "selected code" option and a token estimate to the AI Helper.
 
 See [the Project guide](docs/PROJECT.md).
+
+### Dev — folder sync, AI agents & GitHub (v1.58.0)
+
+The **🧩 Dev** tab connects the generator you are editing to files, to AI coding agents and to GitHub, with one rule: **nothing changes your editor without showing you a diff and getting your click.**
+
+- **Folder sync** mirrors the open generator to plain files in a folder you choose (Chromium browsers). Work on them with any editor or agent; Weld notices changes, shows a diff, and applies it only when you say so. Conflicts are flagged, never overwritten.
+- **Agent bridge (MCP)**: run `npm run bridge`, and agents such as Claude Code, Codex, Gemini CLI, Antigravity and Copilot's agent mode can read the live editor, run Weld's analysis, and **propose** edits that you review. Local only, behind a secret token.
+- **GitHub agents**: hand a task to Copilot's cloud agent, Claude or Codex through an issue in your backup repo, and get a pull request back. **Push as PR** opens a pull request instead of writing to your branch, and Push shows Weld's findings first.
+- **AI helper upgrades**: a Perchance syntax primer in every request, a "look things up first" mode, OpenRouter and GitHub Models providers, and prompt caching for Claude.
+- **Find usages and rename** across both panels, **editor markers** beside lines with findings, and a **regression check** that compares output before and after an edit.
+
+See [the Dev guide](docs/DEV.md) for setup, per-agent instructions, the security model, and what has and has not been verified.
 
 ### Tools — AI Helper & character files
 
@@ -505,13 +518,13 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 
 - **Ritual and habit support** — honour daily creative rituals; quiet streak tracking; gentle prompt if you haven't done your morning pull. *(offline)*
 - **Living style guide** — extract implicit consistency rules from saved outputs ("all your northern city names end in -vik"), surface them, flag when a new output breaks your canon. *(offline)*
-- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)* *(1.57.0 adds an on-demand analyzer with click-to-jump findings in the Project tab; live underlining is still open.)*
+- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)* *(1.57.0 adds an on-demand analyzer with click-to-jump findings in the Project tab; 1.58.0 draws markers beside flagged lines in the editor; live underlining as you type is still open.)*
 - **Accessibility audit** — basic check of output contrast ratio, font size, `prefers-reduced-motion` compliance. One-line result in the Generators tab. *(offline)*
 - **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)* *(1.57.0 keeps local snapshots with compare and restore; a per-edit history is still open.)*
 - **Contextual platform tutorial** — "how does this work?" panel explaining the DSL, HTML panel, and imports for the specific generator you're looking at. *(offline)*
 - **DSL reader / explainer** — "explain this generator in plain English," "what does this line do." The AI Helper writes code; this reads it. *(online — uses AI)*
 - **Atomic GitHub commits** — push DSL + HTML as a single commit rather than two. *(online)*
-- **Richer GitHub manager** — sync-status badge and pre-Pull/Push diff. *(online)*
+- **Richer GitHub manager** — sync-status badge and pre-Pull/Push diff. *(online)* *(1.58.0 adds Push as pull request and an analyzer check in the Push dialog; the badge is still open.)*
 - **Conflict detection for collaborators** — hash editor content, detect divergence via the bus, alert both authors before either saves. *(offline)*
 - **Taste learning from your Scrapbook** — analyse saved outputs to identify what you consistently like; suggest generator prompt adjustments. *(online — uses AI)*
 - **Creative writing coach** — identify recurring themes, stylistic patterns, and tendencies in your writing; suggest prompts to develop range. *(online — uses AI)*
