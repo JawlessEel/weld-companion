@@ -53,5 +53,12 @@ Say plainly when a change was not tried in a real userscript manager.
 
 ## Git
 
-Don't push to `main`, force-push, or commit unless the user asks. Preserve
-uncommitted work you didn't make.
+Aaron grants Codex standing permission (2026-10-03) to finish requested
+implementation, repair, setup, installation and sync tasks with scoped commits,
+normal pushes (including `main`), PRs and verified merges without repeated
+approval. Pushing the validated userscript to `main` is included when delivering
+a requested Weld change. This supersedes older blanket commit/push approval
+rules; newer task-specific restrictions and read-only requests take precedence.
+Preserve unrelated uncommitted work, secrets, required checks/reviews and the
+upstream push block. Force-push, shared-history rewrites, destructive deletion,
+discarding other work and access/security changes still need separate approval.
