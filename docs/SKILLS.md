@@ -21,6 +21,8 @@ Open **Weld > Skills** on a Perchance generator. The library contains **109 pres
 
 Browse collapsible sections or combine search, generator/application type, task mode and favorites. Generic tasks remain available for every type. Dashboard tasks cover feed adapters, financial calculations, provenance/freshness, terminal layouts, charts, recovery, report parity and AI analyst grounding. Advanced story/chat tasks cover branches, ensemble characters, memory, card interoperability, sync conflicts, vault recall and multimodal workflows. The prompts/models/plugins section covers compiled prompts, preset exchange, model capabilities, routing, reusable interfaces and agent/tool contracts.
 
+Dropdown options use opaque backgrounds and text colors from Weld's adopted theme, with matching native dark/light controls (1.60.1).
+
 Every preset has a workflow and acceptance checks. The detail view distinguishes **Review only** from **Makes changes**; researched additions link to their primary sources at inspected revisions or current official provider docs. See [selection rationale and all 14 repositories](SKILLS-SOURCES.md). These are original Perchance adaptations, not installed third-party agent packages.
 
 ## Run a skill
