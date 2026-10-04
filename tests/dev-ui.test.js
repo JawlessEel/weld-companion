@@ -261,7 +261,7 @@ const norm = t => t.replace(/\r\n?/g, '\n');
 
   // ============================================================ GitHub agents
   render(); openSection('GitHub agents');
-  const ta = walk(parent).find(n => n.tagName === 'textarea' && /What should the agent change/.test(n.attrs['aria-label']));
+  const ta = walk(parent).find(n => n.tagName === 'textarea' && /What should the agent do/.test(n.attrs['aria-label']));
   ta.value = 'Add more animals to the list'; ta.events.input();
   repoCopy = { dsl: live.dsl, html: live.html };
   render(); click('Check repo copy'); await until(() => /matches your editor/.test(dev.state.S.agents.repoState), 2000, 'repo check');
@@ -274,9 +274,25 @@ const norm = t => t.replace(/\r\n?/g, '\n');
   assert.equal(ghCalls[0].body.agent_assignment.base_branch, 'main');
   assert.match(ghCalls[0].body.body, /zoo\/zoo-top-panel\.txt/); assert.doesNotMatch(JSON.stringify(ghCalls[0]), /token/i);
   assert.equal(clipboard.at(-1), 'https://github.com/me/perchance_backups/issues/7');
+  assert.match(confirms[0], /Task mode: Change code/);
+  dev.state.S.agents.result = null; ghCalls.length = 0; confirms.length = 0; render();
+  const mode = walk(parent).find(n => n.tagName === 'select' && n.attrs['aria-label'] === 'Task mode');
+  assert.equal(mode.children.length, 3);
+  mode.value = 'analysis'; mode.events.change();
+  assert.equal(dev.state.S.agents.mode, 'analysis');
+  click('Create issue'); await until(() => dev.state.S.agents.result, 2000, 'read-only issue');
+  assert.match(confirms[0], /Analyze and report \(read-only\)/);
+  assert.match(ghCalls[0].body.body, /Do not edit any files/);
+  assert.match(ghCalls[0].body.agent_assignment.custom_instructions, /Read-only analysis/);
+  assert.doesNotMatch(ghCalls[0].body.body, /After the change is merged|Rules for the change/);
+  dev.state.S.agents.mode = 'auto'; dev.state.S.agents.request = 'analyze and tell me what this project is overall, a short quick explanation';
+  dev.state.S.agents.result = null; ghCalls.length = 0; render(); click('Create issue');
+  await until(() => dev.state.S.agents.result, 2000, 'auto analysis issue');
+  assert.match(ghCalls[0].body.agent_assignment.custom_instructions, /Read-only analysis/);
   dev.state.S.agents.agent = 'claude'; dev.state.S.agents.result = null; ghCalls.length = 0; render(); click('Create issue');
   await until(() => dev.state.S.agents.result, 2000, 'claude issue'); assert.equal(ghCalls.length, 2);
   assert.match(ghCalls[1].path, /\/issues\/7\/comments$/); assert.match(ghCalls[1].body.body, /^@claude /);
+  assert.match(ghCalls[1].body.body, /without editing files/);
   // GitHub errors are explained
   ghReplies.push([null, 422, { message: 'Copilot is not enabled' }]); dev.state.S.agents.agent = 'copilot'; dev.state.S.agents.result = null; render(); click('Create issue');
   await until(() => dev.state.S.agents.error, 2000, 'issue error'); assert.match(dev.state.S.agents.error, /GitHub refused \(422: Copilot is not enabled\)/); assert.match(dev.state.S.agents.error, /Pull requests, Actions/);

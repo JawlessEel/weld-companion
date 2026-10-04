@@ -75,16 +75,18 @@ It prints a secret URL and the one-line setup for each agent, and keeps the same
 
 ## GitHub agents and pull requests
 
-**Ask an agent through GitHub.** Dev, GitHub agents: describe the change, choose an agent, and Weld creates an issue in your backup repo with your request, the file paths, rules for the change and Weld's findings. No token and no code is posted.
+**Ask an agent through GitHub.** Dev, GitHub agents: describe the task, choose an agent and a task mode, and Weld creates an issue in your backup repo with your request, the file paths, task rules and Weld's findings. No token and no code is posted.
+
+**Task mode:** Auto treats analysis, explanations and uncertain requests as read-only; it recognizes common explicit change requests. Choose **Analyze and report (read-only)** to require an answer without file edits, commits, pushes or a pull request, or **Change code** for an implementation request Auto does not recognize. The confirmation shows the resolved mode before creating the issue. Analysis issues omit edit and merge instructions; Copilot assignment instructions and Claude/Codex mentions carry the same mode. These are agent instructions, not a permission barrier enforced by GitHub.
 
 | Choice | What happens | Needs |
 |---|---|---|
-| GitHub Copilot cloud agent | the issue is assigned to Copilot, which opens a pull request | Copilot cloud agent enabled on the repo |
+| GitHub Copilot cloud agent | the issue is assigned to Copilot with the selected task mode | Copilot cloud agent enabled on the repo |
 | Claude (Claude Code GitHub Action) | Weld adds an `@claude` comment | the Claude GitHub app or action set up on the repo |
 | Codex cloud | Weld adds an `@codex` comment | Codex cloud connected to the repo |
 | Plain issue | just creates the issue | nothing |
 
-Your GitHub token (GitHub tab) needs **Contents** and **Issues** read and write; for Copilot also **Pull requests** and **Actions**. Push your latest editor first ("Check repo copy" tells you if the repo is behind). When the pull request is merged, press **Pull** in the GitHub tab to load it.
+Your GitHub token (GitHub tab) needs **Contents** and **Issues** read and write; for Copilot also **Pull requests** and **Actions**. Agents read the repository copy ("Check repo copy" tells you if it differs from your editor). For requested code changes, push your latest editor first; when the resulting pull request is merged, press **Pull** in the GitHub tab to load it. Read-only analysis requires no generator changes or merge.
 
 **Push as PR** (GitHub tab) commits the editor to a new branch (`weld/<name>-<date>`) and opens a pull request into your configured branch, so nothing reaches that branch until you merge. The ordinary **Push** now also lists Weld's analyzer findings in its confirmation dialog (switch this off in Code checks).
 

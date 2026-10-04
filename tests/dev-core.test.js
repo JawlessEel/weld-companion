@@ -199,6 +199,32 @@ assert.equal(D.buildAgentIssue({ ...base, agent: 'nonsense' }).agent, 'plain');
 assert.throws(() => D.buildAgentIssue({ ...base, request: '  ' }), /Describe/);
 assert.throws(() => D.buildAgentIssue({ ...base, slug: '../x' }), /normal name/);
 assert.ok(D.buildAgentIssue({ ...base, request: 'x'.repeat(500) }).title.length < 100);
+const overview = 'analyze and tell me what this project is overall, a short quick explanation';
+for (const request of [overview, 'Review the code', 'Explain how to fix the errors', 'Analyze and make recommendations', 'Create a report', 'Fix the bug without modifying files', 'Read-only: analyze and fix nothing', 'What is this project?']) {
+  assert.equal(D.agentTaskMode(request), 'analysis', request);
+}
+for (const request of [base.request, 'Add more animals', 'Please fix the errors', 'Can you update the styles?', 'Analyze the source and fix the confirmed bugs']) {
+  assert.equal(D.agentTaskMode(request), 'change', request);
+}
+assert.equal(D.agentTaskMode('Fix the bug', 'analysis'), 'analysis');
+assert.equal(D.agentTaskMode('Improve the layout', 'change'), 'change');
+assert.throws(() => D.agentTaskMode(overview, 'invalid'), /valid task mode/);
+for (const agent of ['copilot', 'claude', 'codex', 'plain']) {
+  const issue = D.buildAgentIssue({ ...base, request: overview, agent });
+  assert.equal(issue.mode, 'analysis');
+  assert.match(issue.body, /Analyze and report \(read-only\)/);
+  assert.match(issue.body, /Do not edit any files/);
+  assert.match(issue.body, /Automatic findings are context to inspect/);
+  assert.doesNotMatch(issue.body, /Rules for the change|Edit only|After the change is merged/);
+  if (agent === 'copilot') assert.match(issue.agent_assignment.custom_instructions, /Read-only analysis/);
+  if (agent === 'claude' || agent === 'codex') {
+    assert.match(issue.comment, /without editing files/);
+    assert.doesNotMatch(issue.comment, /please implement|and open a pull request/);
+  }
+}
+assert.equal(cop.mode, 'change');
+assert.match(cop.body, /After the change is merged/);
+assert.match(cl.comment, /please implement/);
 assert.equal(D.pushBranchName('dad-chat', Date.UTC(2026, 9, 3, 7, 5)), 'weld/dad-chat-20261003-0705');
 
 // ---- gate -----------------------------------------------------------------------------

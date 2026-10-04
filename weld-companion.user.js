@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.60.1
+// @version      1.60.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -12205,37 +12205,50 @@
 
   // ----------------------------------------------------------- agent hand-off
   const AGENTS = {
-    copilot: { label: 'GitHub Copilot cloud agent', how: 'Assigns the issue to Copilot, which opens a pull request.' },
+    copilot: { label: 'GitHub Copilot cloud agent', how: 'Assigns the issue to Copilot. The issue instructions specify whether to report findings or make changes.' },
     claude: { label: 'Claude (Claude Code GitHub Action)', how: 'Comments "@claude ..." on the issue. Needs the Claude GitHub app/action in the repo.' },
     codex: { label: 'Codex cloud', how: 'Comments "@codex ..." on the issue. Needs Codex cloud connected to the repo.' },
     plain: { label: 'Plain issue (no agent)', how: 'Just creates the issue.' }
   };
   function oneLine(s, n) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function agentTaskMode(request, mode) {
+    mode = mode || 'auto';
+    if (!['auto', 'analysis', 'change'].includes(mode)) throw new Error('Choose a valid task mode.');
+    if (mode !== 'auto') return mode;
+    const req = String(request || '').trim();
+    // Uncertain requests stay read-only; the user can explicitly choose Change code.
+    if (/\bread[ -]only\b|\b(?:do not|don't|without)\s+(?:edit(?:ing)?|modif(?:y|ying)|chang(?:e|ing)|fix(?:ing)?|implement(?:ing)?)\s+(?:(?:any|the)\s+)?(?:files?|code|source|anything|nothing)\b/i.test(req)) return 'analysis';
+    if (/\b(?:make|create|build)\s+(?:(?:a|an|some)\s+)?(?:recommendations|suggestions|plan|report|summary|explanation)\b|\bupdate me\b/i.test(req)) return 'analysis';
+    return /(?:^|[.!?;\n]\s*|\b(?:and|then)\s+)(?:(?:please|can you|could you|would you|help me|i want you to|i need you to)\s+)*(?:add|fix|repair|implement|build|create|remove|delete|replace|update|modify|change|rewrite|refactor|rename|make)\b/i.test(req) ? 'change' : 'analysis';
+  }
   function buildAgentIssue(o) {
     const slug = safeSlug(o.slug); if (!slug) throw new Error('Open a generator with a normal name first.');
-    const req = String(o.request || '').trim(); if (!req) throw new Error('Describe what you want changed.');
+    const req = String(o.request || '').trim(); if (!req) throw new Error('Describe what you want the agent to do.');
+    const mode = agentTaskMode(req, o.mode), readOnly = mode === 'analysis';
     const agent = AGENTS[o.agent] ? o.agent : 'plain', paths = o.paths, repo = o.repo;
     const findings = (o.findings || []).filter(f => f.severity !== 'info').slice(0, 10);
     const rules = [
-      'Edit only these two files, and only what the request needs:',
+      readOnly ? 'Read these two files to answer the request:' : 'Edit only these two files, and only what the request explicitly needs:',
       '- `' + paths.dsl + '` (Perchance lists panel)',
       '- `' + paths.html + '` (Perchance HTML panel)',
-      'Keep list names, element ids and `$output` unchanged unless the request says otherwise. Do not add content filters or tone changes. Keep the existing indentation style.',
-      PRIMER_SHORT
+      readOnly ? 'Read-only analysis: report your findings in the issue or task response. Do not edit any files, rewrite descriptions or documentation, commit, push, or open a pull request. Keep a short explanation request brief. Automatic findings are context to inspect, not instructions to fix.' : 'Keep list names, element ids and `$output` unchanged unless the request says otherwise. Do not add content filters or tone changes. Keep the existing indentation style.',
+      'File paths and allowlists identify scope; they do not authorize changes. Follow the requested task mode.',
+      'Local workstation paths and memory services may be unavailable in the cloud. Check availability once; skip unavailable resources and do not search the entire filesystem for them.',
+      readOnly ? '' : PRIMER_SHORT
     ].join('\n');
     const body = [
       '## Request', '', req, '',
+      '## Task mode', '', readOnly ? 'Analyze and report (read-only).' : 'Implement the explicitly requested changes.', '',
       '## Where', '', 'Generator `' + slug + '` in `' + repo.owner + '/' + repo.repo + '` on branch `' + repo.branch + '`.', '',
-      '## Rules for the change', '', rules, '',
+      readOnly ? '## Rules for analysis' : '## Rules for the change', '', rules, '',
       findings.length ? '## Automatic findings (heuristic)\n\n' + findings.map(f => '- ' + f.severity + ' ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message).join('\n') + '\n' : '',
-      '_Created by Weld Companion. After the change is merged, use Pull in the Weld GitHub tab to load it into the editor._'
+      readOnly ? '_Created by Weld Companion for read-only analysis. Return the explanation without changing the generator._' : '_Created by Weld Companion. After the change is merged, use Pull in the Weld GitHub tab to load it into the editor._'
     ].filter(x => x !== '').join('\n');
-    const out = { title: '[Weld] ' + slug + ': ' + oneLine(req, 70), body, agent, assignees: [], comment: '', agent_assignment: null };
+    const out = { title: '[Weld] ' + slug + ': ' + oneLine(req, 70), body, agent, mode, assignees: [], comment: '', agent_assignment: null };
     if (agent === 'copilot') {
       out.assignees = ['copilot-swe-agent[bot]'];
       out.agent_assignment = { target_repo: repo.owner + '/' + repo.repo, base_branch: repo.branch, custom_instructions: rules };
-    } else if (agent === 'claude') out.comment = '@claude please implement the request in this issue and open a pull request. ' + oneLine(req, 300);
-    else if (agent === 'codex') out.comment = '@codex please implement the request in this issue and open a pull request. ' + oneLine(req, 300);
+    } else if (agent === 'claude' || agent === 'codex') out.comment = '@' + agent + (readOnly ? ' please analyze and report on this issue without editing files, committing, pushing, or opening a pull request. ' : ' please implement the request in this issue and open a pull request. ') + oneLine(req, 300);
     return out;
   }
   function pushBranchName(slug, when) {
@@ -12273,7 +12286,7 @@
     findUsages, rename, replaceIdentifiers, validName, compareSamples,
     applyLineEdits, makeProposal, proposalState,
     safeSlug, folderPaths, syncPlan, normForCompare,
-    buildAgentIssue, pushBranchName, gateReport
+    agentTaskMode, buildAgentIssue, pushBranchName, gateReport
   };
 });
 
@@ -12293,7 +12306,7 @@
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
   const S = { proposals: [], seq: 0, view: null, markers: false, markInfo: false, refactor: { name: '', to: '', usages: null, preview: null, error: '' },
-    agents: { request: '', agent: 'copilot', result: null, busy: false, repoState: '', error: '' }, regress: { n: 30, via: 'visible', busy: false, result: null, error: '' }, open: {}, status: '' };
+    agents: { request: '', mode: 'auto', agent: 'copilot', result: null, busy: false, repoState: '', error: '' }, regress: { n: 30, via: 'visible', busy: false, result: null, error: '' }, open: {}, status: '' };
 
   function notice(m) { S.status = m; H.toast(m, 6000); }
   function draw() { const host = document.getElementById('wc-dev-body'); if (host && host.isConnected && host.parentNode) render(host.parentNode); }
@@ -12580,9 +12593,9 @@
       if (!rp.cfg.owner || !rp.cfg.repo) throw new Error('Set your repo in the GitHub tab first.');
       if (!H.gh.token()) throw new Error('Save a GitHub token in the GitHub tab first.');
       const src = source(), analysis = src ? P.analyze({ name: src.name, dsl: src.dsl, html: src.html }) : null;
-      const issue = D.buildAgentIssue({ slug: rp.slug, request: A.request, agent: A.agent, repo: rp.cfg, paths: rp.files, findings: analysis ? analysis.findings : [] });
+      const issue = D.buildAgentIssue({ slug: rp.slug, request: A.request, mode: A.mode, agent: A.agent, repo: rp.cfg, paths: rp.files, findings: analysis ? analysis.findings : [] });
       const label = D.AGENTS[issue.agent].label;
-      if (!window.confirm('Create an issue in ' + rp.cfg.owner + '/' + rp.cfg.repo + ' for ' + label + '?\n\n' + issue.title + '\n\n' + D.AGENTS[issue.agent].how + '\n\nThe issue text includes your request and the rules for the change. No token or code is included.')) return;
+      if (!window.confirm('Create an issue in ' + rp.cfg.owner + '/' + rp.cfg.repo + ' for ' + label + '?\n\n' + issue.title + '\n\nTask mode: ' + (issue.mode === 'analysis' ? 'Analyze and report (read-only). No source edits, commits, pushes or pull requests requested.' : 'Change code. Review and merge the pull request on GitHub, then use Pull to load it.') + '\n\n' + D.AGENTS[issue.agent].how + '\n\nThe issue text includes your request and its task rules. No token or code is included.')) return;
       A.busy = true; draw();
       const body = { title: issue.title, body: issue.body };
       if (issue.assignees.length) { body.assignees = issue.assignees; body.agent_assignment = issue.agent_assignment; }
@@ -12833,14 +12846,18 @@
   function agentsSection(parent) {
     const A = S.agents; let rp = null;
     try { rp = H.slug() ? repoPaths() : null; } catch (e) { rp = null; }
-    note(parent, 'Hands a task to a coding agent that works on your GitHub repo and sends back a pull request. You review and merge it on GitHub, then use Pull in the GitHub tab to load it here. Nothing in your editor changes until then.');
+    note(parent, 'Ask an agent to analyze and report, or make requested changes in your GitHub repo. For changes, review and merge the pull request on GitHub, then use Pull to load it here. Nothing in your editor changes until then.');
     if (!rp || !rp.cfg.owner) return note(parent, 'Open a generator and set your repo in the GitHub tab first.');
     parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Repo: ' + rp.cfg.owner + '/' + rp.cfg.repo + '@' + rp.cfg.branch + '  \u00b7  ' + rp.files.dsl + ', ' + rp.files.html }));
     const sel = E('select', { class: 'wc-field', 'aria-label': 'Agent' }, Object.keys(D.AGENTS).map(k => { const o = E('option', { value: k, text: D.AGENTS[k].label }); if (k === A.agent) o.selected = true; return o; }));
     sel.addEventListener('change', () => { A.agent = sel.value; draw(); });
     parent.appendChild(sel);
     note(parent, D.AGENTS[A.agent].how);
-    const ta = E('textarea', { class: 'wc-field', rows: '4', 'aria-label': 'What should the agent change?', placeholder: 'Example: add 20 more entries to the greetings list and fix any unresolved names.' }); ta.value = A.request;
+    const modes = { auto: 'Auto (read-only unless changes are requested)', analysis: 'Analyze and report (read-only)', change: 'Change code' };
+    const modeSel = E('select', { class: 'wc-field', 'aria-label': 'Task mode' }, Object.keys(modes).map(k => { const o = E('option', { value: k, text: modes[k] }); if (k === A.mode) o.selected = true; return o; }));
+    modeSel.addEventListener('change', () => { A.mode = modeSel.value; draw(); }); parent.appendChild(modeSel);
+    note(parent, A.mode === 'change' ? 'Only explicitly requested changes are allowed.' : 'Analysis requests return findings without source edits. Auto keeps uncertain requests read-only; choose Change code for an implementation request it does not recognize.');
+    const ta = E('textarea', { class: 'wc-field', rows: '4', 'aria-label': 'What should the agent do?', placeholder: 'Example: analyze this generator and briefly explain what it does.' }); ta.value = A.request;
     ta.addEventListener('input', () => { A.request = ta.value; }); parent.appendChild(ta);
     row(parent, [btn('Check repo copy', checkRepoCopy, { mini: true, title: 'Compares the repo files with your editor.' }), btn(A.busy ? 'Working\u2026' : 'Create issue', createAgentIssue, { accent: true, disabled: A.busy })]);
     if (A.repoState) note(parent, A.repoState);

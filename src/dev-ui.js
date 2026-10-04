@@ -14,7 +14,7 @@
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
   const S = { proposals: [], seq: 0, view: null, markers: false, markInfo: false, refactor: { name: '', to: '', usages: null, preview: null, error: '' },
-    agents: { request: '', agent: 'copilot', result: null, busy: false, repoState: '', error: '' }, regress: { n: 30, via: 'visible', busy: false, result: null, error: '' }, open: {}, status: '' };
+    agents: { request: '', mode: 'auto', agent: 'copilot', result: null, busy: false, repoState: '', error: '' }, regress: { n: 30, via: 'visible', busy: false, result: null, error: '' }, open: {}, status: '' };
 
   function notice(m) { S.status = m; H.toast(m, 6000); }
   function draw() { const host = document.getElementById('wc-dev-body'); if (host && host.isConnected && host.parentNode) render(host.parentNode); }
@@ -301,9 +301,9 @@
       if (!rp.cfg.owner || !rp.cfg.repo) throw new Error('Set your repo in the GitHub tab first.');
       if (!H.gh.token()) throw new Error('Save a GitHub token in the GitHub tab first.');
       const src = source(), analysis = src ? P.analyze({ name: src.name, dsl: src.dsl, html: src.html }) : null;
-      const issue = D.buildAgentIssue({ slug: rp.slug, request: A.request, agent: A.agent, repo: rp.cfg, paths: rp.files, findings: analysis ? analysis.findings : [] });
+      const issue = D.buildAgentIssue({ slug: rp.slug, request: A.request, mode: A.mode, agent: A.agent, repo: rp.cfg, paths: rp.files, findings: analysis ? analysis.findings : [] });
       const label = D.AGENTS[issue.agent].label;
-      if (!window.confirm('Create an issue in ' + rp.cfg.owner + '/' + rp.cfg.repo + ' for ' + label + '?\n\n' + issue.title + '\n\n' + D.AGENTS[issue.agent].how + '\n\nThe issue text includes your request and the rules for the change. No token or code is included.')) return;
+      if (!window.confirm('Create an issue in ' + rp.cfg.owner + '/' + rp.cfg.repo + ' for ' + label + '?\n\n' + issue.title + '\n\nTask mode: ' + (issue.mode === 'analysis' ? 'Analyze and report (read-only). No source edits, commits, pushes or pull requests requested.' : 'Change code. Review and merge the pull request on GitHub, then use Pull to load it.') + '\n\n' + D.AGENTS[issue.agent].how + '\n\nThe issue text includes your request and its task rules. No token or code is included.')) return;
       A.busy = true; draw();
       const body = { title: issue.title, body: issue.body };
       if (issue.assignees.length) { body.assignees = issue.assignees; body.agent_assignment = issue.agent_assignment; }
@@ -554,14 +554,18 @@
   function agentsSection(parent) {
     const A = S.agents; let rp = null;
     try { rp = H.slug() ? repoPaths() : null; } catch (e) { rp = null; }
-    note(parent, 'Hands a task to a coding agent that works on your GitHub repo and sends back a pull request. You review and merge it on GitHub, then use Pull in the GitHub tab to load it here. Nothing in your editor changes until then.');
+    note(parent, 'Ask an agent to analyze and report, or make requested changes in your GitHub repo. For changes, review and merge the pull request on GitHub, then use Pull to load it here. Nothing in your editor changes until then.');
     if (!rp || !rp.cfg.owner) return note(parent, 'Open a generator and set your repo in the GitHub tab first.');
     parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Repo: ' + rp.cfg.owner + '/' + rp.cfg.repo + '@' + rp.cfg.branch + '  \u00b7  ' + rp.files.dsl + ', ' + rp.files.html }));
     const sel = E('select', { class: 'wc-field', 'aria-label': 'Agent' }, Object.keys(D.AGENTS).map(k => { const o = E('option', { value: k, text: D.AGENTS[k].label }); if (k === A.agent) o.selected = true; return o; }));
     sel.addEventListener('change', () => { A.agent = sel.value; draw(); });
     parent.appendChild(sel);
     note(parent, D.AGENTS[A.agent].how);
-    const ta = E('textarea', { class: 'wc-field', rows: '4', 'aria-label': 'What should the agent change?', placeholder: 'Example: add 20 more entries to the greetings list and fix any unresolved names.' }); ta.value = A.request;
+    const modes = { auto: 'Auto (read-only unless changes are requested)', analysis: 'Analyze and report (read-only)', change: 'Change code' };
+    const modeSel = E('select', { class: 'wc-field', 'aria-label': 'Task mode' }, Object.keys(modes).map(k => { const o = E('option', { value: k, text: modes[k] }); if (k === A.mode) o.selected = true; return o; }));
+    modeSel.addEventListener('change', () => { A.mode = modeSel.value; draw(); }); parent.appendChild(modeSel);
+    note(parent, A.mode === 'change' ? 'Only explicitly requested changes are allowed.' : 'Analysis requests return findings without source edits. Auto keeps uncertain requests read-only; choose Change code for an implementation request it does not recognize.');
+    const ta = E('textarea', { class: 'wc-field', rows: '4', 'aria-label': 'What should the agent do?', placeholder: 'Example: analyze this generator and briefly explain what it does.' }); ta.value = A.request;
     ta.addEventListener('input', () => { A.request = ta.value; }); parent.appendChild(ta);
     row(parent, [btn('Check repo copy', checkRepoCopy, { mini: true, title: 'Compares the repo files with your editor.' }), btn(A.busy ? 'Working\u2026' : 'Create issue', createAgentIssue, { accent: true, disabled: A.busy })]);
     if (A.repoState) note(parent, A.repoState);
