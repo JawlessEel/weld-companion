@@ -65,7 +65,7 @@ assert.doesNotMatch(instructionSource, /aiHelperInputEl/);
 
 // Exercise actual asynchronous request and review handlers without a browser.
 let pending, aborts = 0, writes = 0, throwsOnStart = false;
-let provider = 'localai', nativeRequest = '', nativeFailure = false;
+let provider = 'localai', nativeRequest = '', nativeFailure = false, lastUser = '';
 let doc = 'original';
 const view = {};
 const roots = [];
@@ -90,6 +90,7 @@ const runtime = load(
     callOwnAI(cfg, sys, user, callback, json, maxTokens) {
       if (throwsOnStart) throw new Error('transport unavailable');
       assert.equal(maxTokens, 8192);
+      lastUser = user;
       pending = callback;
       return { abort() { aborts++; } };
     },
@@ -112,6 +113,15 @@ assert.equal(state.busy, true);
 pending(null, 'new answer');
 assert.equal(state.response, 'new answer');
 assert.equal(state.busy, false);
+state.prompt = 'Explain that answer';
+runtime.aiAskWorkspace();
+assert.match(lastUser, /USER:\nretry\nASSISTANT:\nnew answer/);
+assert.match(lastUser, /CURRENT USER MESSAGE:\nExplain that answer/);
+pending('Server unavailable', null);
+assert.equal(state.history.length, 1, 'failed requests do not enter conversation history');
+runtime.aiStopWorkspace(true);
+assert.equal(state.history.length, 0, 'Clear starts a new conversation');
+state.prompt = 'retry'; state.response = 'new answer';
 throwsOnStart = true;
 runtime.aiAskWorkspace();
 assert.equal(state.busy, false, 'synchronous errors release the busy state');
@@ -126,6 +136,20 @@ nativeFailure = true;
 assert.equal(runtime.aiAskWorkspace(), false);
 assert.match(state.status, /Native input missing/);
 provider = 'localai';
+
+const conversation = load(['AI_WORKSPACE', 'aiConversationPrompt', 'aiRememberTurn'], between('var AI_WORKSPACE =', 'function aiStopWorkspace('), { genName: () => 'one' });
+const chatCfg = { provider: 'localai', models: { localai: 'model-a' } };
+conversation.aiConversationPrompt('first', chatCfg);
+for (let i = 0; i < 10; i++) conversation.aiRememberTurn('question ' + i, 'reply ' + i);
+assert.equal(conversation.AI_WORKSPACE.history.length, 6);
+assert.match(conversation.aiConversationPrompt('next', chatCfg), /question 9/);
+assert.doesNotMatch(conversation.aiConversationPrompt('next', chatCfg), /question 0/);
+conversation.aiRememberTurn('large', 'x'.repeat(25000));
+assert.equal(conversation.AI_WORKSPACE.history.length, 0, 'oversized exchanges cannot overflow the conversation budget');
+conversation.aiRememberTurn('private local question', 'local answer');
+assert.equal(conversation.aiConversationPrompt('other model', { provider: 'openai' }), 'other model', 'history is not sent to a different provider');
+conversation.aiRememberTurn('other question', 'other answer');
+assert.equal(conversation.aiConversationPrompt('changed model', chatCfg), 'changed model');
 
 // Test the real native adapter with both current and legacy helper controls.
 let nativeInput, nativePanel, nativeToggle, drawerCloses = 0, toggles = 0, workspaceOpens = 0, routed = 0;

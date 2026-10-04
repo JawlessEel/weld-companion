@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.60.2-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.61.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -262,6 +262,8 @@ The **🛠 Tools** tab holds self-contained tool cards.
 #### 🤖 AI Helper
 
 The AI Helper is now a **review-first project workspace**. It can explain a generator, debug a failure, or propose DSL/HTML changes without silently replacing either editor pane.
+
+**Tools → Model chat** puts your message box and the model's visible reply first, with **Model connection and AI settings** beneath them. Choose Local — OpenAI-compatible for LM Studio, Ollama, or a configured cloud provider. The panel shows which model receives your message. Follow-ups include up to six recent completed exchanges within a 24,000-character history budget; failed or stopped requests are excluded. Recent conversation is expandable, and Clear cancels any request and starts fresh. History stays in memory for this page session and resets before sending to a different generator, provider, model, or endpoint. Editor context is selected separately for each request. Built-in Perchance still uses its native message and reply panel.
 
 Version 1.55.1 adds **Stop**, cancellation when clearing, and a configurable **Maximum output tokens** setting (256–32768, default 4096). The last reply stays available if a new request fails or is stopped. Replies cut off by a provider's token limit are reported as incomplete. Workspace text survives closing and reopening the drawer in the same page session; it is not saved across page reloads.
 

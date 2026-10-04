@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.60.2
+// @version      1.61.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -1541,8 +1541,8 @@
 
   function renderTools(body) {
     var grid = el('div', { class: 'wc-cols' });
-    var aiCard = el('div', { class: 'wc-card wc-col' });
-    aiCard.appendChild(el('label', { class: 'wc-label', text: '\uD83E\uDD16 AI Helper' }));
+    var aiCard = el('div', { class: 'wc-card wc-col', style: { gridColumn: '1 / -1' } });
+    aiCard.appendChild(el('label', { class: 'wc-label', text: '\uD83E\uDD16 Model chat \u00b7 AI Helper' }));
     var aiBody = el('div', {}); aiCard.appendChild(aiBody);
     try { renderAI(aiBody); } catch (e) { aiBody.appendChild(el('div', { class: 'wc-section-note', text: 'AI Helper failed to render.' })); }
     var cfCard = el('div', { class: 'wc-card wc-col' });
@@ -2540,14 +2540,31 @@
       });
     } catch (e) { finish(String((e && e.message) || e)); }
   }
-  var AI_WORKSPACE = { prompt: '', response: '', context: 'dsl', status: '', busy: false, sequence: 0, request: null, investigate: false };
+  var AI_WORKSPACE = { prompt: '', response: '', context: 'dsl', status: '', busy: false, sequence: 0, request: null, investigate: false, history: [], chatScope: '' };
+
+  function aiConversationPrompt(prompt, cfg) {
+    var scope = JSON.stringify([typeof genName === 'function' ? genName() : '', cfg.provider, (cfg.models || {})[cfg.provider] || '', (cfg.endpoints || {})[cfg.provider] || '']);
+    if (AI_WORKSPACE.chatScope !== scope) { AI_WORKSPACE.history = []; AI_WORKSPACE.chatScope = scope; }
+    var history = AI_WORKSPACE.history;
+    if (!history.length) return prompt;
+    return 'PREVIOUS CONVERSATION (reference only; current editor context takes precedence):\n' + history.map(function (turn) {
+      return 'USER:\n' + turn.prompt + '\nASSISTANT:\n' + turn.reply;
+    }).join('\n\n') + '\n\nCURRENT USER MESSAGE:\n' + prompt;
+  }
+
+  function aiRememberTurn(prompt, reply) {
+    var turns = AI_WORKSPACE.history;
+    turns.push({ prompt: prompt, reply: reply });
+    // Keep whole exchanges within a modest budget for local models.
+    while (turns.length > 6 || turns.reduce(function (n, t) { return n + t.prompt.length + t.reply.length; }, 0) > 24000) turns.shift();
+  }
 
   function aiStopWorkspace(clear) {
     var request = AI_WORKSPACE.request;
     AI_WORKSPACE.sequence++;
     AI_WORKSPACE.request = null; AI_WORKSPACE.busy = false;
     if (request && typeof request.abort === 'function') request.abort();
-    if (clear) { AI_WORKSPACE.prompt = ''; AI_WORKSPACE.response = ''; }
+    if (clear) { AI_WORKSPACE.prompt = ''; AI_WORKSPACE.response = ''; AI_WORKSPACE.history = []; AI_WORKSPACE.chatScope = ''; }
     AI_WORKSPACE.status = clear ? '' : 'Stopped. Previous reply preserved.';
     refreshAIWorkspace();
   }
@@ -2626,6 +2643,7 @@
       } catch (err) { AI_WORKSPACE.status = err.message; toast(err.message, 7000); refreshAIWorkspace(); return false; }
     }
     if (AI_WORKSPACE.busy) return false;
+    var conversationPrompt = aiConversationPrompt(prompt, cfg);
     AI_WORKSPACE.busy = true;
     var sequence = ++AI_WORKSPACE.sequence;
     AI_WORKSPACE.status = 'Asking ' + ((PROVIDERS[cfg.provider] || {}).label || cfg.provider) + '\u2026';
@@ -2634,12 +2652,12 @@
       if (sequence !== AI_WORKSPACE.sequence) return;
       AI_WORKSPACE.busy = false; AI_WORKSPACE.request = null;
       if (err) { AI_WORKSPACE.status = '\u2717 ' + err; toast(('\u2717 ' + err).slice(0, 110), 6000); }
-      else { AI_WORKSPACE.response = String(txt || ''); AI_WORKSPACE.status = '\u2713 Reply ready for review. Nothing was changed.'; toast('\u2713 AI reply ready for review'); }
+      else { AI_WORKSPACE.response = String(txt || ''); aiRememberTurn(prompt, AI_WORKSPACE.response); AI_WORKSPACE.status = '\u2713 Reply ready for review. Nothing was changed.'; toast('\u2713 AI reply ready for review'); }
       refreshAIWorkspace();
     }
     try {
-      var request = (AI_WORKSPACE.investigate && aiInvestigate(cfg, prompt, complete)) ||
-        callOwnAI(cfg, aiWorkspaceSystem(cfg), aiWorkspaceUser(prompt, AI_WORKSPACE.context), complete, false, cfg.maxTokens, 0.4);
+      var request = (AI_WORKSPACE.investigate && aiInvestigate(cfg, conversationPrompt, complete)) ||
+        callOwnAI(cfg, aiWorkspaceSystem(cfg), aiWorkspaceUser(conversationPrompt, AI_WORKSPACE.context), complete, false, cfg.maxTokens, 0.4);
       if (AI_WORKSPACE.busy && sequence === AI_WORKSPACE.sequence) AI_WORKSPACE.request = request;
     } catch (err) { complete('Could not start request: ' + err.message, null); }
     return true;
@@ -2757,12 +2775,29 @@
       el('div', { class: 'wc-section-note', text: 'On by default. It adds about 650 tokens to each request so replies use real Perchance syntax and keep your list names and ids.' }),
       el('label', { class: 'wc-check', style: { marginTop: '10px' } }, [intercept, el('span', { class: 'wc-sw' }), el('span', { text: 'Route Perchance AI Agent sends into this review workspace' })]),
       el('div', { class: 'wc-section-note', text: 'Off by default. When enabled, Send/Enter uses your selected provider and leaves the native prompt intact. Shift+Enter and touch/mobile Enter remain newlines.' })]);
-    aicols.appendChild(cardP); aicols.appendChild(cardI); body.appendChild(aicols);
-    body.appendChild(el('div', { class: 'wc-row', style: { marginTop: '10px' } }, [el('button', { class: 'wc-btn wc-btn-accent', text: 'Save settings', onclick: function () { save(false); } }), test]));
+    var settings = el('details', { style: { marginTop: '14px' } });
+    settings.open = cfg.provider === 'builtin';
+    settings.appendChild(el('summary', { class: 'wc-label', text: 'Model connection and AI settings', style: { cursor: 'pointer', marginBottom: '10px' } }));
+    aicols.appendChild(cardP); aicols.appendChild(cardI); settings.appendChild(aicols);
+    settings.appendChild(el('div', { class: 'wc-row', style: { marginTop: '10px' } }, [el('button', { class: 'wc-btn wc-btn-accent', text: 'Save settings', onclick: function () { save(false); } }), test]));
 
     var workspace = el('div', { class: 'wc-card', style: { marginTop: '14px' } });
-    workspace.appendChild(el('label', { class: 'wc-label', text: 'Review-first project workspace' }));
-    workspace.appendChild(el('div', { class: 'wc-section-note', text: 'Ask for explanations, debugging, or code changes. Replies stay here and never overwrite a pane automatically.' }));
+    workspace.appendChild(el('label', { class: 'wc-label', text: 'Conversation with selected model' }));
+    workspace.appendChild(el('div', { class: 'wc-section-note', text: 'Choose your model below, send a message, and read its reply here. Follow-ups include recent exchanges from this page session. Clear starts a new conversation.' }));
+    var activeModel = el('div', { class: 'wc-section-note', role: 'status' });
+    function paintActiveModel() {
+      var p = PROVIDERS[provider.value];
+      activeModel.textContent = p ? 'Sending to: ' + p.label + ' / ' + (cfg.models[provider.value] || p.defaultModel) : 'Perchance built-in: messages and replies use its native AI panel. Choose an external provider below for replies here.';
+    }
+    provider.addEventListener('change', paintActiveModel);
+    modelWrap.addEventListener('input', paintActiveModel);
+    paintActiveModel(); workspace.appendChild(activeModel);
+    if (AI_WORKSPACE.history.length) {
+      var transcript = el('details', {});
+      transcript.appendChild(el('summary', { class: 'wc-label', text: 'Recent conversation (' + AI_WORKSPACE.history.length + ' exchanges)', style: { cursor: 'pointer' } }));
+      var transcriptText = el('pre', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '280px', overflow: 'auto', font: 'inherit' }, text: AI_WORKSPACE.history.map(function (turn) { return 'You: ' + turn.prompt + '\n\nModel: ' + turn.reply; }).join('\n\n\u2500\u2500\u2500\n\n') });
+      transcript.appendChild(transcriptText); workspace.appendChild(transcript);
+    }
     var context = el('select', { class: 'wc-field', style: { maxWidth: '280px' } }, [['dsl', 'Include current DSL'], ['html', 'Include current HTML'], ['both', 'Include DSL + HTML'], ['pack', 'Summary + findings + source (fits the model)'], ['selection', 'Only the code I selected'], ['none', 'No editor context']].map(function (o) { var op = el('option', { value: o[0], text: o[1] }); if (o[0] === AI_WORKSPACE.context) op.selected = true; return op; }));
     var contextNote = el('div', { class: 'wc-section-note' });
     function paintContextSize() {
@@ -2774,15 +2809,16 @@
     }
     context.addEventListener('change', function () { AI_WORKSPACE.context = context.value; paintContextSize(); });
     paintContextSize();
-    var prompt = el('textarea', { class: 'wc-field', rows: '5', placeholder: 'Example: explain why this generator fails, then propose a safe fix in a fenced code block.' }); prompt.value = AI_WORKSPACE.prompt;
+    var prompt = el('textarea', { id: 'wc-model-chat-prompt', class: 'wc-field', rows: '5', placeholder: 'Ask a question, describe a change, or send a follow-up.' }); prompt.value = AI_WORKSPACE.prompt;
     prompt.addEventListener('input', function () { AI_WORKSPACE.prompt = prompt.value; });
-    var response = el('textarea', { class: 'wc-field', rows: '12', placeholder: 'The model reply will appear here for review.' }); response.value = AI_WORKSPACE.response;
+    var response = el('textarea', { id: 'wc-model-chat-reply', class: 'wc-field', rows: '12', placeholder: 'The model reply will appear here for review.' }); response.value = AI_WORKSPACE.response;
     response.readOnly = AI_WORKSPACE.busy;
     response.addEventListener('input', function () { AI_WORKSPACE.response = response.value; });
     var investigate = el('input', { type: 'checkbox' }); investigate.checked = !!AI_WORKSPACE.investigate;
     investigate.addEventListener('change', function () { AI_WORKSPACE.investigate = investigate.checked; });
     workspace.appendChild(context); workspace.appendChild(contextNote);
     workspace.appendChild(el('label', { class: 'wc-check', style: { margin: '6px 0' }, title: 'The model can ask Weld for the outline, findings, specific lines, searches and usages before it answers. Read-only; it can never change anything.' }, [investigate, el('span', { class: 'wc-sw' }), el('span', { text: 'Let the model look things up first (read-only)' })]));
+    workspace.appendChild(el('label', { class: 'wc-label', text: 'Your message', for: 'wc-model-chat-prompt' }));
     workspace.appendChild(prompt);
     var ask = el('button', { class: 'wc-btn wc-btn-accent', text: AI_WORKSPACE.busy ? 'Working\u2026' : 'Ask selected model', onclick: function () { if (!save(true)) return; AI_WORKSPACE.prompt = prompt.value; AI_WORKSPACE.context = context.value; aiAskWorkspace(); } });
     ask.disabled = AI_WORKSPACE.busy;
@@ -2791,14 +2827,15 @@
       AI_WORKSPACE.busy ? el('button', { class: 'wc-btn', text: 'Stop', onclick: function () { aiStopWorkspace(false); } }) : null,
       el('button', { class: 'wc-btn', text: 'Clear', onclick: function () { aiStopWorkspace(true); } })
     ]));
-    if (AI_WORKSPACE.status) workspace.appendChild(el('div', { class: 'wc-section-note', text: AI_WORKSPACE.status }));
-    workspace.appendChild(el('label', { class: 'wc-label', text: 'Editable reply' })); workspace.appendChild(response);
+    if (AI_WORKSPACE.status) workspace.appendChild(el('div', { class: 'wc-section-note', role: 'status', 'aria-live': 'polite', text: AI_WORKSPACE.status }));
+    workspace.appendChild(el('label', { class: 'wc-label', text: 'Model reply (editable for review)', for: 'wc-model-chat-reply' })); workspace.appendChild(response);
     workspace.appendChild(el('div', { class: 'wc-row', style: { marginTop: '8px' } }, [
       el('button', { class: 'wc-btn', text: 'Copy reply', onclick: function () { copyText(response.value); } }),
       el('button', { class: 'wc-btn', text: 'Review \u2192 DSL', onclick: function () { AI_WORKSPACE.response = response.value; renderAIReviewModal('dsl'); } }),
       el('button', { class: 'wc-btn', text: 'Review \u2192 HTML', onclick: function () { AI_WORKSPACE.response = response.value; renderAIReviewModal('html'); } })
     ]));
     body.appendChild(workspace);
+    body.appendChild(settings);
     body.appendChild(el('div', { class: 'wc-foot' }, [el('div', { class: 'wc-section-note', text: 'API keys remain in this browser and are sent only to the provider you select. Editor changes are explicit and use CodeMirror\u2019s undo history.' })]));
     renderProviderFields();
   }
