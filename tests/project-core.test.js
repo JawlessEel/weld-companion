@@ -139,6 +139,64 @@ const closedAnalysis = P.analyze({ dsl: 'output\n  hello\n', html: closedHtml })
 assert.equal(closedAnalysis.findings.filter(f => f.id === 'html-unresolved-ref').length, 2, 'real markup references on both sides remain checked');
 assert.ok(!P.analyzeHtml('<style>p { color: var(--palette[k]); }').squareRefs.length);
 
+// Scope-aware overlap and duplicate-ID triage: overlapping names alone do not prove a defect.
+const overlapDsl = 'output\n  hello\nspecies = {import:species-data}\nlocation = {import:location-data}\nseed = 1\n';
+const overlaps = P.analyze({ dsl: overlapDsl, html: '<select id="species"></select><div id="location"></div><script>const selected = document.getElementById("species").value; const prompt = species[selected]?.prompt; window.location.reload();</script>' });
+assert.equal(overlaps.counts.warn, 0);
+assert.equal(overlaps.findings.filter(f => f.id === 'id-collision' && f.severity === 'info').length, 2);
+const duplicate = source => P.analyze({ dsl: 'output\n  OK\n', html: '<div id="pad"></div><div id="pad"></div>' + source });
+assert.equal(duplicate('<style>#pad { color: red; }</style>').findings.find(f => f.id === 'duplicate-id').severity, 'info');
+assert.equal(duplicate('<script>document.querySelectorAll("#pad").forEach(x => x.hidden = true);</script>').findings.find(f => f.id === 'duplicate-id').severity, 'info');
+for (const source of ['<script>document.getElementById("pad").hidden = true;</script>', '<script>document.querySelector("#pad").hidden = true;</script>', '<label for="pad">Pad</label>', '<button aria-describedby="pad">Go</button>', '<a href="#pad">Go</a>', '<p>[pad]</p>', '<button onclick="document.getElementById(&quot;pad&quot;).hidden=true">Go</button>']) {
+  assert.equal(duplicate(source).findings.find(f => f.id === 'duplicate-id').severity, 'warn', source);
+}
+for (const source of ['<script>const text = "document.getElementById(\\\"pad\\\")";</script>', '<script>// document.getElementById("pad")\nconst x=1; /* document.querySelector("#pad") */</script>', '<!-- <label for="pad">Not live</label> -->', '<script>function f(document) { document.getElementById("pad"); }</script>', '<p>for="pad" is sample text</p>', '<div data-note=\'for="pad"\'></div>', '<script>document.querySelector(\'[data-label="#pad"]\');</script>']) {
+  assert.equal(duplicate(source).findings.find(f => f.id === 'duplicate-id').severity, 'info', source);
+}
+assert.deepEqual(P.analyzeHtml('<!-- <div id="pad"></div><script>location.reload()</script> --><div id="pad"></div>').duplicateIds, []);
+
+const globals = code => P.analyze({ dsl: overlapDsl, html: '<script>' + code + '</script>' }).findings.filter(f => f.id === 'browser-global-shadow');
+assert.equal(globals('setTimeout(() => location.reload(), 3000);').length, 1);
+assert.equal(globals('location.href = "/next";').length, 1);
+assert.equal(globals('window.location.reload(); globalThis.location.reload();').length, 0);
+assert.equal(globals('const text = "location.reload()"; // location.href\n/* location.reload() */ const regex=/location.reload()/; const template=`location.reload()`;').length, 0);
+assert.equal(globals('function f(location) { location.reload(); }').length, 0);
+assert.equal(globals('function f(location) { location.reload(); } location.reload();').length, 1, 'a parameter does not hide a later global use');
+assert.equal(globals('function f() { const location = {}; location.reload(); } location.reload();').length, 1, 'a nested declaration does not hide a later global use');
+assert.equal(globals('const a = location => location.reload(); const b = (location) => location.reload();').length, 0);
+assert.equal(globals('const location = {reload(){}}; location.reload();').length, 0);
+assert.equal(globals('const other = 1, location = {}; location.reload();').length, 0);
+assert.equal(globals('const obj = {location:{reload(){}}}; obj.location.reload();').length, 0);
+assert.equal(globals('const ratio = 10 / 2; location.reload();').length, 1, 'division must not mask later code as a regex');
+assert.equal(P.analyze({ dsl: 'output\n  OK\n', html: '<script>location.reload()</script>' }).findings.filter(f => f.id === 'browser-global-shadow').length, 0);
+assert.equal(P.analyze({ dsl: overlapDsl, html: '<button onclick="location.reload()">Go</button>' }).findings.filter(f => f.id === 'browser-global-shadow').length, 1);
+assert.equal(P.analyze({ dsl: overlapDsl + 'reloadPage() =>\n  location.reload();\n' }).findings.filter(f => f.id === 'browser-global-shadow').length, 1);
+assert.equal(P.analyze({ dsl: overlapDsl + 'reloadPage(location) =>\n  location.reload();\n' }).findings.filter(f => f.id === 'browser-global-shadow').length, 0);
+assert.equal(P.analyze({ dsl: 'location = {import:places}\noutput\n  [location.reload()]\n' }).findings.filter(f => f.id === 'browser-global-shadow').length, 1);
+assert.equal(P.analyze({ dsl: 'location = {import:places}\noutput\n  [window.location.reload()]\n' }).findings.filter(f => f.id === 'browser-global-shadow').length, 0);
+assert.equal(P.analyze({ dsl: overlapDsl, html: '<button onclick="species.value">Go</button><select id="species"></select>' }).findings.filter(f => f.id === 'implicit-element-ref').length, 1);
+
+const inline = html => P.analyze({ dsl: 'output\n  OK\n', html }).findings.filter(f => f.id === 'inline-module-write');
+assert.equal(inline('<script>let seed=1;</script><input oninput="seed=this.value">').length, 0, 'classic global lexical bindings are visible to handlers');
+assert.equal(inline('<script type="module">let seed=1;</script><input oninput="seed=this.value">').length, 1);
+assert.equal(inline('<script type="module">let seed=1;</script><input oninput="let seed; seed=this.value">').length, 0);
+assert.equal(inline('<script type="module">let seed=1;</script><input oninput="window.seed=this.value">').length, 0);
+assert.equal(inline('<script type="module">let seed=1;</script><input oninput="seed===this.value">').length, 0);
+assert.equal(P.analyze({ dsl: overlapDsl, html: '<script type="module">let seed=1;</script><input oninput="seed=this.value">' }).findings.filter(f => f.id === 'inline-module-write').length, 0, 'Perchance data with the same name is a distinct intentional interface');
+
+// Suppressions are explicit, target one rule/name, and stay auditable. Strings cannot suppress rules.
+const suppressed = P.analyze({ dsl: overlapDsl, html: '<!-- weld-ignore: browser-global-shadow location --><script>location.reload();</script>' });
+assert.equal(suppressed.findings.filter(f => f.id === 'browser-global-shadow').length, 0);
+assert.equal(suppressed.suppressedFindings.length, 1);
+assert.equal(suppressed.suppressedFindings[0].suppressionLine, 1);
+const notSuppressed = P.analyze({ dsl: overlapDsl, html: '<script>const text="<!-- weld-ignore: browser-global-shadow location -->"; location.reload();</script>' });
+assert.equal(notSuppressed.findings.filter(f => f.id === 'browser-global-shadow').length, 1);
+assert.equal(notSuppressed.suppressedFindings.length, 0);
+assert.equal(P.analyze({ dsl: overlapDsl, html: '<div data-note="<!-- weld-ignore: browser-global-shadow location -->"></div><script>location.reload();</script>' }).findings.filter(f => f.id === 'browser-global-shadow').length, 1);
+assert.equal(duplicate('<!-- weld-ignore: duplicate-id pad -->').findings.filter(f => f.id === 'duplicate-id').length, 0);
+assert.equal(duplicate('<!-- weld-ignore: duplicate-id other -->').findings.filter(f => f.id === 'duplicate-id').length, 1);
+assert.ok(P.analyze({ dsl: 'output\n  OK\n', html: '<!-- weld-ignore: id-collision missing --><p>[missing]</p>' }).findings.some(f => f.id === 'html-unresolved-ref'));
+
 // ---- dependencies ----------------------------------------------------------
 const deps = P.normalizeDeps({ success: true, generators: {
   top: { name: 'top', imports: ['a', 'b', 'top'], code: 'x'.repeat(10), lastEditTime: 5 },

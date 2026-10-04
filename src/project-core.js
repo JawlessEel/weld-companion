@@ -348,21 +348,174 @@
   // ------------------------------------------------------------- HTML panel
   function htmlRegions(html) {
     html = String(html || '');
-    const scripts = [], styles = [];
+    const scripts = [], styles = [], comments = [];
     let masked = html;
     // HTML raw-text elements may run to EOF without an explicit closing tag.
-    const re = /<(script|style)\b([^>]*)>([\s\S]*?)(?:<\/\1\s*>|$)/gi; let m;
+    const re = /<!--[\s\S]*?(?:-->|$)|<(script|style)\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)(?:<\/\1\s*>|$)|<[A-Za-z](?:[^>"']|"[^"]*"|'[^']*')*>/gi; let m;
     while ((m = re.exec(html))) {
+      if (!m[1]) {
+        if (!m[0].startsWith('<!--')) continue;
+        comments.push({ text: m[0], start: m.index });
+        masked = masked.slice(0, m.index) + m[0].replace(/[^\n]/g, ' ') + masked.slice(m.index + m[0].length);
+        continue;
+      }
       const attrs = m[2] || '', bodyStart = m.index + m[0].indexOf('>') + 1, code = m[3];
       const typeM = /\btype\s*=\s*["']?([^\s"'>]+)/i.exec(attrs), srcM = /\bsrc\s*=\s*["']?([^\s"'>]+)/i.exec(attrs);
       const rec = { start: bodyStart, end: bodyStart + code.length, code, line: lineOf(html, bodyStart), type: typeM ? typeM[1].toLowerCase() : '', src: srcM ? srcM[1] : '' };
       (m[1].toLowerCase() === 'script' ? scripts : styles).push(rec);
       masked = masked.slice(0, bodyStart) + code.replace(/[^\n]/g, ' ') + masked.slice(bodyStart + code.length);
     }
-    return { scripts, styles, masked };
+    return { scripts, styles, comments, masked };
   }
   const JS_TYPES = /^(|text\/javascript|application\/javascript|module)$/;
   function isJsScript(s) { return JS_TYPES.test(s.type); }
+
+  // Conservative lexical checks, not a full JavaScript parser. Keep token offsets for line numbers.
+  // Strings, comments, regexes and template literals are data, never executable lookup evidence.
+  function scopeTokens(code) {
+    const out = []; let i = 0;
+    while (i < code.length) {
+      const start = i, c = code[i], prev = out[out.length - 1];
+      if (/\s/.test(c)) { i++; continue; }
+      if (c === '/' && code[i + 1] === '/') { while (i < code.length && code[i] !== '\n') i++; continue; }
+      if (c === '/' && code[i + 1] === '*') { const end = code.indexOf('*/', i + 2); i = end < 0 ? code.length : end + 2; continue; }
+      if (c === '"' || c === "'" || c === '`') {
+        const quote = c; let value = ''; i++;
+        while (i < code.length && code[i] !== quote) {
+          if (code[i] === '\\') { i++; if (i < code.length) value += code[i++]; }
+          else value += code[i++];
+        }
+        i++; out.push({ value, kind: quote === '`' ? 'template' : 'string', index: start }); continue;
+      }
+      if (c === '/' && (!prev || /^(?:[=(:,;!{\[?]|=>|return|throw|case)$/.test(prev.value))) {
+        let square = false; i++;
+        while (i < code.length) {
+          const x = code[i++]; if (x === '\\') { i++; continue; }
+          if (x === '[') square = true; else if (x === ']') square = false;
+          else if (x === '/' && !square) break;
+        }
+        while (/[a-z]/i.test(code[i] || '') && i < code.length) i++;
+        out.push({ value: '/', kind: 'regex', index: start }); continue;
+      }
+      if (/[A-Za-z_$]/.test(c)) { i++; while (i < code.length && /[\w$]/.test(code[i])) i++; out.push({ value: code.slice(start, i), kind: 'name', index: start }); continue; }
+      const pair = code.slice(i, i + 2); i += pair === '=>' || pair === '?.' ? 2 : 1;
+      out.push({ value: i - start === 2 ? pair : c, kind: 'punct', index: start });
+    }
+    return out;
+  }
+  function scopeFacts(code) {
+    const tokens = scopeTokens(code), pairs = new Map(), stack = [], bindings = [], functions = [];
+    tokens.forEach((t, i) => {
+      if (t.kind !== 'punct') return;
+      if ('([{'.includes(t.value)) stack.push(i);
+      else if (')]}'.includes(t.value) && stack.length) { const open = stack.pop(); pairs.set(open, i); }
+    });
+    const blocks = [{ start: -1, end: tokens.length }];
+    pairs.forEach((end, start) => { if (tokens[start].value === '{') blocks.push({ start, end }); });
+    const blockAt = i => blocks.filter(b => b.start < i && b.end >= i).sort((a, b) => b.start - a.start)[0];
+    function bodyAt(i) {
+      if (tokens[i]?.value === '{') return { start: i, end: pairs.get(i) || tokens.length };
+      let end = i;
+      while (end < tokens.length && ![',', ';', ')', '}'].includes(tokens[end].value)) {
+        if (pairs.has(end)) end = pairs.get(end); end++;
+      }
+      return { start: i - 1, end };
+    }
+    tokens.forEach((t, i) => {
+      if (t.value === '(' && pairs.has(i)) {
+        const close = pairs.get(i), next = tokens[close + 1]?.value, before = tokens[i - 1];
+        const fn = before?.value === 'function' || tokens[i - 2]?.value === 'function';
+        const method = before?.kind === 'name' && !['if', 'for', 'while', 'switch', 'with'].includes(before.value) && next === '{';
+        if (!fn && !method && next !== '=>') return;
+        const body = bodyAt(close + (next === '=>' ? 2 : 1));
+        const names = splitTop(code.slice(t.index + 1, tokens[close].index), ',')
+          .map(x => /^\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)\s*(?:=|$)/.exec(x)?.[1]).filter(Boolean);
+        names.forEach(name => bindings.push({ name, ...body })); functions.push(body);
+      } else if (t.kind === 'name' && tokens[i + 1]?.value === '=>') {
+        const body = bodyAt(i + 2); bindings.push({ name: t.value, ...body }); functions.push(body);
+      }
+    });
+    tokens.forEach((t, i) => {
+      if (!['let', 'const', 'var', 'function', 'class'].includes(t.value) || t.kind !== 'name') return;
+      const scope = t.value === 'var' ? functions.filter(b => b.start < i && b.end >= i).sort((a, b) => b.start - a.start)[0] || blocks[0] : blockAt(i);
+      if (tokens[i + 1]?.kind === 'name') bindings.push({ name: tokens[i + 1].value, ...scope });
+      if (!['let', 'const', 'var'].includes(t.value)) return;
+      // Additional simple declarators; skip commas nested inside initializers.
+      for (let j = i + 2; j < tokens.length && ![';', '}'].includes(tokens[j].value); j++) {
+        if (pairs.has(j)) { j = pairs.get(j); continue; }
+        if (tokens[j].value === ',' && tokens[j + 1]?.kind === 'name') bindings.push({ name: tokens[j + 1].value, ...scope });
+      }
+    });
+    return { tokens, globals: bindings.filter(b => b.start === -1).map(b => b.name),
+      bound: (name, i) => bindings.some(b => b.name === name && b.start < i && b.end >= i) };
+  }
+  const BROWSER_MEMBERS = {
+    location: ['reload', 'assign', 'replace', 'href', 'origin', 'pathname', 'search', 'hash', 'host', 'hostname', 'protocol'],
+    history: ['back', 'forward', 'go', 'pushState', 'replaceState', 'state'],
+    document: ['getElementById', 'querySelector', 'querySelectorAll', 'createElement', 'body', 'head'],
+    navigator: ['clipboard', 'userAgent', 'mediaDevices', 'geolocation'],
+    localStorage: ['getItem', 'setItem', 'removeItem', 'clear', 'key'], sessionStorage: ['getItem', 'setItem', 'removeItem', 'clear', 'key'],
+    parent: ['postMessage', 'document', 'location'], top: ['postMessage', 'document', 'location'], self: ['postMessage', 'document', 'location']
+  };
+  function decodeHandler(text) {
+    return text.replace(/&(?:quot|apos|amp|lt|gt);|&#(?:x[\da-f]+|\d+);/gi, s => {
+      const named = { '&quot;': '"', '&apos;': "'", '&amp;': '&', '&lt;': '<', '&gt;': '>' };
+      if (named[s.toLowerCase()]) return named[s.toLowerCase()];
+      const n = s.slice(2, -1); const value = n[0].toLowerCase() === 'x' ? parseInt(n.slice(1), 16) : +n;
+      return value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : s;
+    });
+  }
+  function markupAttributes(markup) {
+    const out = [], tags = /<[A-Za-z](?:[^>"']|"[^"]*"|'[^']*')*>/g; let tag;
+    while ((tag = tags.exec(markup))) {
+      const attrs = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g; let a;
+      while ((a = attrs.exec(tag[0]))) out.push({ name: a[1].toLowerCase(), value: a[2] ?? a[3] ?? a[4] ?? '', index: tag.index + a.index });
+    }
+    return out;
+  }
+  function selectorIds(selector) {
+    const ids = []; let square = 0, quote = '';
+    for (let i = 0; i < selector.length; i++) {
+      const c = selector[i];
+      if (c === '\\') { i++; continue; }
+      if (quote) { if (c === quote) quote = ''; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '[') square++; else if (c === ']') square--;
+      else if (c === '#' && square === 0) { const m = /^[A-Za-z_$][\w$-]*/.exec(selector.slice(i + 1)); if (m) { ids.push(m[0]); i += m[0].length; } }
+    }
+    return ids;
+  }
+  function htmlScopeEvidence(reg, handlers) {
+    const scripts = reg.scripts.filter(isJsScript).map(s => ({ ...s, facts: scopeFacts(s.code) }));
+    const classic = new Set(scripts.filter(s => s.type !== 'module').flatMap(s => s.facts.globals));
+    const moduleNames = new Set(scripts.filter(s => s.type === 'module').flatMap(s => s.facts.globals));
+    const accesses = [], consumers = [], moduleWrites = [];
+    const fragments = scripts.concat(handlers.map(h => ({ code: h.code, line: h.line, handler: true, facts: scopeFacts(h.code) })));
+    fragments.forEach(s => {
+      const ts = s.facts.tokens;
+      ts.forEach((t, i) => {
+        const local = s.facts.bound(t.value, i) || classic.has(t.value);
+        if (t.kind === 'name' && !local && !['.', '?.'].includes(ts[i - 1]?.value) && ['.', '?.'].includes(ts[i + 1]?.value))
+          accesses.push({ name: t.value, member: ts[i + 2]?.value, line: s.line + lineOf(s.code, t.index) - 1, handler: !!s.handler });
+        if (s.handler && t.kind === 'name' && moduleNames.has(t.value) && !local && !['.', '?.'].includes(ts[i - 1]?.value) &&
+          ts[i + 1]?.value === '=' && ts[i + 2]?.value !== '=') moduleWrites.push({ name: t.value, line: s.line });
+        if (t.value !== 'document' || t.kind !== 'name' || s.facts.bound('document', i) || classic.has('document')) return;
+        const method = ts[i + 2]?.value, arg = ts[i + 4];
+        if (ts[i + 1]?.value !== '.' || ts[i + 3]?.value !== '(' || arg?.kind !== 'string') return;
+        if (method === 'getElementById') consumers.push({ id: arg.value, via: method, line: s.line + lineOf(s.code, t.index) - 1 });
+        if (method === 'querySelector') {
+          selectorIds(arg.value).forEach(id => consumers.push({ id, via: method, line: s.line + lineOf(s.code, t.index) - 1 }));
+        }
+      });
+    });
+    (reg.attributes || []).forEach(a => {
+      const attr = a.name, value = decodeHandler(a.value);
+      if (!['for', 'aria-labelledby', 'aria-describedby', 'href'].includes(attr)) return;
+      const ids = attr === 'href' ? (/^#[^\s]+$/.test(value) ? [value.slice(1)] : []) : value.split(/\s+/);
+      ids.filter(Boolean).forEach(id => consumers.push({ id, via: attr, line: lineOf(reg.masked, a.index) }));
+    });
+    return { accesses, consumers, moduleWrites };
+  }
 
   function htmlTraps(code) {
     const rules = [
@@ -379,18 +532,19 @@
     html = String(html || '');
     ctx = ctx || {};
     const reg = htmlRegions(html);
+    reg.attributes = markupAttributes(reg.masked);
     const info = {
       ids: [], duplicateIds: [], scripts: reg.scripts.map(s => ({ line: s.line, type: s.type || 'script', src: s.src, bytes: s.code.length })),
       urls: [], hosts: [], externalScripts: [], stylesheets: [], rootRefs: {}, rootAssigned: [], functions: [], assigned: [],
       storage: { localStorage: [], sessionStorage: [], kv: [], indexedDB: [], cookies: false }, squareRefs: [], findings: [], capabilities: []
     };
     const idCount = {}, idLine = {};
-    const idRe = /<[A-Za-z][^>]*?\sid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g; let m;
-    while ((m = idRe.exec(reg.masked))) {
-      const id = m[1] != null ? m[1] : m[2] != null ? m[2] : m[3];
-      if (!id || /[\[\]{}]/.test(id)) continue;
-      idCount[id] = (idCount[id] || 0) + 1; if (!idLine[id]) idLine[id] = lineOf(html, m.index);
-    }
+    let m;
+    reg.attributes.filter(a => a.name === 'id').forEach(a => {
+      const id = decodeHandler(a.value);
+      if (!id || /[\[\]{}]/.test(id)) return;
+      idCount[id] = (idCount[id] || 0) + 1; if (!idLine[id]) idLine[id] = lineOf(html, a.index);
+    });
     info.ids = Object.keys(idCount);
     info.duplicateIds = info.ids.filter(id => idCount[id] > 1).map(id => ({ id, count: idCount[id], line: idLine[id] }));
     info.idLines = idLine;
@@ -421,16 +575,16 @@
     info.assigned = uniq(info.assigned); info.functions = uniq(info.functions); info.rootAssigned = uniq(info.rootAssigned);
 
     // names assigned by inline event handlers: oninput="name = this.value"
-    const attrRe = /\son[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
-    const handlerCalls = [];
-    while ((m = attrRe.exec(reg.masked))) {
-      const val = m[1] != null ? m[1] : m[2], line = lineOf(html, m.index);
+    const handlerCalls = [], handlers = [];
+    reg.attributes.filter(a => /^on[a-z]+$/.test(a.name)).forEach(a => {
+      const val = decodeHandler(a.value), line = lineOf(html, a.index);
+      handlers.push({ code: val, line });
       splitTop(val, ';').forEach(part => splitTop(part, ',').forEach(stmt => {
         const a = /^\s*([A-Za-z_$][\w$]*)\s*=(?!=)/.exec(stmt); if (a) info.assigned.push(a[1]);
       }));
       const callRe = /(?:^|[;,(\s])([A-Za-z_$][\w$]*)\s*\(/g; let c;
       while ((c = callRe.exec(val))) handlerCalls.push({ name: c[1], line });
-    }
+    });
     info.assigned = uniq(info.assigned);
 
     // URLs anywhere in the panel
@@ -456,6 +610,11 @@
       else if (simple) info.squareRefs.push({ name: simple[1], text: b.content.trim(), line });
     });
     info.handlerCalls = handlerCalls;
+    info.scope = htmlScopeEvidence(reg, handlers);
+    info.suppressions = reg.comments.flatMap(c => {
+      const match = /^<!--\s*weld-ignore:\s*(duplicate-id|id-collision|browser-global-shadow|implicit-element-ref|inline-module-write)\s+([A-Za-z_$][\w$-]*)\s*-->$/.exec(c.text);
+      return match ? [{ id: match[1], subject: match[2], line: lineOf(html, c.start) }] : [];
+    });
     JS.forEach(s => htmlTraps(s.code).forEach(t => info.findings.push({ id: 'perchance-trap', severity: 'warn', pane: 'html', line: s.line + lineOf(s.code, t.index) - 1, message: t.message })));
     info.mixedContent = info.urls.filter(u => u.insecure && !/^(localhost|127\.0\.0\.1)$/i.test(u.host));
     info.mixedContent.forEach(u => info.findings.push({ id: 'insecure-url', severity: 'warn', pane: 'html', line: u.line, message: 'Insecure http:// address: ' + u.url, hint: 'Browsers block http:// resources on an https page. Use https:// or host the file elsewhere.' }));
@@ -535,7 +694,7 @@
     input = input || {};
     const dsl = String(input.dsl || ''), html = input.html == null ? null : String(input.html);
     const parsed = parseDsl(dsl);
-    const findings = [], unresolved = [];
+    const findings = [], unresolved = [], suppressedFindings = [];
     const add = (id, severity, pane, line, message, hint) => findings.push({ id, severity, pane, line: line || 0, message, hint: hint || '' });
     const hv = html == null ? null : analyzeHtml(html, input);
     if (hv) hv.findings.forEach(f => findings.push(f));
@@ -660,14 +819,53 @@
     if (!topLists.has('output') && !parsed.nodes.some(n => n.top && n.name === '$output') && parsed.lists.length > 0)
       add('no-output', 'info', 'dsl', 0, 'There is no "output" list or top-level $output.', 'Importing generators receive a random list name instead of text.');
 
+    // Browser APIs in executable DSL fragments can also be shadowed by Perchance names.
+    const browserFragments = [];
+    parsed.functions.forEach(f => {
+      const body = f.codeLines.length ? '\n' + lines(dsl).slice(f.line, Math.max(...f.codeLines)).join('\n') : (f.value || '');
+      browserFragments.push({ code: '(' + f.params + ') => {' + body + '}', line: f.line, type: '' });
+    });
+    blockNodes.forEach(n => squareBlocks(nodeText(n)).blocks.forEach(b => browserFragments.push({ code: b.content, line: n.line, type: '' })));
+    const browserDsl = htmlScopeEvidence({ scripts: browserFragments, masked: '' }, []).accesses;
+    browserDsl.forEach(r => {
+      if ((topLists.has(r.name) || hv?.ids.includes(r.name)) && BROWSER_MEMBERS[r.name]?.includes(r.member))
+        add('browser-global-shadow', 'warn', 'dsl', r.line, 'Bare ' + r.name + '.' + r.member + ' may resolve to a same-named list or element instead of the browser global.',
+          'If the browser API is intended, use window.' + r.name + '.' + r.member + '. Verify the runtime value before changing data access.');
+    });
+
     // HTML cross-checks
     if (hv) {
       hv.squareRefs.forEach(r => {
         if (!known.has(r.name) && !locals.has(r.name)) add('html-unresolved-ref', 'warn', 'html', r.line, '[' + r.text + '] in the HTML panel refers to "' + r.name + '", which is not defined.', 'Check the spelling against your list names.');
         used.add(r.name);
       });
-      hv.ids.forEach(id => { if (topLists.has(id)) add('id-collision', 'warn', 'html', hv.idLines[id], 'Element id "' + id + '" has the same name as a list.', 'Element ids become globals and collide with list names. Rename one.'); });
-      hv.duplicateIds.forEach(d => add('duplicate-id', 'warn', 'html', d.line, 'Element id "' + d.id + '" is used ' + d.count + ' times.'));
+      function scoped(id, severity, line, subject, message, hint) {
+        add(id, severity, 'html', line, message, hint); findings[findings.length - 1].subject = subject;
+      }
+      hv.ids.forEach(id => {
+        if (topLists.has(id)) scoped('id-collision', 'info', hv.idLines[id], id, 'Element id "' + id + '" shares a list name; this needs a flow check, not an automatic rename.',
+          'Explicit document.getElementById/querySelector lookups can safely distinguish elements from list data. Verify how bare references resolve before changing working names.');
+      });
+      hv.duplicateIds.forEach(d => {
+        const consumer = hv.scope.consumers.find(c => c.id === d.id) || hv.squareRefs.find(r => r.name === d.id);
+        scoped('duplicate-id', consumer ? 'warn' : 'info', d.line, d.id, 'Element id "' + d.id + '" is used ' + d.count + ' times' +
+          (consumer ? '; ' + (consumer.via || 'a template reference') + ' uses it on line ' + consumer.line + '.' : '; no single-element lookup or markup reference was detected.'),
+          consumer ? 'A single-element lookup or label can target only one matching element. Use unique IDs and update its consumers.' :
+            'IDs should be unique, but CSS and querySelectorAll can style/select every match. External or dynamic consumers may still need review.');
+      });
+      hv.scope.accesses.forEach(r => {
+        if (!topLists.has(r.name) && !hv.ids.includes(r.name)) return;
+        if (BROWSER_MEMBERS[r.name]?.includes(r.member)) scoped('browser-global-shadow', 'warn', r.line, r.name,
+          'Bare ' + r.name + '.' + r.member + ' may resolve to a same-named list or element instead of the browser global.',
+          'If the browser API is intended, use window.' + r.name + '.' + r.member + '. Verify the runtime value before changing data access.');
+        else if (topLists.has(r.name) && hv.ids.includes(r.name) && ['value', 'checked', 'selectedIndex', 'innerHTML', 'textContent', 'style', 'classList', 'focus', 'click'].includes(r.member))
+          scoped('implicit-element-ref', 'warn', r.line, r.name, 'Bare ' + r.name + '.' + r.member + ' is ambiguous because a list and element share this name.',
+            'If the element is intended, use document.getElementById("' + r.name + '").' + r.member + '. Check the runtime flow; list properties with this name can also be intentional.');
+      });
+      hv.scope.moduleWrites.forEach(r => {
+        if (!topLists.has(r.name)) scoped('inline-module-write', 'warn', r.line, r.name, 'An inline handler writes "' + r.name + '", but its detected declaration is private to a module script.',
+          'Module bindings are not shared with inline attributes. Wire the handler inside the module or expose an intentional shared interface. Classic-script let/const bindings are not module-private.');
+      });
       const noRootCheck = new Set([...topLists.keys(), ...Object.keys(aliases), ...hv.rootAssigned, ...fnNames, 'update', 'light', 'dark']);
       Object.keys(hv.rootRefs).forEach(k => { if (!noRootCheck.has(k) && !locals.has(k)) add('root-unknown', 'info', 'html', 0, 'root.' + k + ' is read but no list, import or assignment of that name was found.', 'It may come from an imported plugin. If it is a typo, the value will be undefined.'); });
       const declared = new Set([...hv.functions, ...hv.assigned, ...fnNames, ...topLists.keys(), ...Object.keys(aliases), ...hv.ids]);
@@ -687,6 +885,12 @@
       add('unused-list', 'info', 'dsl', n.line, 'List "' + n.name + '" is not referenced in this generator.', 'It may still be used by generators that import this one.');
     });
 
+    if (hv) {
+      for (let i = findings.length - 1; i >= 0; i--) {
+        const f = findings[i], suppression = hv.suppressions.find(s => f.pane === 'html' && s.id === f.id && s.subject === f.subject);
+        if (suppression) { suppressedFindings.unshift({ ...f, suppressionLine: suppression.line }); findings.splice(i, 1); }
+      }
+    }
     const order = { error: 0, warn: 1, info: 2 };
     findings.sort((a, b) => order[a.severity] - order[b.severity] || (a.pane === b.pane ? 0 : a.pane === 'dsl' ? -1 : 1) || a.line - b.line);
 
@@ -704,7 +908,7 @@
         comments: parsed.comments.length, todos: parsed.comments.filter(c => /\b(TODO|FIXME|HACK|XXX)\b/i.test(c.text)).length },
       lists, aliases, imports: allImports, capabilities, network,
       outputSpace: estimateSpace(parsed),
-      findings, counts: { error: findings.filter(f => f.severity === 'error').length, warn: findings.filter(f => f.severity === 'warn').length, info: findings.filter(f => f.severity === 'info').length },
+      findings, suppressedFindings, counts: { error: findings.filter(f => f.severity === 'error').length, warn: findings.filter(f => f.severity === 'warn').length, info: findings.filter(f => f.severity === 'info').length },
       html: hv ? { ids: hv.ids, scripts: hv.scripts, urls: hv.urls, hosts: hv.hosts, externalScripts: hv.externalScripts, stylesheets: hv.stylesheets,
         storage: hv.storage, rootRefs: hv.rootRefs, functions: hv.functions } : null,
       todos: parsed.comments.filter(c => /\b(TODO|FIXME|HACK|XXX)\b/i.test(c.text)),

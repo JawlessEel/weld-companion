@@ -233,6 +233,7 @@
   }
   function findingsSection(parent) {
     const a = S.analysis, rank = { error: 0, warn: 1, info: 2 }, max = S.filter === 'error' ? 0 : S.filter === 'warn' ? 1 : 2;
+    if (a.suppressedFindings && a.suppressedFindings.length) note(parent, a.suppressedFindings.length + ' finding(s) suppressed by explicit weld-ignore comments. They remain recorded in the analysis JSON.');
     const list = a.findings.filter(f => rank[f.severity] <= max);
     const sel = E('select', { class: 'wc-field', 'aria-label': 'Finding filter', style: { maxWidth: '200px' } }, [['error', 'Errors only'], ['warn', 'Warnings and errors'], ['info', 'Everything']].map(o => {
       const op = E('option', { value: o[0], text: o[1] }); if (o[0] === S.filter) op.selected = true; return op;

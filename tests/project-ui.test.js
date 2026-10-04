@@ -179,9 +179,11 @@ const render = () => window.weldProject.render(parent);
 
   // Repair handoff includes all issues, independent of the visible filter/limit.
   const originalFindings = state().analysis.findings;
+  state().analysis.suppressedFindings = [{ id: 'duplicate-id', severity: 'warn', subject: 'pad', message: 'Suppressed only' }];
   state().analysis.findings = Array.from({ length: 65 }, (_, i) => ({ severity: i === 0 ? 'error' : 'warn', pane: i === 0 ? 'dsl' : 'html', line: i + 1, message: 'Issue ' + i, hint: 'Check ' + i }));
   state().analysis.findings.push({ severity: 'info', pane: 'dsl', message: 'Informational only' });
   state().filter = 'error'; render();
+  assert.match(bodyText(), /1 finding\(s\) suppressed by explicit weld-ignore comments/);
   const writesBeforeRepair = applied.length;
   const toolsCallsBeforeRepair = aiCalls.length;
   click('Send findings to Perchance AI');
@@ -191,11 +193,12 @@ const render = () => window.weldProject.render(parent);
   assert.match(repair.prompt, /\[ERROR\] dsl line 1: Issue 0/);
   assert.match(repair.prompt, /\[WARN\] html line 65: Issue 64\n  Hint: Check 64/);
   assert.doesNotMatch(repair.prompt, /Informational only/);
+  assert.doesNotMatch(repair.prompt, /Suppressed only/);
   assert.match(repair.prompt, /false alarms/);
   assert.equal(applied.length, writesBeforeRepair, 'handoff does not write to the editor');
   state().analysis.findings = [{ severity: 'info', pane: 'dsl', message: 'Just a note' }]; render();
   assert.ok(find('button', 'Send findings to Perchance AI').disabled, 'repair is disabled without warnings/errors');
-  state().analysis.findings = originalFindings; state().filter = 'warn'; render();
+  state().analysis.findings = originalFindings; state().analysis.suppressedFindings = []; state().filter = 'warn'; render();
 
   // ---- starred generators ----
   openSection('Starred generators');
