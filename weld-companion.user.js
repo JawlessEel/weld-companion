@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.60.0
+// @version      1.60.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.60.0';
+  var WC_VERSION = '1.60.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1150,6 +1150,7 @@
       var lineB = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.06)';
 
       var set = {
+        '--wc-color-scheme': dark ? 'dark' : 'light',
         '--wc-surface': surface, '--wc-surface-2': surface2, '--wc-surface-3': surface3,
         '--wc-ink': rgb(textC),
         '--wc-dim': rgb(mix(textC, base, 0.35)),
@@ -1178,6 +1179,7 @@
     '  --wc-mono:"Berkeley Mono","JetBrains Mono","SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;',
     '  --wc-sans:"Geist","Satoshi",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
     '  --wc-ink:#eef2f6; --wc-dim:#9aa7b6; --wc-faint:#5d6b7b;',
+    '  --wc-color-scheme:dark;',
     '  --wc-arc:#ff8a3d;        /* welding-arc amber, the primary accent */',
     '  --wc-arc-soft:rgba(255,138,61,.14);',
     '  --wc-signal:#4ee0c8;     /* cool cyan signal, secondary */',
@@ -1196,6 +1198,10 @@
     // ---- boundary reset: neutralise inherited host styles on our subtree ----
     '.wc-root,.wc-root *{box-sizing:border-box;}',
     '.wc-root{all:revert;font-family:var(--wc-sans);line-height:1.5;-webkit-font-smoothing:antialiased;color:var(--wc-ink);text-align:left;}',
+    // Native option popups must use opaque, paired colours rather than a
+    // transparent option background with the host page's inherited text.
+    '.wc-root select,.wdm-root select,select.wc-field,select.wdm-field,select.wlib-field{color-scheme:var(--wc-color-scheme,dark);}',
+    '.wc-root select option,.wc-root select optgroup,.wdm-root select option,.wdm-root select optgroup,select.wc-field option,select.wc-field optgroup,select.wdm-field option,select.wdm-field optgroup,select.wlib-field option,select.wlib-field optgroup{background-color:var(--wc-surface-2,#1a1f28);color:var(--wc-ink,#eef2f6);}',
     // theme overlay: fixed, click-through; filters the whole page behind it.
     // z below our UI (bar/drawer/pins/toast) so those stay un-filtered.
     '.wc-theme-overlay{position:fixed;inset:0;pointer-events:none;z-index:2147483400;}',
