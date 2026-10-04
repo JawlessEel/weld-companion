@@ -60,45 +60,49 @@ assert.match(source, /redirect:\s*'error'/);
 assert.match(source, /request\.abort\(\)/);
 assert.match(source, /callOwnAIStream\(cfg, sys, user, !!payload\.json, maxTokens, temperature, emit, done\)/);
 
+// AI agent panel selectors. Upstream covered these with helperSubmitButton()/helperPromptInput();
+// this fork's equivalents are aiAgentButton()/aiAgentInput() (current aiAgent* ids first,
+// legacy aiHelper* ids as the fallback).
 const helperSelectors = load(
-  ['helperSubmitButton', 'helperPromptInput'],
-  between('function helperSubmitButton(', '// If the user picked their own provider'),
+  ['aiAgentButton', 'aiAgentInput'],
+  between('function aiAgentButton(', 'function aiAgentPrompt('),
   {
     $(selector) {
       return ({ '#aiHelperSubmitBtn': null, '#aiAgentSendBtn': 'new-send', '#aiHelperInputEl': null, '#aiAgentInputEl': 'new-input' })[selector] || null;
     },
   },
 );
-assert.equal(helperSelectors.helperSubmitButton(), 'new-send');
-assert.equal(helperSelectors.helperPromptInput(), 'new-input');
+assert.equal(helperSelectors.aiAgentButton(), 'new-send');
+assert.equal(helperSelectors.aiAgentInput(), 'new-input');
 
 const legacyHelperSelectors = load(
-  ['helperSubmitButton', 'helperPromptInput'],
-  between('function helperSubmitButton(', '// If the user picked their own provider'),
+  ['aiAgentButton', 'aiAgentInput'],
+  between('function aiAgentButton(', 'function aiAgentPrompt('),
   {
     $(selector) {
       return ({ '#aiHelperSubmitBtn': 'legacy-send', '#aiHelperInputEl': 'legacy-input' })[selector] || null;
     },
   },
 );
-assert.equal(legacyHelperSelectors.helperSubmitButton(), 'legacy-send');
-assert.equal(legacyHelperSelectors.helperPromptInput(), 'legacy-input');
+assert.equal(legacyHelperSelectors.aiAgentButton(), 'legacy-send');
+assert.equal(legacyHelperSelectors.aiAgentInput(), 'legacy-input');
 
 // AI agent panel: Enter in the prompt box calls Perchance's send() directly (no click),
-// so the own-model route must also hook keydown -- capture phase, Enter only.
+// so the own-model route must also hook keydown -- capture phase, Enter only, and never
+// with Shift/Ctrl/Alt/Meta held, while composing, or on the touch/mobile layout.
 function fakeEl() {
   return { dataset: {}, listeners: [], addEventListener(type, fn, capture) { this.listeners.push({ type, fn, capture }); } };
 }
 const agentBtn = fakeEl(), agentInput = fakeEl();
-let routed = 0, mobile = false;
+let routed = 0, touch = false;
 const hook = load(
   ['hookHelperSubmit'],
   between('function hookHelperSubmit(', '// ============================================================ bootstrap'),
   {
-    helperSubmitButton: () => agentBtn,
-    helperPromptInput: () => agentInput,
-    routeHelperToOwnModel: () => { routed++; return true; },
-    pageProp: (name) => (name === '__isMobileEditorLayout' ? mobile : undefined),
+    aiAgentButton: () => agentBtn,
+    aiAgentInput: () => agentInput,
+    routeAgentToWorkspace: () => { routed++; return true; },
+    aiAgentTouchMode: () => touch,
   },
 );
 hook.hookHelperSubmit();
@@ -107,12 +111,13 @@ assert.deepEqual(agentBtn.listeners.map((l) => [l.type, l.capture]), [['click', 
 assert.deepEqual(agentInput.listeners.map((l) => [l.type, l.capture]), [['keydown', true]]);
 const onKey = agentInput.listeners[0].fn;
 onKey({ key: 'Enter', shiftKey: true });
+onKey({ key: 'Enter', ctrlKey: true });
 onKey({ key: 'Enter', isComposing: true });
 onKey({ key: 'a' });
 assert.equal(routed, 0);
 onKey({ key: 'Enter' });
 assert.equal(routed, 1);
-mobile = true; onKey({ key: 'Enter' }); assert.equal(routed, 1);
+touch = true; onKey({ key: 'Enter' }); assert.equal(routed, 1);
 agentBtn.listeners[0].fn({}); assert.equal(routed, 2);
 
 const calls = [];

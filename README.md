@@ -29,6 +29,7 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
   - [Generator manager, directory & CRUD](#generator-manager-directory--crud)
   - [Sync with GitHub — Pull & Push](#sync-with-github--pull--push)
   - [Library — for readers & players](#library--for-readers--players)
+  - [Project — read, check & export any generator](#project--read-check--export-any-generator)
   - [Tools — AI Helper & character files](#tools--ai-helper--character-files)
   - [Data Manager — browse, edit & back up every generator's IndexedDB](#data-manager--browse-edit--back-up-every-generators-indexeddb)
   - [AICC pack — Lore Library, character round-trip & repair](#aicc-pack--lore-library-character-round-trip--repair)
@@ -212,16 +213,44 @@ If you've saved a note on a generator, a small floating 🗒 badge appears when 
 
 **Read aloud** speaks the current page's output, any Scrapbook entry, or a whole chat story using the browser's built-in speech — local, no network, no key. **Per-generator notes** let you jot "great for elf names" on any generator, searchable from the Scrapbook box. **🎲 Random favorite** (in the sticky header) jumps to a random starred generator. **Night light** now lives in the **Comfort** tab beside the theme it controls — it auto-applies a comfort theme (Warm, Dim, Sepia, Gray, or Dark) on an hour schedule, e.g. Warm from 20:00 to 07:00 — or in **ambient mode**, where the theme follows the hour and season (warm in the evening, earlier in winter, later in summer; dark late at night; southern-hemisphere aware) — restoring your previous theme outside those hours; your manual comfort settings always win when it's off.
 
+### Character & World Studio
+
+The **Studio** tab adds guided character editing, shared world lore with activation and knowledge rules, relationships, timelines, five chatbot templates, model-connected conversation tests, side-by-side reply comparisons, approved playthrough memory, consistency checking, and project export/import with snapshots. It uses your existing AI provider settings and character/lore interfaces.
+
+See [the Studio guide](STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
+
+### Project — read, check & export any generator
+
+The **🔬 Project** tab works on whatever generator you are looking at. It reads the **published** lists panel, HTML panel and whole import tree of any public generator (or your live editor, including unsaved edits) and then:
+
+- **checks it** for the mistakes that usually break at runtime: undefined names, silent no-op blocks, re-randomizing stored selections, id/list collisions, bad handlers, insecure addresses, mixed indentation, and Perchance parser traps, each with a click-to-jump line;
+- **maps it**: list and function outline, an estimate of how many distinct outputs it can make, every external host and storage key, and the import tree with sizes and last-edit times;
+- **watches it**: warns when an import changed since you last reviewed it, keeps local snapshots you can compare or restore, and flags starred generators that were edited;
+- **samples it**: re-rolls the generator N times to measure real output variety;
+- **checks its links** (anonymous requests, on your confirmation);
+- **exports it** as a ZIP bundle (source, imports, findings, manifest), Markdown, or a budgeted **AI context pack**, and adds the pack, a "selected code" option and a token estimate to the AI Helper.
+
+See [the Project guide](PROJECT.md).
+
 ### Tools — AI Helper & character files
 
 The **🛠 Tools** tab holds self-contained tool cards.
 
 #### 🤖 AI Helper
 
-Perchance's built-in AI Helper writes generator code from a prompt. This card adds the two things it's missing:
+The AI Helper is now a **review-first project workspace**. It can explain a generator, debug a failure, or propose DSL/HTML changes without silently replacing either editor pane.
 
-1. **Edit the instruction.** Override the helper's system prompt with your own.
-2. **Use your own model — cloud or local.** Route the helper (and, via Skybridge, any generator's `ai` capability) through a model **you** control:
+It also has **Stop**, cancellation when clearing, and a configurable **Maximum output tokens** setting (256–32768, default 4096). The last reply stays available if a new request fails or is stopped. Replies cut off by a provider's token limit are reported as incomplete. Workspace text survives closing and reopening the drawer in the same page session; it is not saved across page reloads.
+
+Review expects one complete code block for the selected pane (perchance/dsl or html). Ambiguous or mismatched fenced blocks are rejected; plain text can still be reviewed after editing it into a complete replacement. Applying replaces the entire selected pane, so check the diff. If the editor changes while the review is open, reopen the review before applying.
+
+1. Choose and save a cloud or local provider.
+2. Pick the context to include: current DSL, HTML, both panes, or neither.
+3. Write a request and select **Ask selected model**.
+4. Read or edit the reply in the workspace. Use **Copy reply** when you only need advice.
+5. For a proposed code change, select **Review → DSL** or **Review → HTML**. A line-by-line diff appears; the editor changes only after you explicitly select **Apply**. CodeMirror undo remains available.
+
+The provider choices are:
 
    | Provider | Default model | Notes |
    | :------- | :------------ | :---- |
@@ -231,10 +260,12 @@ Perchance's built-in AI Helper writes generator code from a prompt. This card ad
    | **Local — Ollama** | `llama3.1` | **no key**; endpoint `http://localhost:11434` |
    | **Local — OpenAI-compatible** | `local-model` | LM Studio / llama.cpp; endpoint `http://localhost:1234`; key optional |
 
-   Pick a provider, set the model (and, for local, the **endpoint**), and hit **Test**. Cloud replies **stream token-by-token**; the result is written straight into the code editor. The **local** providers run on your own machine — free and private — reaching `localhost` through the privileged `GM_xmlhttpRequest` (the in-sandbox bridge cannot). When a call fails, the error is **classified into a plain-language cause + fix** (e.g. a `403` from Ollama tells you to run it with `OLLAMA_ORIGINS=*`). Prefer the default? Leave it on **Perchance built-in** with just a custom instruction.
+Set the model and, for a local server, its endpoint, then use **Test provider**. Local providers run on your own machine and are reached through `GM_xmlhttpRequest`. Failures are classified into a plain-language cause and suggested fix. LM Studio models that consume their output budget as reasoning without producing a final answer get a specific diagnostic instead of a blank result.
+
+**Perchance built-in** continues to use Perchance's native AI Agent UI. If you want the native Agent's Send button and desktop Enter key to use LM Studio or another configured provider, enable **Route Perchance AI Agent sends into this review workspace** and save. This option is off by default. It preserves the native prompt, keeps Shift+Enter as a newline, and does not intercept touch/mobile Enter.
 
 > [!NOTE]
-> For a local model the userscript reaches `localhost` directly. Ollama must be started with **`OLLAMA_ORIGINS=*`** (or your browser origin) so it accepts the browser-origin request — the AI Helper's **Test** and the **🧪 Diagnostics** self-test both report this precisely when it's missing.
+> For a local model the userscript reaches `localhost` directly. Ollama must be started with **`OLLAMA_ORIGINS=*`** (or your browser origin) so it accepts the browser-origin request — **Test provider** and the **🧪 Diagnostics** self-test both report this precisely when it's missing.
 
 > [!IMPORTANT]
 > Your API key is stored **only** in this browser and sent **only** to the provider you select. See [Privacy & safety](#privacy--safety).
@@ -431,7 +462,7 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 *All offline unless noted.*
 
 - **Companion-to-Companion sync** — encode full state as a QR code or short link; scan on another device to import. No server. *(offline)*
-- **Asset manager** — inventory every external asset a generator loads, check liveness, offer to re-host dead ones to user.uploads.dev, maintain a personal asset library reusable across generators. *(online)*
+- **Asset manager** — inventory every external asset a generator loads, check liveness, offer to re-host dead ones to user.uploads.dev, maintain a personal asset library reusable across generators. *(online)* *(the Project tab inventories every external address and checks liveness from the Project tab; re-hosting is still open.)*
 - **Grief recovery / session archaeology** — given any IndexedDB dump, reconstruct a human-readable timeline including deleted rows. Not just "here are your characters" but the full database history. *(offline)*
 
 ---
@@ -472,9 +503,9 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 
 - **Ritual and habit support** — honour daily creative rituals; quiet streak tracking; gentle prompt if you haven't done your morning pull. *(offline)*
 - **Living style guide** — extract implicit consistency rules from saved outputs ("all your northern city names end in -vik"), surface them, flag when a new output breaks your canon. *(offline)*
-- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)*
+- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)* *(the Project tab adds an on-demand analyzer with click-to-jump findings in the Project tab; live underlining is still open.)*
 - **Accessibility audit** — basic check of output contrast ratio, font size, `prefers-reduced-motion` compliance. One-line result in the Generators tab. *(offline)*
-- **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)*
+- **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)* *(the Project tab keeps local snapshots with compare and restore; a per-edit history is still open.)*
 - **Contextual platform tutorial** — "how does this work?" panel explaining the DSL, HTML panel, and imports for the specific generator you're looking at. *(offline)*
 - **DSL reader / explainer** — "explain this generator in plain English," "what does this line do." The AI Helper writes code; this reads it. *(online — uses AI)*
 - **Atomic GitHub commits** — push DSL + HTML as a single commit rather than two. *(online)*
