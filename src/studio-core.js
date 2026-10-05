@@ -517,7 +517,8 @@
       character_book: toV2Book(p, c), tags: tagsToList(c.tags), creator: c.creator, character_version: c.version,
       extensions: { talkativeness: String(c.talkativeness / 100), fav: false,
         depth_prompt: { prompt: c.depthPrompt, depth: c.depthPromptDepth, role: 'system' },
-        weld_studio: { studio: 1, motivations: c.motivations, boundaries: c.boundaries, beliefs: c.beliefs } } };
+        weld_studio: { studio: 1, motivations: c.motivations, boundaries: c.boundaries, beliefs: c.beliefs },
+        forge: { kind: 'character', world_bible: p.world.description, user_persona: { name: p.persona.name, description: p.persona.description }, source: null } } };
     return { spec: 'chara_card_v2', spec_version: '2.0', data };
   }
   function fromCard(raw) {
@@ -536,7 +537,7 @@
     ch.scenario = cap(d.scenario, 100000); ch.opening = cap(d.first_mes, 100000); ch.examples = cap(d.mes_example, 100000);
     ch.creatorNotes = cap(d.creator_notes, 100000); ch.systemPrompt = cap(d.system_prompt, 100000);
     ch.postHistory = cap(d.post_history_instructions, 100000); ch.creator = cap(d.creator, 2000); ch.version = cap(d.character_version, 200);
-    ch.alternateGreetings = Array.isArray(d.alternate_greetings) ? d.alternate_greetings.filter(g => typeof g === 'string').slice(0, 50).map(g => cap(g, 100000)) : [];
+    ch.alternateGreetings = Array.isArray(d.alternate_greetings) ? d.alternate_greetings.filter(g => typeof g === 'string' && g.trim() && g !== ch.opening).slice(0, 50).map(g => cap(g, 100000)) : [];
     ch.tags = Array.isArray(d.tags) ? tagsToList(d.tags.map(String).join(',')).join(', ') : cap(d.tags, 2000);
     const dp = ext.depth_prompt;
     if (dp && typeof dp === 'object') { ch.depthPrompt = cap(dp.prompt, 100000); ch.depthPromptDepth = clampInt(dp.depth, 0, 100, 4); }
@@ -584,14 +585,15 @@
     }
     return chunks;
   }
+  function latin1(u8) { let out = ''; for (let i = 0; i < u8.length; i += 8192) out += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return out; }
   function pngReadCard(bytes) {
     if (bytes.length > 25000000) throw new Error('PNG is larger than 25 MB.');
     const found = {};
     pngChunks(bytes).forEach(ch => {
       if (ch.type !== 'tEXt') return;
       const z = ch.data.indexOf(0); if (z < 1) return;
-      const keyword = String.fromCharCode(...ch.data.subarray(0, z));
-      if (keyword === 'chara' || keyword === 'ccv3') found[keyword] = String.fromCharCode(...ch.data.subarray(z + 1));
+      const keyword = latin1(ch.data.subarray(0, z));
+      if (keyword === 'chara' || keyword === 'ccv3') found[keyword] = latin1(ch.data.subarray(z + 1));
     });
     const keyword = found.ccv3 ? 'ccv3' : found.chara ? 'chara' : '';
     if (!keyword) throw new Error('No character card data (chara or ccv3) was found in this PNG.');
@@ -611,7 +613,7 @@
     view.setUint32(8 + data.length, crc32(chunk.subarray(4, 8 + data.length)));
     const parts = [bytes.subarray(0, 8)];
     chunks.forEach(ch => {
-      if (ch.type === 'tEXt') { const z = ch.data.indexOf(0), k = z > 0 ? String.fromCharCode(...ch.data.subarray(0, z)) : ''; if (k === 'chara' || k === 'ccv3') return; }
+      if (ch.type === 'tEXt') { const z = ch.data.indexOf(0), k = z > 0 ? latin1(ch.data.subarray(0, z)) : ''; if (k === 'chara' || k === 'ccv3') return; }
       if (ch.type === 'IEND') parts.push(chunk);
       parts.push(bytes.subarray(ch.start, ch.end));
     });
@@ -624,7 +626,7 @@
     const c = p.characters.find(x => x.id === s.characterId) || { name: 'Character' };
     const rows = [{ user_name: p.persona.name, character_name: c.name, create_date: new Date().toISOString(), chat_metadata: { weld_studio: 1 } }];
     s.messages.forEach(m => {
-      const row = { name: m.role === 'user' ? p.persona.name : c.name, is_user: m.role === 'user', is_system: false,
+      const row = { name: m.role === 'user' ? p.persona.name : c.name, is_user: m.role === 'user', is_name: m.role !== 'user', is_system: false,
         send_date: new Date().toISOString(), mes: m.content };
       if (Array.isArray(m.swipes)) { row.swipes = m.swipes.slice(); row.swipe_id = m.swipeId; }
       rows.push(row);

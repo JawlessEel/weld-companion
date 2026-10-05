@@ -2,12 +2,12 @@
 (function () {
   'use strict';
   if (window.top !== window) return;
-  const C = window.WeldStudioCore, H = window.weldStudioHost;
+  const C = window.WeldStudioCore, H = window.weldStudioHost, Dad = window.WeldStudioDad;
   if (!C || !H) return;
   let p = null, revision = 0, snapshots = [], tab = 'overview', selected = '', sessionId = '', greetingPick = '0';
   let busy = false, request = null, generation = 0, status = '', preview = null, importPreview = null;
   let draft = '', report = '', compareA = '', compareB = '', editing = -1, loreFilter = '', loreView = '', loreTest = '';
-  let conceptText = '', direction = '', aiUndo = null, regexSample = '';
+  let conceptText = '', direction = '', aiUndo = null, regexSample = '', importPlan = null, exportChar = '';
   const INDEX = 'studio:index:v1';
   const key = id => 'studio:project:v1:' + id;
   const E = H.el;
@@ -207,6 +207,7 @@
     row(parent, [button('Add character', () => { const c = C.character(); p.characters.push(c); selected = c.id; tab = 'characters'; save(); draw(); }),
       button('Review consistency', () => { tab = 'checks'; draw(); }),
       button('Start a playthrough', () => { tab = 'playground'; draw(); })]);
+    if (Dad) row(parent, [importButton()]);
     heading(parent, 'Draft with the model');
     note(parent, 'Describe a character or a piece of the world. Results are added as new entries you can edit; nothing existing is overwritten.');
     area(parent, 'Concept (character or lore request)', conceptText, value => { conceptText = value; });
@@ -274,7 +275,7 @@
     p.characters.push(res.character); p.lore.push(...res.lore); selected = res.character.id; save();
   }
   function characters(parent) {
-    row(parent, [button('Import Tavern card (PNG or JSON)', () => pickFile('.png,.json,image/png,application/json', 25000000, file => importCard(file).then(applyCard))),
+    row(parent, [...(Dad ? [importButton()] : []), button('Import Tavern card (PNG or JSON)', () => pickFile('.png,.json,image/png,application/json', 25000000, file => importCard(file).then(applyCard))),
       button('Import AICC character', () => chooseFile(raw => {
         const c = C.characterFromAICC(JSON.parse(raw));
         if (!window.confirm('Import character "' + c.name + '" into this project?')) return;
@@ -329,7 +330,7 @@
   function lore(parent) {
     area(parent, 'Search lore', loreFilter, v => { loreFilter = v; draw(); }, { line: true, commit: true });
     select(parent, 'Show', loreView, [['', 'All entries'], ['active', 'Active only'], ['disabled', 'Disabled / reference'], ['private', 'Private only']], v => { loreView = v; draw(); });
-    row(parent, [button('Import Lore Library notes', () => {
+    row(parent, [...(Dad ? [importButton()] : []), button('Import Lore Library notes', () => {
       const pack = window.weldAICCPack, entries = pack ? pack.lore.all() : [];
       const added = entries.filter(e => !p.lore.some(l => l.source === e.url)).map(e => C.loreEntry({
         title: e.name || 'Linked lore', body: e.notes || '', source: e.url || '',
@@ -442,6 +443,7 @@
       const branch = C.copy(s); branch.id = C.id(); branch.name += ' (branch)';
       p.sessions.push(branch); sessionId = branch.id; save(); draw();
     }), button('Export transcript (Markdown)', () => download(s.name + '.md', C.transcriptMarkdown(p, s))),
+    ...(Dad ? [button('Export Dad Chat chat (JSON)', () => download(s.name + '.dad-chat.json', JSON.stringify(Dad.toDadChat(p, s), null, 2))), button('Export chat text (.txt)', () => download(s.name + '.txt', Dad.chatText(p, s)))] : []),
     button('Export chat (JSONL)', () => download(s.name + '.jsonl', C.toChatJsonl(p, s))),
     button('Delete playthrough', () => { if (!window.confirm('Delete this playthrough and its memories?')) return; p.sessions = p.sessions.filter(x => x.id !== s.id); sessionId = ''; save(); draw(); })]);
     const transcript = E('div', { style: { maxHeight: '420px', overflow: 'auto', border: '1px solid var(--wc-line)', padding: '10px' } });
@@ -624,6 +626,7 @@
         importPreview = null; adopt(imported);
       }), button('Cancel import', () => { importPreview = null; draw(); })]);
     }
+    exportButtons(parent);
     note(parent, 'The latest 10 snapshots are retained per project. Export older snapshots if you need a longer archive.');
     snapshots.slice().reverse().forEach(snap => row(parent, [
       E('span', { text: snap.at + ' / ' + snap.label }),
@@ -635,10 +638,49 @@
       })
     ]));
   }
+  // ---- Import any supported file (Dad Chat exports, cards, lorebooks, chats, backups, zip packs) ----
+  function importButton() {
+    return button('Import a file (card, lorebook, world, chat, backup, zip)', () => pickFile('.json,.png,.jsonl,.txt,.md,.zip,.js,application/json,image/png,application/zip,text/plain', 60000000,
+      file => Dad.readFile(file, { userNames: ['You', 'User', p ? p.persona.name : 'User'] }).then(plan => { importPlan = plan; })));
+  }
+  function importPanel(parent) {
+    const plan = importPlan, card = E('div', { class: 'wc-card' });
+    heading(card, 'Import preview: ' + (plan.format || 'file') + ' — ' + plan.name);
+    note(card, 'Nothing has changed yet. Tick what to bring in, then choose Import selected.' + (p ? ' It is added to this project; a snapshot is taken first.' : ' A new project is created.'));
+    plan.items.forEach(it => check(card, it.label + ' — ' + it.detail, it.checked, v => { it.checked = v; }));
+    plan.notes.slice(0, 12).forEach(n => note(card, n));
+    row(card, [button('Import selected', () => {
+      if (!plan.items.some(i => i.checked)) throw new Error('Nothing is selected to import.');
+      const target = p || C.project(plan.name || 'Imported project', 'character');
+      if (!p && plan.items.some(i => i.checked && i.kind === 'character')) target.characters = [];
+      if (p) checkpoint('Before import');
+      const message = Dad.applyPlan(target, plan);
+      importPlan = null;
+      if (p) { save(); notice(message); draw(); } else { adopt(target); notice(message); draw(); }
+    }), button('Select all', () => { plan.items.forEach(i => { i.checked = true; }); draw(); }), button('Select none', () => { plan.items.forEach(i => { i.checked = false; }); draw(); }),
+    button('Cancel import', () => { importPlan = null; draw(); })]);
+    parent.appendChild(card);
+  }
+  function exportButtons(parent) {
+    if (!Dad) return;
+    if (!p.characters.some(c => c.id === exportChar)) exportChar = p.characters[0] ? p.characters[0].id : '';
+    heading(parent, 'Dad Chat and Tavern formats');
+    note(parent, 'Files written for Dad Chat (dad-chat-v2) and compatible apps. Character files carry lore the character may know; world books and the pack include all lore, so you are asked first when private lore exists.');
+    if (!exportChar) return note(parent, 'Add a character to export it.');
+    select(parent, 'Character for exports', exportChar, p.characters.map(c => [c.id, c.name]), v => { exportChar = v; draw(); });
+    const c = () => p.characters.find(x => x.id === exportChar);
+    const confirmPrivate = () => !p.lore.some(l => l.visibility === 'private') || window.confirm('This export includes private lore. Export everything?');
+    row(parent, [button('Export Dad Chat character (JSON)', () => download(c().name + '.dad-char.json', JSON.stringify(Dad.toDadChar(p, c()), null, 2))),
+      button('Export Dad Chat lorebook (JSON)', () => download(c().name + '_lorebook.json', JSON.stringify(Dad.toDadLorebook(p, c()), null, 2))),
+      button('Export Dad Chat world book (JSON)', () => { if (confirmPrivate()) download(p.name + '_worldbook.json', JSON.stringify(Dad.toDadWorld(p), null, 2)); }),
+      button('Export Dad Chat user profile (JSON)', () => download(p.persona.name + '.UserProfile.json', JSON.stringify(Dad.toDadUserProfile(p), null, 2))),
+      button('Export world bible (text)', () => download(p.name + '_bible.txt', Dad.toBibleText(p))),
+      button('Export Dad Chat pack (zip)', () => { if (confirmPrivate()) downloadBytes(p.name + '_dad-chat-pack.zip', Dad.exportPack(p), 'application/zip'); })]);
+  }
   function welcome(body) {
     heading(body, 'Welcome to Studio');
     note(body, 'Build characters, worlds and chatbot projects, test them with your own model, and move them to and from Tavern-style cards, lorebooks and chats. Everything is stored in this browser.');
-    row(body, [button('Open the sample world', () => adopt(C.sample())),
+    row(body, [button('Open the sample world', () => adopt(C.sample())), ...(Dad ? [importButton()] : []),
       button('Start from a Tavern card (PNG or JSON)', () => pickFile('.png,.json,image/png,application/json', 25000000, file => importCard(file).then(card => {
         const res = C.fromCard(card), np = C.project(res.character.name + ' world', 'character');
         np.characters = [res.character]; np.lore = res.lore; adopt(np);
@@ -655,6 +697,7 @@
     const index = H.get(INDEX, []);
     if (index.length) select(body, 'Project', p ? p.id : '', [['', 'Choose a project'], ...index.map(x => [x.id, x.name])], id => { if (id) open(id); });
     if (!p) welcome(body);
+    if (importPlan && Dad) importPanel(body);
     const create = E('details', p ? {} : { open: 'open' });
     create.appendChild(E('summary', { text: 'New project / chatbot template' }));
     let name = '', template = 'character';

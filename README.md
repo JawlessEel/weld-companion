@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.63.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.64.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -218,11 +218,13 @@ If you've saved a note on a generator, a small floating 🗒 badge appears when 
 
 **Read aloud** speaks the current page's output, any Scrapbook entry, or a whole chat story using the browser's built-in speech — local, no network, no key. **Per-generator notes** let you jot "great for elf names" on any generator, searchable from the Scrapbook box. **🎲 Random favorite** (in the sticky header) jumps to a random starred generator. **Night light** now lives in the **Comfort** tab beside the theme it controls — it auto-applies a comfort theme (Warm, Dim, Sepia, Gray, or Dark) on an hour schedule, e.g. Warm from 20:00 to 07:00 — or in **ambient mode**, where the theme follows the hour and season (warm in the evening, earlier in winter, later in summer; dark late at night; southern-hemisphere aware) — restoring your previous theme outside those hours; your manual comfort settings always win when it's off.
 
-### Character & World Studio (v1.56.0, expanded in v1.63.0)
+### Character & World Studio (v1.56.0, expanded in v1.63.0 and v1.64.0)
 
 The **Studio** tab adds guided character editing, shared world lore with activation and knowledge rules, relationships, timelines, five chatbot templates, model-connected conversation tests, side-by-side reply comparisons, approved playthrough memory, consistency checking, and project export/import with snapshots. It uses your existing AI provider settings and character/lore interfaces.
 
 Version 1.63.0 adds a sample world and welcome screen, Tavern V2/V3 card import and export (JSON and PNG), World Info and lorebook import/export, advanced lore (secondary keys, probability, sticky/cooldown/delay, groups, recursion), alternate greetings, message variants, Continue/Regenerate/Impersonate, personas, macros, Author's Note, quick replies, regex rules, a prompt inspector, summaries, chat import/export, a world bible export and model-assisted drafting with undo.
+
+Version 1.64.0 reads and writes Dad Chat (dad-chat-v2) files: characters, chats with variants, personas, lorebooks, world books, Story Forge zips, Tavern/Chub PNG cards and full backups, with a preview before anything changes, plus Dad Chat export formats and a zip pack.
 
 See [the Studio guide](docs/STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
 

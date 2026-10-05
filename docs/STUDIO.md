@@ -1,6 +1,6 @@
 # Character & World Studio
 
-Available in Weld → **Studio**, starting with userscript **1.56.0**. Version **1.63.0** adds the features below.
+Available in Weld → **Studio**, starting with userscript **1.56.0**. Version **1.63.0** adds the features below, and **1.64.0** adds Dad Chat file support.
 
 ## Start a project
 
@@ -108,3 +108,32 @@ The smoke test expects a running local server at http://127.0.0.1:1234. Optional
 - The *Avatar image URL* is stored as text only and is never loaded by Studio.
 - Find-and-replace rules skip patterns with nested repeats (a ReDoS guard) and text over 20,000 characters, and rules inside an imported project start disabled.
 - Older projects open unchanged; missing fields get defaults when loaded.
+
+## Dad Chat (dad-chat-v2) files
+
+Studio reads and writes the files Dad Chat produces, so characters, lore, worlds and chats can move between the two. Use **Import a file** (welcome screen, Overview, Characters or Lore). Studio shows a **preview** of everything the file would add, lets you tick what to bring in, and only then changes the project. A snapshot is taken first when a project is open.
+
+| File | What Studio does |
+| --- | --- |
+| `dad-char` JSON (`*_Profile.json`, `*.json`) | Character with its lorebook, greetings, example dialogue, author note and reminder. The user persona is offered, unticked. |
+| `dad-char-chat` JSON | Character plus the chat. The selected branch becomes the playthrough, sibling replies become **variants**, archived nodes become hidden messages, Dad Chat memory facts arrive as **pending proposals**, and the summary is kept. |
+| `dad-user-profile` / `dad-chat-user-profile` JSON and `import_*_user_profile.js` scripts | Persona. Scripts are read as text and never run. |
+| Lorebooks (`*_lorebook.json`, `forge_lore` cards, Chub/Tavern V2 books) and World Info JSON | Lore entries. |
+| `dad-world` world book and Story Forge `worldbook.json` | World text and lore entries. |
+| Story Forge `characters.json` | Cast members as characters. |
+| Character cards, PNG (`chara` / `ccv3`, including cards with two `chara` chunks; the last wins) and JSON, V1, V2 and V3 | Character, lore, alternate greetings. Forge extension data offers the persona and world bible. |
+| Chat logs: `.jsonl` and readable `.txt` (`Name: text`) | A playthrough, with variants where the log has them. |
+| World bible `.txt` | World description. |
+| `dad-full` backup | A list to choose from: characters (built-in presets unticked), worlds, personas and chats, with chats, worlds and personas off by default. Nothing is wiped; this adds to the project. |
+| `.zip` packs (for example Story Forge exports) | Every importable file inside is listed together; other files are ignored. Stored and deflate zips are supported. |
+
+**Export** (Export & snapshots, and the playthrough): Dad Chat character JSON, lorebook JSON, world book JSON, user profile JSON, chat JSON (`dad-char-chat` with a branching tree and variants), chat text, world bible text, a Tavern V2 card (JSON or PNG, now with a Forge extension carrying your persona and world text) and a **zip pack** of all of them. Character files carry only lore that character may know; whole-project files ask first when private lore exists.
+
+How fields map (Dad Chat to Studio): the long `systemPrompt` and `systemNote` become the system prompt override; `profile` text becomes the personality/background field; `Voice`, `Goals and fears`, `Boundaries` and `Beliefs` custom sections fill those fields and other sections are appended as headed text; `reminderMessage` is post-history instructions; `authorNote` is the character reminder; `firstMessage` is the opening plus alternates; lore priority, keys, constant, enabled and exclude-recursion carry over. Studio's secondary keys are merged into keys on export because Dad Chat has no such field.
+
+### Not carried over, and limits
+
+- Avatars: embedded images are not stored (Studio keeps an image address only). Image prefix, visual map, chat background and scene-cast data are reported as skipped.
+- Dad Chat keeps embeddings, Scene View, beat-director and immersive state; Studio ignores them.
+- Verification: import was run against 80 of the 81 real files in a local Dad Chat output folder (the 81st is a plain chat screenshot PNG with no card data) and every one validated. Exports follow the field lists in Dad Chat's own source and re-import through Studio, but they have **not** been loaded into a running dad-chat-v2.
+- Full backups are up to about 12 MB; very large files take a moment to read.
