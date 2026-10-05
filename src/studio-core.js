@@ -511,14 +511,16 @@
   }
   function toV2Card(p, c, options) {
     const o = options || {};
-    const data = { name: c.name, description: c.personality, personality: c.voice, scenario: c.scenario || p.world.description,
+    const data = { name: c.name, description: c.personality, personality: c.voice, scenario: c.scenario || (o.includeForge ? p.world.description : ""),
       first_mes: c.opening, mes_example: c.examples, creator_notes: c.creatorNotes + (o.includeNotes && c.notes ? '\n\n' + c.notes : ''),
       system_prompt: c.systemPrompt, post_history_instructions: c.postHistory, alternate_greetings: c.alternateGreetings.slice(),
       character_book: toV2Book(p, c), tags: tagsToList(c.tags), creator: c.creator, character_version: c.version,
       extensions: { talkativeness: String(c.talkativeness / 100), fav: false,
         depth_prompt: { prompt: c.depthPrompt, depth: c.depthPromptDepth, role: 'system' },
         weld_studio: { studio: 1, motivations: c.motivations, boundaries: c.boundaries, beliefs: c.beliefs },
-        forge: { kind: 'character', world_bible: p.world.description, user_persona: { name: p.persona.name, description: p.persona.description }, source: null } } };
+        } };
+    // Persona and world text describe you and your project, so they only travel with a card when you opt in.
+    if (o.includeForge) data.extensions.forge = { kind: 'character', world_bible: p.world.description, user_persona: { name: p.persona.name, description: p.persona.description }, source: null };
     return { spec: 'chara_card_v2', spec_version: '2.0', data };
   }
   function fromCard(raw) {

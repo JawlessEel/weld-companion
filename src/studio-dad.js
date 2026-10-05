@@ -5,6 +5,7 @@
   else root.WeldStudioDad = factory(root.WeldStudioCore);
 })(typeof window === 'object' ? window : globalThis, function (C) {
   'use strict';
+  const MAX_ENTRY = 60000000, MAX_TOTAL = 100000000;
   const LIMITS = { characters: 200, lore: 1000, sessions: 100, messages: 2000, proposals: 100, text: 100000 };
   const FIELD_SECTIONS = { voice: 'Voice', motivations: 'Goals and fears', boundaries: 'Boundaries', beliefs: 'Beliefs' };
   const str = v => (v == null ? '' : String(v));
@@ -118,7 +119,9 @@
     });
     return out;
   }
-  function toDadChar(p, c) {
+  // The persona (your name and description) is only written when includePersona is true.
+  function toDadChar(p, c, options) {
+    const withPersona = !!(options && options.includePersona);
     const rows = rowsFromExamples(c.examples);
     const sections = Object.keys(FIELD_SECTIONS).filter(k => c[k].trim()).map(k => ({ header: FIELD_SECTIONS[k], content: c[k] }));
     return { type: 'dad-char', version: 2, data: {
@@ -127,7 +130,7 @@
       profile: { name: c.name, age: '', gender: '', appearance: '', personality: c.personality, background: '', scenario: c.scenario, systemNote: '' },
       customSections: sections, exampleDialogue: rows,
       firstMessage: [c.opening].concat(c.alternateGreetings).filter(g => g.trim()), reminderMessage: c.postHistory,
-      userOverride: { name: p.persona.name, description: p.persona.description, avatar: null }, preInstruction: c.systemPrompt.trim() ? 'custom' : 'roleplay',
+      userOverride: { name: withPersona ? p.persona.name : '', description: withPersona ? p.persona.description : '', avatar: null }, preInstruction: c.systemPrompt.trim() ? 'custom' : 'roleplay',
       preInstructionCustom: c.systemPrompt, tags: c.tags.split(',').map(t => t.trim()).filter(Boolean),
       chatBackground: '', bgBlur: '0', bgOpacity: '1', imagePrefix: '', visualMap: '', lorebook: dadLoreEntries(p, c),
       authorNote: { text: c.depthPrompt, depth: c.depthPromptDepth, role: 'system', enabled: !!c.depthPrompt.trim() }, lastModified: Date.now() } };
@@ -155,7 +158,7 @@
     const ch = p.characters.find(c => c.id === s.characterId) || { name: 'Character' };
     return s.messages.filter(m => !m.hidden).map(m => (m.role === 'user' ? p.persona.name : ch.name) + ': ' + m.content).join('\n\n') + '\n';
   }
-  function toDadChat(p, s) {
+  function toDadChat(p, s, options) {
     const c = p.characters.find(x => x.id === s.characterId);
     if (!c) throw new Error('This playthrough has no character.');
     const nodes = {}, rootId = uniqueId('n');
@@ -173,7 +176,7 @@
     });
     const facts = {};
     s.memories.forEach((m, i) => { const id = 'mem_' + Date.now() + '_' + i; facts[id] = { id, type: 'fact', content: m.text, scene: null, keywords: [], confidence: 1, timestamp: new Date().toISOString(), accessCount: 0, relatedCharId: '', originNodeId: '', aiImproved: false }; });
-    const char = toDadChar(p, c).data;
+    const char = toDadChar(p, c, options).data;
     return { type: 'dad-char-chat', version: 2, character: char, thread: { id: uniqueId('t'), title: s.name, characterId: char.id, nodes, rootId, created: new Date().toISOString(), smartRenamed: false, draft: '',
       authorNote: { text: p.settings.authorNote, depth: p.settings.authorNoteDepth, role: 'system', enabled: !!p.settings.authorNote.trim() }, memoryStore: { facts, version: 1 }, contextSummary: s.summary } };
   }
@@ -243,10 +246,21 @@
 
   // ---- ZIP (stored/deflate reader, stored writer) ----
   const TD = typeof TextDecoder === 'function' ? new TextDecoder('utf-8') : null;
-  async function inflateRaw(bytes) {
+  // Inflate with a hard cap on the real output size: sizes declared in a zip header are not trusted.
+  async function inflateRaw(bytes, limit) {
     if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot unpack compressed zip files.');
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) { try { await reader.cancel(); } catch (e) { /* already stopped */ } throw new Error('The zip expands to more than the allowed size.'); }
+      chunks.push(value);
+    }
+    const out = new Uint8Array(size); let o = 0;
+    chunks.forEach(c => { out.set(c, o); o += c.length; });
+    return out;
   }
   async function unzip(bytes) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -264,12 +278,14 @@
       const name = TD.decode(bytes.subarray(pos + 46, pos + 46 + nlen));
       pos += 46 + nlen + elen + clen;
       if (name.endsWith('/')) continue;
-      total += usize;
-      if (total > 100000000 || usize > 60000000) throw new Error('The zip is too large to open here.');
+      if (usize > MAX_ENTRY || total + usize > MAX_TOTAL) throw new Error('The zip is too large to open here.');
       const lnlen = view.getUint16(local + 26, true), lelen = view.getUint16(local + 28, true), start = local + 30 + lnlen + lelen;
       const raw = bytes.subarray(start, start + csize);
-      files.push({ name: name.split('/').pop(), path: name, bytes: method === 0 ? raw : method === 8 ? await inflateRaw(raw) : null });
-      if (files[files.length - 1].bytes === null) throw new Error('Unsupported zip compression in ' + name + '.');
+      if (method !== 0 && method !== 8) throw new Error('Unsupported zip compression in ' + name + '.');
+      const data = method === 0 ? raw : await inflateRaw(raw, Math.min(MAX_ENTRY, MAX_TOTAL - total));
+      total += data.length;
+      if (total > MAX_TOTAL) throw new Error('The zip is too large to open here.');
+      files.push({ name: name.split('/').pop(), path: name, bytes: data });
     }
     return files;
   }
@@ -457,7 +473,7 @@
     const safe = s => str(s).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60) || 'item';
     const files = [{ name: 'README.txt', data: 'Exported from Weld Studio (' + p.name + ').\nFiles: *.dad-char.json (Dad Chat characters), *_lorebook.json, worldbook.json (dad-world), bible.txt, *.UserProfile.json, chats/*.txt.\n' }];
     p.characters.forEach(c => {
-      files.push({ name: safe(c.name) + '.dad-char.json', data: JSON.stringify(toDadChar(p, c), null, 2) });
+      files.push({ name: safe(c.name) + '.dad-char.json', data: JSON.stringify(toDadChar(p, c, { includePersona: true }), null, 2) });
       if (p.lore.some(l => C.visible(l, c.id))) files.push({ name: safe(c.name) + '_lorebook.json', data: JSON.stringify(toDadLorebook(p, c), null, 2) });
     });
     if (p.lore.length) files.push({ name: 'worldbook.json', data: JSON.stringify(toDadWorld(p), null, 2) });

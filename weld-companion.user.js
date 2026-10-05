@@ -10058,14 +10058,16 @@
   }
   function toV2Card(p, c, options) {
     const o = options || {};
-    const data = { name: c.name, description: c.personality, personality: c.voice, scenario: c.scenario || p.world.description,
+    const data = { name: c.name, description: c.personality, personality: c.voice, scenario: c.scenario || (o.includeForge ? p.world.description : ""),
       first_mes: c.opening, mes_example: c.examples, creator_notes: c.creatorNotes + (o.includeNotes && c.notes ? '\n\n' + c.notes : ''),
       system_prompt: c.systemPrompt, post_history_instructions: c.postHistory, alternate_greetings: c.alternateGreetings.slice(),
       character_book: toV2Book(p, c), tags: tagsToList(c.tags), creator: c.creator, character_version: c.version,
       extensions: { talkativeness: String(c.talkativeness / 100), fav: false,
         depth_prompt: { prompt: c.depthPrompt, depth: c.depthPromptDepth, role: 'system' },
         weld_studio: { studio: 1, motivations: c.motivations, boundaries: c.boundaries, beliefs: c.beliefs },
-        forge: { kind: 'character', world_bible: p.world.description, user_persona: { name: p.persona.name, description: p.persona.description }, source: null } } };
+        } };
+    // Persona and world text describe you and your project, so they only travel with a card when you opt in.
+    if (o.includeForge) data.extensions.forge = { kind: 'character', world_bible: p.world.description, user_persona: { name: p.persona.name, description: p.persona.description }, source: null };
     return { spec: 'chara_card_v2', spec_version: '2.0', data };
   }
   function fromCard(raw) {
@@ -10365,6 +10367,7 @@
   else root.WeldStudioDad = factory(root.WeldStudioCore);
 })(typeof window === 'object' ? window : globalThis, function (C) {
   'use strict';
+  const MAX_ENTRY = 60000000, MAX_TOTAL = 100000000;
   const LIMITS = { characters: 200, lore: 1000, sessions: 100, messages: 2000, proposals: 100, text: 100000 };
   const FIELD_SECTIONS = { voice: 'Voice', motivations: 'Goals and fears', boundaries: 'Boundaries', beliefs: 'Beliefs' };
   const str = v => (v == null ? '' : String(v));
@@ -10478,7 +10481,9 @@
     });
     return out;
   }
-  function toDadChar(p, c) {
+  // The persona (your name and description) is only written when includePersona is true.
+  function toDadChar(p, c, options) {
+    const withPersona = !!(options && options.includePersona);
     const rows = rowsFromExamples(c.examples);
     const sections = Object.keys(FIELD_SECTIONS).filter(k => c[k].trim()).map(k => ({ header: FIELD_SECTIONS[k], content: c[k] }));
     return { type: 'dad-char', version: 2, data: {
@@ -10487,7 +10492,7 @@
       profile: { name: c.name, age: '', gender: '', appearance: '', personality: c.personality, background: '', scenario: c.scenario, systemNote: '' },
       customSections: sections, exampleDialogue: rows,
       firstMessage: [c.opening].concat(c.alternateGreetings).filter(g => g.trim()), reminderMessage: c.postHistory,
-      userOverride: { name: p.persona.name, description: p.persona.description, avatar: null }, preInstruction: c.systemPrompt.trim() ? 'custom' : 'roleplay',
+      userOverride: { name: withPersona ? p.persona.name : '', description: withPersona ? p.persona.description : '', avatar: null }, preInstruction: c.systemPrompt.trim() ? 'custom' : 'roleplay',
       preInstructionCustom: c.systemPrompt, tags: c.tags.split(',').map(t => t.trim()).filter(Boolean),
       chatBackground: '', bgBlur: '0', bgOpacity: '1', imagePrefix: '', visualMap: '', lorebook: dadLoreEntries(p, c),
       authorNote: { text: c.depthPrompt, depth: c.depthPromptDepth, role: 'system', enabled: !!c.depthPrompt.trim() }, lastModified: Date.now() } };
@@ -10515,7 +10520,7 @@
     const ch = p.characters.find(c => c.id === s.characterId) || { name: 'Character' };
     return s.messages.filter(m => !m.hidden).map(m => (m.role === 'user' ? p.persona.name : ch.name) + ': ' + m.content).join('\n\n') + '\n';
   }
-  function toDadChat(p, s) {
+  function toDadChat(p, s, options) {
     const c = p.characters.find(x => x.id === s.characterId);
     if (!c) throw new Error('This playthrough has no character.');
     const nodes = {}, rootId = uniqueId('n');
@@ -10533,7 +10538,7 @@
     });
     const facts = {};
     s.memories.forEach((m, i) => { const id = 'mem_' + Date.now() + '_' + i; facts[id] = { id, type: 'fact', content: m.text, scene: null, keywords: [], confidence: 1, timestamp: new Date().toISOString(), accessCount: 0, relatedCharId: '', originNodeId: '', aiImproved: false }; });
-    const char = toDadChar(p, c).data;
+    const char = toDadChar(p, c, options).data;
     return { type: 'dad-char-chat', version: 2, character: char, thread: { id: uniqueId('t'), title: s.name, characterId: char.id, nodes, rootId, created: new Date().toISOString(), smartRenamed: false, draft: '',
       authorNote: { text: p.settings.authorNote, depth: p.settings.authorNoteDepth, role: 'system', enabled: !!p.settings.authorNote.trim() }, memoryStore: { facts, version: 1 }, contextSummary: s.summary } };
   }
@@ -10603,10 +10608,21 @@
 
   // ---- ZIP (stored/deflate reader, stored writer) ----
   const TD = typeof TextDecoder === 'function' ? new TextDecoder('utf-8') : null;
-  async function inflateRaw(bytes) {
+  // Inflate with a hard cap on the real output size: sizes declared in a zip header are not trusted.
+  async function inflateRaw(bytes, limit) {
     if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot unpack compressed zip files.');
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) { try { await reader.cancel(); } catch (e) { /* already stopped */ } throw new Error('The zip expands to more than the allowed size.'); }
+      chunks.push(value);
+    }
+    const out = new Uint8Array(size); let o = 0;
+    chunks.forEach(c => { out.set(c, o); o += c.length; });
+    return out;
   }
   async function unzip(bytes) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -10624,12 +10640,14 @@
       const name = TD.decode(bytes.subarray(pos + 46, pos + 46 + nlen));
       pos += 46 + nlen + elen + clen;
       if (name.endsWith('/')) continue;
-      total += usize;
-      if (total > 100000000 || usize > 60000000) throw new Error('The zip is too large to open here.');
+      if (usize > MAX_ENTRY || total + usize > MAX_TOTAL) throw new Error('The zip is too large to open here.');
       const lnlen = view.getUint16(local + 26, true), lelen = view.getUint16(local + 28, true), start = local + 30 + lnlen + lelen;
       const raw = bytes.subarray(start, start + csize);
-      files.push({ name: name.split('/').pop(), path: name, bytes: method === 0 ? raw : method === 8 ? await inflateRaw(raw) : null });
-      if (files[files.length - 1].bytes === null) throw new Error('Unsupported zip compression in ' + name + '.');
+      if (method !== 0 && method !== 8) throw new Error('Unsupported zip compression in ' + name + '.');
+      const data = method === 0 ? raw : await inflateRaw(raw, Math.min(MAX_ENTRY, MAX_TOTAL - total));
+      total += data.length;
+      if (total > MAX_TOTAL) throw new Error('The zip is too large to open here.');
+      files.push({ name: name.split('/').pop(), path: name, bytes: data });
     }
     return files;
   }
@@ -10817,7 +10835,7 @@
     const safe = s => str(s).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60) || 'item';
     const files = [{ name: 'README.txt', data: 'Exported from Weld Studio (' + p.name + ').\nFiles: *.dad-char.json (Dad Chat characters), *_lorebook.json, worldbook.json (dad-world), bible.txt, *.UserProfile.json, chats/*.txt.\n' }];
     p.characters.forEach(c => {
-      files.push({ name: safe(c.name) + '.dad-char.json', data: JSON.stringify(toDadChar(p, c), null, 2) });
+      files.push({ name: safe(c.name) + '.dad-char.json', data: JSON.stringify(toDadChar(p, c, { includePersona: true }), null, 2) });
       if (p.lore.some(l => C.visible(l, c.id))) files.push({ name: safe(c.name) + '_lorebook.json', data: JSON.stringify(toDadLorebook(p, c), null, 2) });
     });
     if (p.lore.length) files.push({ name: 'worldbook.json', data: JSON.stringify(toDadWorld(p), null, 2) });
@@ -10934,6 +10952,10 @@
         parent.appendChild(E('label', { style: { display: 'inline-flex', gap: '5px', padding: '6px' } }, [box, E('span', { text: c.name })]));
       });
     }
+  }
+  // Persona and world text are yours; ask before they travel inside an exported file.
+  function shareExtras() {
+    return window.confirm('Include your persona (' + p.persona.name + ') and your world description in this file? Choose Cancel to leave them out.');
   }
   function download(name, content) { H.download(name.replace(/[^a-z0-9._-]/gi, '_'), content); }
   function downloadBytes(name, bytes, mime) {
@@ -11145,9 +11167,9 @@
       if (aiUndo) row(body, [button('Undo last model change (' + aiUndo.label + ')', () => { aiUndo.object[aiUndo.name] = aiUndo.value; aiUndo = null; save(); draw(); })]);
       row(body, [button('Duplicate character', () => {
         const copy = C.copy(c); copy.id = C.id(); copy.name += ' (copy)'; p.characters.push(copy); selected = copy.id; save(); draw();
-      }), button('Export Tavern V2 card (JSON)', () => download(c.name + '.card.json', JSON.stringify(C.toV2Card(p, c), null, 2))),
+      }), button('Export Tavern V2 card (JSON)', () => download(c.name + '.card.json', JSON.stringify(C.toV2Card(p, c, { includeForge: shareExtras() }), null, 2))),
       button('Export Tavern V2 card (PNG)', () => pickFile('.png,image/png', 25000000, file => file.arrayBuffer().then(buf => {
-        downloadBytes(c.name + '.card.png', C.pngWriteCard(new Uint8Array(buf), C.toV2Card(p, c), 'chara'), 'image/png');
+        downloadBytes(c.name + '.card.png', C.pngWriteCard(new Uint8Array(buf), C.toV2Card(p, c, { includeForge: shareExtras() }), 'chara'), 'image/png');
       }))), button('Export AICC character', () => {
         const pack = window.weldAICCPack;
         if (!pack) throw new Error('Existing character tools are unavailable.');
@@ -11276,7 +11298,7 @@
       const branch = C.copy(s); branch.id = C.id(); branch.name += ' (branch)';
       p.sessions.push(branch); sessionId = branch.id; save(); draw();
     }), button('Export transcript (Markdown)', () => download(s.name + '.md', C.transcriptMarkdown(p, s))),
-    ...(Dad ? [button('Export Dad Chat chat (JSON)', () => download(s.name + '.dad-chat.json', JSON.stringify(Dad.toDadChat(p, s), null, 2))), button('Export chat text (.txt)', () => download(s.name + '.txt', Dad.chatText(p, s)))] : []),
+    ...(Dad ? [button('Export Dad Chat chat (JSON)', () => download(s.name + '.dad-chat.json', JSON.stringify(Dad.toDadChat(p, s, { includePersona: shareExtras() }), null, 2))), button('Export chat text (.txt)', () => download(s.name + '.txt', Dad.chatText(p, s)))] : []),
     button('Export chat (JSONL)', () => download(s.name + '.jsonl', C.toChatJsonl(p, s))),
     button('Delete playthrough', () => { if (!window.confirm('Delete this playthrough and its memories?')) return; p.sessions = p.sessions.filter(x => x.id !== s.id); sessionId = ''; save(); draw(); })]);
     const transcript = E('div', { style: { maxHeight: '420px', overflow: 'auto', border: '1px solid var(--wc-line)', padding: '10px' } });
@@ -11503,7 +11525,7 @@
     select(parent, 'Character for exports', exportChar, p.characters.map(c => [c.id, c.name]), v => { exportChar = v; draw(); });
     const c = () => p.characters.find(x => x.id === exportChar);
     const confirmPrivate = () => !p.lore.some(l => l.visibility === 'private') || window.confirm('This export includes private lore. Export everything?');
-    row(parent, [button('Export Dad Chat character (JSON)', () => download(c().name + '.dad-char.json', JSON.stringify(Dad.toDadChar(p, c()), null, 2))),
+    row(parent, [button('Export Dad Chat character (JSON)', () => download(c().name + '.dad-char.json', JSON.stringify(Dad.toDadChar(p, c(), { includePersona: shareExtras() }), null, 2))),
       button('Export Dad Chat lorebook (JSON)', () => download(c().name + '_lorebook.json', JSON.stringify(Dad.toDadLorebook(p, c()), null, 2))),
       button('Export Dad Chat world book (JSON)', () => { if (confirmPrivate()) download(p.name + '_worldbook.json', JSON.stringify(Dad.toDadWorld(p), null, 2)); }),
       button('Export Dad Chat user profile (JSON)', () => download(p.persona.name + '.UserProfile.json', JSON.stringify(Dad.toDadUserProfile(p), null, 2))),

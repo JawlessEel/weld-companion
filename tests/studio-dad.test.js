@@ -221,6 +221,19 @@ const v2Entry = (i, keys, content, over) => Object.assign({ id: i, entry_id: i, 
   const names = pack.map(f => f.path); assert.ok(names.includes('Ayla.dad-char.json') && names.includes('Ayla_lorebook.json') && names.includes('worldbook.json') && names.includes('bible.txt') && names.includes('Rowan.UserProfile.json') && names.includes('README.txt'));
   assert.equal(JSON.parse(Buffer.from(pack.find(f => f.name === 'Ayla.dad-char.json').bytes).toString()).type, 'dad-char');
 
+  // Decompression bomb: a header that lies about its size cannot get past the real output cap.
+  const bomb = makeZip([['bomb.json', Buffer.alloc(70000000, 32)]], true);
+  for (let i = 0; i < bomb.length - 4; i++) if (bomb.readUInt32LE(i) === 0x02014b50) { bomb.writeUInt32LE(100, i + 24); break; }
+  await assert.rejects(() => D.unzip(new Uint8Array(bomb)), /expands to more than the allowed size|too large/);
+  // Persona and world text only travel with an export when the user opts in.
+  const priv = C.project('Priv', 'character'); priv.persona = { name: 'PrivateName', description: 'PRIVATE_PERSONA' }; priv.world.description = 'PRIVATE_WORLD';
+  assert.doesNotMatch(JSON.stringify(D.toDadChar(priv, priv.characters[0])), /PrivateName|PRIVATE_PERSONA/);
+  assert.match(JSON.stringify(D.toDadChar(priv, priv.characters[0], { includePersona: true })), /PRIVATE_PERSONA/);
+  assert.doesNotMatch(JSON.stringify(C.toV2Card(priv, priv.characters[0])), /PRIVATE_PERSONA|PRIVATE_WORLD|forge/);
+  assert.match(JSON.stringify(C.toV2Card(priv, priv.characters[0], { includeForge: true })), /PRIVATE_PERSONA/);
+  assert.match(JSON.stringify(C.toV2Card(priv, priv.characters[0], { includeForge: true })), /PRIVATE_WORLD/);
+  assert.doesNotMatch(JSON.stringify(D.toDadChat(Object.assign(priv, { sessions: [C.session(priv, priv.characters[0].id, 'S')] }), priv.sessions[0])), /PRIVATE_PERSONA/);
+
   // Limits and safety: caps are enforced and nothing runs.
   const many = { type: 'dad-full', config: { characterBook: Object.fromEntries(Array.from({ length: 201 }, (_, i) => ['c' + i, Object.assign(dadChar(), { id: 'c' + i })])) }, threads: {} };
   const manyPlan = await D.readFile(file('many.json', JSON.stringify(many))); assert.equal(manyPlan.items.filter(i => i.kind === 'character').length, 200);

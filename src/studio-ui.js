@@ -102,6 +102,10 @@
       });
     }
   }
+  // Persona and world text are yours; ask before they travel inside an exported file.
+  function shareExtras() {
+    return window.confirm('Include your persona (' + p.persona.name + ') and your world description in this file? Choose Cancel to leave them out.');
+  }
   function download(name, content) { H.download(name.replace(/[^a-z0-9._-]/gi, '_'), content); }
   function downloadBytes(name, bytes, mime) {
     if (!H.downloadBytes) throw new Error('Binary downloads are not available in this environment.');
@@ -312,9 +316,9 @@
       if (aiUndo) row(body, [button('Undo last model change (' + aiUndo.label + ')', () => { aiUndo.object[aiUndo.name] = aiUndo.value; aiUndo = null; save(); draw(); })]);
       row(body, [button('Duplicate character', () => {
         const copy = C.copy(c); copy.id = C.id(); copy.name += ' (copy)'; p.characters.push(copy); selected = copy.id; save(); draw();
-      }), button('Export Tavern V2 card (JSON)', () => download(c.name + '.card.json', JSON.stringify(C.toV2Card(p, c), null, 2))),
+      }), button('Export Tavern V2 card (JSON)', () => download(c.name + '.card.json', JSON.stringify(C.toV2Card(p, c, { includeForge: shareExtras() }), null, 2))),
       button('Export Tavern V2 card (PNG)', () => pickFile('.png,image/png', 25000000, file => file.arrayBuffer().then(buf => {
-        downloadBytes(c.name + '.card.png', C.pngWriteCard(new Uint8Array(buf), C.toV2Card(p, c), 'chara'), 'image/png');
+        downloadBytes(c.name + '.card.png', C.pngWriteCard(new Uint8Array(buf), C.toV2Card(p, c, { includeForge: shareExtras() }), 'chara'), 'image/png');
       }))), button('Export AICC character', () => {
         const pack = window.weldAICCPack;
         if (!pack) throw new Error('Existing character tools are unavailable.');
@@ -443,7 +447,7 @@
       const branch = C.copy(s); branch.id = C.id(); branch.name += ' (branch)';
       p.sessions.push(branch); sessionId = branch.id; save(); draw();
     }), button('Export transcript (Markdown)', () => download(s.name + '.md', C.transcriptMarkdown(p, s))),
-    ...(Dad ? [button('Export Dad Chat chat (JSON)', () => download(s.name + '.dad-chat.json', JSON.stringify(Dad.toDadChat(p, s), null, 2))), button('Export chat text (.txt)', () => download(s.name + '.txt', Dad.chatText(p, s)))] : []),
+    ...(Dad ? [button('Export Dad Chat chat (JSON)', () => download(s.name + '.dad-chat.json', JSON.stringify(Dad.toDadChat(p, s, { includePersona: shareExtras() }), null, 2))), button('Export chat text (.txt)', () => download(s.name + '.txt', Dad.chatText(p, s)))] : []),
     button('Export chat (JSONL)', () => download(s.name + '.jsonl', C.toChatJsonl(p, s))),
     button('Delete playthrough', () => { if (!window.confirm('Delete this playthrough and its memories?')) return; p.sessions = p.sessions.filter(x => x.id !== s.id); sessionId = ''; save(); draw(); })]);
     const transcript = E('div', { style: { maxHeight: '420px', overflow: 'auto', border: '1px solid var(--wc-line)', padding: '10px' } });
@@ -670,7 +674,7 @@
     select(parent, 'Character for exports', exportChar, p.characters.map(c => [c.id, c.name]), v => { exportChar = v; draw(); });
     const c = () => p.characters.find(x => x.id === exportChar);
     const confirmPrivate = () => !p.lore.some(l => l.visibility === 'private') || window.confirm('This export includes private lore. Export everything?');
-    row(parent, [button('Export Dad Chat character (JSON)', () => download(c().name + '.dad-char.json', JSON.stringify(Dad.toDadChar(p, c()), null, 2))),
+    row(parent, [button('Export Dad Chat character (JSON)', () => download(c().name + '.dad-char.json', JSON.stringify(Dad.toDadChar(p, c(), { includePersona: shareExtras() }), null, 2))),
       button('Export Dad Chat lorebook (JSON)', () => download(c().name + '_lorebook.json', JSON.stringify(Dad.toDadLorebook(p, c()), null, 2))),
       button('Export Dad Chat world book (JSON)', () => { if (confirmPrivate()) download(p.name + '_worldbook.json', JSON.stringify(Dad.toDadWorld(p), null, 2)); }),
       button('Export Dad Chat user profile (JSON)', () => download(p.persona.name + '.UserProfile.json', JSON.stringify(Dad.toDadUserProfile(p), null, 2))),
