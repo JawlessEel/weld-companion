@@ -569,7 +569,7 @@
     });
     row(parent, [button('Add quick reply', () => { if (p.quickReplies.length >= 50) throw new Error('At most 50 quick replies.'); p.quickReplies.push({ id: C.id(), label: 'New', text: '', send: false }); save(); draw(); })]);
     heading(parent, 'Find and replace rules');
-    note(parent, 'Rules can clean or restyle text. Display rules change only what you see in Test chat; prompt rules change only what the model receives; stored messages are never rewritten. Invalid patterns are skipped.');
+    note(parent, 'Rules can clean or restyle text. Display rules change only what you see in Test chat; prompt rules change only what the model receives; stored messages are never rewritten. Invalid patterns, patterns with nested repeats such as (a+)+ and text over 20,000 characters are skipped, and rules from imported files start switched off until you enable them.');
     p.regex.forEach((r, i) => {
       area(parent, 'Rule name ' + (i + 1), r.name, v => { r.name = v; save(); }, { line: true });
       area(parent, 'Find pattern ' + (i + 1), r.find, v => { r.find = v.slice(0, 500); save(); }, { line: true });

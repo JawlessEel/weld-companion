@@ -106,4 +106,5 @@ The smoke test expects a running local server at http://127.0.0.1:1234. Optional
 - Model features (fill, rewrite, draft, summarize, suggest) were tested with a simulated model and strict parsers, not a real model. Output is validated and capped, and nothing is applied without you seeing it, but quality depends on your model.
 - Macros and lore timing run inside Studio's own test chat. Exported cards carry the text; the target app decides whether it expands macros.
 - The *Avatar image URL* is stored as text only and is never loaded by Studio.
+- Find-and-replace rules skip patterns with nested repeats (a ReDoS guard) and text over 20,000 characters, and rules inside an imported project start disabled.
 - Older projects open unchanged; missing fields get defaults when loaded.

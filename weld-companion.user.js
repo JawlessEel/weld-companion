@@ -9745,11 +9745,14 @@
     const found = new Set(); String(input || '').replace(/\{\{\s*([A-Za-z_]+)(?::[^{}]*)?\s*\}\}/g, (w, n) => { if (!known.includes(n.toLowerCase())) found.add(w); return w; });
     return [...found];
   }
+  // Patterns with a quantified group that itself contains a quantifier (for example (a+)+) can backtrack
+  // catastrophically. They are refused outright, and text handed to any rule is capped.
+  function riskyPattern(find) { return /\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]/.test(find); }
   function applyRegex(input, rules, target) {
     let out = String(input == null ? '' : input);
     (rules || []).forEach(r => {
       if (!r.enabled || (r.target !== 'both' && r.target !== target) || !r.find) return;
-      if (out.length > 200000) return;
+      if (out.length > 20000 || riskyPattern(r.find)) return;
       try { out = out.replace(new RegExp(r.find, r.flags), r.replace); } catch (e) { /* invalid rule is skipped */ }
     });
     return out;
@@ -9974,7 +9977,10 @@
     if (raw.length > 5000000) throw new Error('Import file exceeds 5 MB.');
     const b = JSON.parse(raw);
     if (!b || b.format !== 'weld-studio' || b.version !== VERSION) throw new Error('Not a supported Studio bundle.');
-    return validate(b.project);
+    const imported = validate(b.project);
+    // Rules arrive switched off: a shared file must not run patterns on your text until you review them.
+    imported.regex.forEach(r => { r.enabled = false; });
+    return imported;
   }
   function characterFromAICC(raw) {
     const c = raw.character || raw.addCharacter || raw;
@@ -10345,7 +10351,7 @@
   }
 
   return { VERSION, templates, id, copy, project, character, loreEntry, session, validate, migrate, visible, audit, context, lorePreview, recordLore,
-    parseMemories, approve, addVariant, pickVariant, setVariantText, expand, unresolvedMacros, applyRegex, bundle, importBundle,
+    parseMemories, approve, addVariant, pickVariant, setVariantText, expand, unresolvedMacros, applyRegex, riskyPattern, bundle, importBundle,
     characterFromAICC, characterToAICC, toV2Card, fromCard, toV2Book, fromV2Book, toWorldInfo, fromWorldInfo,
     pngReadCard, pngWriteCard, crc32, bytesToB64, b64ToBytes, toChatJsonl, fromChatJsonl, transcriptMarkdown, worldBible, stats, assist, sample, estTokens };
 });
@@ -10921,7 +10927,7 @@
     });
     row(parent, [button('Add quick reply', () => { if (p.quickReplies.length >= 50) throw new Error('At most 50 quick replies.'); p.quickReplies.push({ id: C.id(), label: 'New', text: '', send: false }); save(); draw(); })]);
     heading(parent, 'Find and replace rules');
-    note(parent, 'Rules can clean or restyle text. Display rules change only what you see in Test chat; prompt rules change only what the model receives; stored messages are never rewritten. Invalid patterns are skipped.');
+    note(parent, 'Rules can clean or restyle text. Display rules change only what you see in Test chat; prompt rules change only what the model receives; stored messages are never rewritten. Invalid patterns, patterns with nested repeats such as (a+)+ and text over 20,000 characters are skipped, and rules from imported files start switched off until you enable them.');
     p.regex.forEach((r, i) => {
       area(parent, 'Rule name ' + (i + 1), r.name, v => { r.name = v; save(); }, { line: true });
       area(parent, 'Find pattern ' + (i + 1), r.find, v => { r.find = v.slice(0, 500); save(); }, { line: true });

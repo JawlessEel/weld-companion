@@ -32,6 +32,16 @@ const rules = [{ id: 'a', name: 'x', find: 'foo', replace: 'bar', flags: 'g', ta
 assert.equal(C.applyRegex('foo foo', rules, 'prompt'), 'bar bar');
 assert.equal(C.applyRegex('foo bar', rules, 'display'), 'foo baz');
 
+// ReDoS guard: nested quantifiers are refused, large inputs skipped, and imported rules arrive disabled.
+assert.ok(C.riskyPattern('(a+)+$') && C.riskyPattern('(x*)*') && C.riskyPattern('(\w+\s?)+'));
+assert.ok(!C.riskyPattern('colou?r') && !C.riskyPattern('(cat|dog)s') && !C.riskyPattern('a+b'));
+const evil = [{ id: 'e', name: 'e', find: '(a+)+$', replace: '', flags: '', target: 'both', enabled: true }];
+const started = Date.now(); assert.equal(C.applyRegex('a'.repeat(40) + '!', evil, 'prompt'), 'a'.repeat(40) + '!'); assert.ok(Date.now() - started < 500);
+assert.equal(C.applyRegex('x'.repeat(30000), [{ id: 'g', name: 'g', find: 'x', replace: 'y', flags: 'g', target: 'both', enabled: true }], 'prompt').length, 30000);
+const shared = C.project('Shared', 'character'); shared.regex.push({ id: 'r', name: 'r', find: 'a', replace: 'b', flags: 'g', target: 'both', enabled: true });
+assert.equal(C.importBundle(C.bundle(shared)).regex[0].enabled, false);
+assert.equal(shared.regex[0].enabled, true);
+
 // Advanced lore: secondary keys, whole word, case, probability, groups, recursion, sticky/cooldown/delay.
 const p = C.project('Lore world', 'adventure');
 const hero = p.characters[0];
