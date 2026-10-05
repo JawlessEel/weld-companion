@@ -5,8 +5,10 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const file = path.join(root, 'weld-companion.user.js');
 const bundles = [
-  { marker: 'STUDIO', sources: ['studio-core.js', 'studio-ui.js'] },
-  { marker: 'PROJECT', sources: ['project-core.js', 'project-ui.js'] }
+  { marker: 'STUDIO', sources: ['studio-core.js', 'studio-dad.js', 'studio-ui.js'] },
+  { marker: 'PROJECT', sources: ['project-core.js', 'project-ui.js'] },
+  { marker: 'DEV', sources: ['dev-core.js', 'dev-ui.js'] },
+  { marker: 'SKILLS', sources: ['skills-core.js', 'skills-ui.js'] }
 ];
 const normalize = s => s.replace(/\r\n/g, '\n');
 const current = normalize(fs.readFileSync(file, 'utf8'));

@@ -233,6 +233,7 @@
   }
   function findingsSection(parent) {
     const a = S.analysis, rank = { error: 0, warn: 1, info: 2 }, max = S.filter === 'error' ? 0 : S.filter === 'warn' ? 1 : 2;
+    if (a.suppressedFindings && a.suppressedFindings.length) note(parent, a.suppressedFindings.length + ' finding(s) suppressed by explicit weld-ignore comments. They remain recorded in the analysis JSON.');
     const list = a.findings.filter(f => rank[f.severity] <= max);
     const sel = E('select', { class: 'wc-field', 'aria-label': 'Finding filter', style: { maxWidth: '200px' } }, [['error', 'Errors only'], ['warn', 'Warnings and errors'], ['info', 'Everything']].map(o => {
       const op = E('option', { value: o[0], text: o[1] }); if (o[0] === S.filter) op.selected = true; return op;
@@ -241,7 +242,13 @@
     row(parent, [sel, btn('Ask AI about these', () => {
       confirmSendOrThrow();
       H.openAI('Review the automatic findings below, tell me which are real problems and which are false alarms, and propose minimal fixes.', 'pack');
-    }, { mini: true, title: 'Opens the AI helper with this generator and its findings as context. Nothing is sent until you press Ask.' })]);
+    }, { mini: true, title: 'Opens the AI helper with this generator and its findings as context. Nothing is sent until you press Ask.' }),
+    btn('Send findings to Perchance AI', () => {
+      // Include every warning/error, even those hidden by the filter or Show more.
+      const issues = a.findings.filter(f => f.severity === 'error' || f.severity === 'warn');
+      const report = issues.map(f => '[' + f.severity.toUpperCase() + '] ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message + (f.hint ? '\n  Hint: ' + f.hint : '')).join('\n');
+      H.openPerchanceAI('Check and fix the confirmed issues in generator "' + S.project.name + '". Read the current generator source first: these automatic findings may be stale or false alarms. Explain false alarms and preserve working code, existing features, shared names, imports, and behavior. Make the smallest complete fixes and verify them in the live preview. Do not publish the generator.\n\nAUTOMATIC FINDINGS (' + issues.length + ' warnings/errors; analyzed ' + S.project.source + ' source):\n' + report);
+    }, { mini: true, accent: true, disabled: !H.isEdit() || !a.findings.some(f => f.severity === 'error' || f.severity === 'warn'), title: 'Put all warnings and errors into the native Perchance AI helper input. Existing draft text is kept. Press its Send button when ready. Requires the editor (#edit).' })]);
     if (!list.length) { note(parent, S.filter === 'info' ? 'No findings.' : 'No warnings. Switch the filter to see notes.'); return; }
     if (!canJump()) note(parent, 'Click-to-jump needs the editor open with the live version analyzed.');
     list.slice(0, S.findingsMax).forEach(f => {
@@ -566,6 +573,8 @@
   }
   window.weldProject = {
     render,
+    // Download a generator's published lists, HTML and imports without changing what the tab shows.
+    fetchPublished,
     // Source currently loaded for this generator (editor first), for the AI helper.
     current() {
       const slug = H.slug(); if (!slug) return null;

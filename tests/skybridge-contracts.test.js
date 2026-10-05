@@ -149,4 +149,100 @@ assert.equal(calls.filter((call) => call.path.endsWith('/blobs')).length, 2);
 assert.equal(calls.at(-1).method, 'PATCH');
 assert.match(calls.at(-1).path, /\/refs\/heads\/main$/);
 
+// Push as pull request: the commit is published as a NEW branch; the base branch is never moved.
+{
+  const prCalls = [];
+  const pr = load(['ghPushFilesAtomic'], between('function ghApiError(', 'function pushToGitHub('), {
+    ghApi(method, path, token, body, done) {
+      prCalls.push({ method, path, body });
+      if (path.endsWith('/ref/heads/main')) return done(null, 200, { object: { sha: 'parent' } });
+      if (path.endsWith('/commits/parent')) return done(null, 200, { tree: { sha: 'base-tree' } });
+      if (path.endsWith('/blobs')) return done(null, 201, { sha: 'blob' });
+      if (path.endsWith('/trees')) return done(null, 201, { sha: 'new-tree' });
+      if (path.endsWith('/commits')) return done(null, 201, { sha: 'new-commit' });
+      if (path.endsWith('/refs')) return done(null, 201, { ref: body.ref });
+      throw new Error(`unexpected API request: ${method} ${path}`);
+    },
+  });
+  let out;
+  pr.ghPushFilesAtomic('o', 'r', 'main', [{ path: 'a/x.txt', content: 'x' }], 't', 'msg', (err, value) => { out = { err, value }; }, { newBranch: 'weld/dad-chat-20261003-0705' });
+  assert.deepEqual(out, { err: null, value: 'created' });
+  assert.equal(prCalls.at(-1).method, 'POST');
+  assert.match(prCalls.at(-1).path, /\/git\/refs$/);
+  assert.equal(JSON.stringify(prCalls.at(-1).body), JSON.stringify({ ref: 'refs/heads/weld/dad-chat-20261003-0705', sha: 'new-commit' }));
+  assert.ok(!prCalls.some((c) => c.method === 'PATCH'), 'the base branch is never moved');
+  assert.ok(prCalls.find((c) => c.path.endsWith('/commits') && c.method === 'POST').body.parents[0] === 'parent', 'the commit sits on top of the base branch');
+  for (const bad of ['../x', 'a..b', 'x.lock', '/abs', 'trail/', 'sp ace', 'a//b']) {
+    prCalls.length = 0; let r;
+    pr.ghPushFilesAtomic('o', 'r', 'main', [{ path: 'a/x.txt', content: 'x' }], 't', 'msg', (err, value) => { r = { err, value }; }, { newBranch: bad });
+    assert.ok(r.err && /Unsafe branch name/.test(r.err.message), bad);
+    assert.ok(!prCalls.some((c) => c.path.endsWith('/refs')), 'no ref is created for ' + bad);
+  }
+}
+
+// The analyzer gate only ever adds text to the Push dialog; it never throws and can be switched off.
+{
+  const P = require('../src/project-core.js'), Dv = require('../src/dev-core.js');
+  let gate = true;
+  const g = load(['ghGateNote'], between('function ghGateNote(', 'function pushAsPullRequest('), {
+    gget: (k, d) => (k === 'ghPushGate' ? gate : d), window: { WeldProjectCore: P, WeldDevCore: Dv },
+  });
+  assert.equal(g.ghGateNote('x', 'output\n  ok\n', '<p>[output]</p>'), '', 'clean code adds nothing');
+  const note = g.ghGateNote('x', 'output\n  [missing]\n', '<p>[output]</p>');
+  assert.match(note, /Weld found 1 possible problem/); assert.match(note, /missing/);
+  gate = false; assert.equal(g.ghGateNote('x', 'output\n  [missing]\n', '<p>[output]</p>'), '', 'can be switched off');
+  gate = true;
+  const broken = load(['ghGateNote'], between('function ghGateNote(', 'function pushAsPullRequest('), { gget: () => true, window: { WeldProjectCore: { analyze() { throw new Error('boom'); } }, WeldDevCore: Dv } });
+  assert.equal(broken.ghGateNote('x', 'a', 'b'), '', 'an analyzer failure never blocks a push');
+  assert.equal(load(['ghGateNote'], between('function ghGateNote(', 'function pushAsPullRequest('), { gget: () => true, window: {} }).ghGateNote('x', 'a', 'b'), '', 'missing modules are tolerated');
+}
+
+// Credentials never travel in a state export: the GitHub token, Skybridge grants and the agent-bridge token.
+{
+  const sec = load(['stateIsSecret'], between('var STATE_SECRET_KEYS', 'function stateScrubOut('), {});
+  ['ghToken', 'sb:perm', 'bridge'].forEach((k) => assert.equal(sec.stateIsSecret(k), true, k + ' is excluded from exports'));
+  ['favorites', 'ai', 'folderSync', 'baseline:zoo'].forEach((k) => assert.equal(sec.stateIsSecret(k), false, k + ' may be exported'));
+}
+
 console.log('skybridge and GitHub push contract tests passed');
+
+// Pull/Diff must work on PRIVATE repos: with a token the file is read through the Contents API
+// (token only to api.github.com); without one, or if the API refuses, the anonymous raw URL is used.
+{
+  const sent = [];
+  function world(token, responses) {
+    sent.length = 0;
+    return load(['ghFetch', 'ghFetchRaw'], between('function ghFetchRaw(', 'function cmText('), {
+      ghToken: () => token,
+      parseGitHubUrl: load(['parseGitHubUrl'], between('function parseGitHubUrl(', '// global defaults overlaid')).parseGitHubUrl,
+      encodeURIComponent, Date,
+      GM_xmlhttpRequest(o) { sent.push(o); const r = responses.shift(); setTimeout(() => (r.err ? o.onerror() : o.onload({ status: r.status, responseText: r.text })), 0); },
+    });
+  }
+  const raw = 'https://raw.githubusercontent.com/me/private repo/refs/heads/main/dad chat/a b.txt?_=1'.replace(/ /g, '-');
+  const run = (w, url) => new Promise((resolve) => w.ghFetch(url, (err, text) => resolve({ err, text })));
+  (async () => {
+    let w = world('tok123', [{ status: 200, text: 'SECRET LISTS' }]);
+    assert.deepEqual(await run(w, raw), { err: null, text: 'SECRET LISTS' });
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].url, /^https:\/\/api\.github\.com\/repos\/me\/private-repo\/contents\/dad-chat\/a-b\.txt\?ref=main&_=\d+$/);
+    assert.equal(sent[0].headers.Authorization, 'Bearer tok123');
+    assert.match(sent[0].headers.Accept, /raw/);
+    w = world('', [{ status: 200, text: 'PUBLIC' }]);
+    assert.deepEqual(await run(w, raw), { err: null, text: 'PUBLIC' });
+    assert.equal(sent.length, 1);
+    assert.ok(sent[0].url.startsWith('https://raw.githubusercontent.com/') && !(sent[0].headers && sent[0].headers.Authorization), 'no token: anonymous raw, no Authorization');
+    w = world('tok', [{ status: 401, text: '' }, { status: 200, text: 'PUBLIC OK' }]);
+    assert.deepEqual(await run(w, raw), { err: null, text: 'PUBLIC OK' }, 'a rejected token falls back to the public file');
+    assert.ok(!(sent[1].headers && sent[1].headers.Authorization), 'the token is never sent to raw.githubusercontent.com');
+    w = world('tok', [{ status: 404, text: '' }, { status: 404, text: '' }]);
+    const failed = await run(w, raw);
+    assert.match(failed.err, /^HTTP 404 \(private repo\? the token needs access to me\/private-repo/);
+    w = world('tok', [{ err: true }, { status: 200, text: 'X' }]);
+    assert.equal((await run(w, raw)).text, 'X');
+    w = world('tok', [{ status: 200, text: 'Y' }]);
+    await run(w, 'https://example.com/file.txt');
+    assert.ok(sent[0].url.startsWith('https://example.com/') && !(sent[0].headers && sent[0].headers.Authorization), 'non-GitHub URLs never get the token');
+    console.log('Private-repo Pull/Diff fetch tests passed');
+  })().catch((e) => { console.error(e); process.exit(1); });
+}

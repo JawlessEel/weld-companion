@@ -38,7 +38,7 @@ async function settle() { for (let i = 0; i < 40; i++) { await tick(); if (!stat
 
 // ---- fake world ----------------------------------------------------------
 let slug = 'demo', edit = false, live = null, version = 1;
-const requests = [], store = new Map(), downloads = [], aiCalls = [], applied = [], jumps = [];
+const requests = [], store = new Map(), downloads = [], aiCalls = [], nativeCalls = [], applied = [], jumps = [];
 const deps = () => ({ success: true, unfound: [], generators: {
   demo: { name: 'demo', imports: ['plug'], code: version === 1 ? 'plug = {import:plug}\noutput\n  [animal] [missing]\nanimal\n  pig\n  cow\n  zebra\n' : 'plug = {import:plug}\noutput\n  [animal]\nanimal\n  pig\n  cow\n', lastEditTime: 1000 + version },
   plug: { name: 'plug', imports: [], code: 'x'.repeat(2000), lastEditTime: 5 + (version === 1 ? 0 : 1) } } });
@@ -66,6 +66,7 @@ const host = {
   favorites: () => ['alpha', 'beta'],
   statsMany(names, cb) { cb(host.stats); }, stats: {},
   openAI(prompt, ctx) { aiCalls.push({ prompt, ctx }); },
+  openPerchanceAI(prompt) { nativeCalls.push({ prompt }); },
   sample: async (s, via, opts) => ({ samples: ['Red Fox', 'Red Fox', 'Blue Owl', 'Green Cat', 'Red Fox', 'Pink Eel'], ms: 12, requested: opts.n })
 };
 const confirms = [];
@@ -89,6 +90,7 @@ const render = () => window.weldProject.render(parent);
   assert.ok(find('button', 'Analyze editor (live)').disabled, 'live analysis needs the editor');
   click('Fetch published + imports'); await settle();
   assert.equal(state().project.source, 'published');
+  assert.ok(find('button', 'Send findings to Perchance AI').disabled, 'native handoff requires the editor');
   assert.equal(state().project.deps.nodes.plug.bytes, 2000);
   assert.match(bodyText(), /Fetched the published version/);
   assert.match(bodyText(), /"missing" is not a list/, 'findings are listed');
@@ -174,6 +176,29 @@ const render = () => window.weldProject.render(parent);
   assert.equal(aiCalls.length, asked + 1);
   assert.equal(aiCalls.at(-1).ctx, 'pack');
   assert.equal(confirms.filter(c => /another author/.test(c)).length, warned, 'an editor source is yours: no extra warning');
+
+  // Repair handoff includes all issues, independent of the visible filter/limit.
+  const originalFindings = state().analysis.findings;
+  state().analysis.suppressedFindings = [{ id: 'duplicate-id', severity: 'warn', subject: 'pad', message: 'Suppressed only' }];
+  state().analysis.findings = Array.from({ length: 65 }, (_, i) => ({ severity: i === 0 ? 'error' : 'warn', pane: i === 0 ? 'dsl' : 'html', line: i + 1, message: 'Issue ' + i, hint: 'Check ' + i }));
+  state().analysis.findings.push({ severity: 'info', pane: 'dsl', message: 'Informational only' });
+  state().filter = 'error'; render();
+  assert.match(bodyText(), /1 finding\(s\) suppressed by explicit weld-ignore comments/);
+  const writesBeforeRepair = applied.length;
+  const toolsCallsBeforeRepair = aiCalls.length;
+  click('Send findings to Perchance AI');
+  const repair = nativeCalls.at(-1);
+  assert.equal(aiCalls.length, toolsCallsBeforeRepair, 'native handoff bypasses Tools and provider calls');
+  assert.match(repair.prompt, /Check and fix the confirmed issues in generator "demo"/);
+  assert.match(repair.prompt, /\[ERROR\] dsl line 1: Issue 0/);
+  assert.match(repair.prompt, /\[WARN\] html line 65: Issue 64\n  Hint: Check 64/);
+  assert.doesNotMatch(repair.prompt, /Informational only/);
+  assert.doesNotMatch(repair.prompt, /Suppressed only/);
+  assert.match(repair.prompt, /false alarms/);
+  assert.equal(applied.length, writesBeforeRepair, 'handoff does not write to the editor');
+  state().analysis.findings = [{ severity: 'info', pane: 'dsl', message: 'Just a note' }]; render();
+  assert.ok(find('button', 'Send findings to Perchance AI').disabled, 'repair is disabled without warnings/errors');
+  state().analysis.findings = originalFindings; state().analysis.suppressedFindings = []; state().filter = 'warn'; render();
 
   // ---- starred generators ----
   openSection('Starred generators');

@@ -6,8 +6,9 @@
 
 Favorites · reading comfort · save & pin results · undo-reroll · a full generator manager with your real folders · **two-way GitHub sync (Pull & Push)** · rename/delete that drive Perchance's own controls · a **Library** tab for readers and players — a permanent cross-generator **Scrapbook**, AICC **chat-story export** (styled HTML / Markdown / text), a **backup guardian**, night light, and read-aloud · a **Tools** tab housing the AI Helper (edit it, *point at your own GPT, or run a free local model*), AICC character file import/export, and a one-click **self-test** · a **federated Data Manager** that browses, edits and backs up every generator's IndexedDB · an **AICC pack** for AI Character Chat with a Lore Library, character GitHub round-trip, and database repair & recovery with quarantine.
 
+[![Checks](https://github.com/therealwestninja/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/therealwestninja/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.54.3-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.64.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -29,7 +30,9 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
   - [Generator manager, directory & CRUD](#generator-manager-directory--crud)
   - [Sync with GitHub — Pull & Push](#sync-with-github--pull--push)
   - [Library — for readers & players](#library--for-readers--players)
-  - [Project — read, check & export any generator](#project--read-check--export-any-generator)
+  - [Project — read, check & export any generator](#project--read-check--export-any-generator-v1570)
+  - [Skills - application and generator library](#skills--application-and-generator-library-v1600)
+  - [Dev — folder sync, AI agents & GitHub](#dev--folder-sync-ai-agents--github-v1580)
   - [Tools — AI Helper & character files](#tools--ai-helper--character-files)
   - [Data Manager — browse, edit & back up every generator's IndexedDB](#data-manager--browse-edit--back-up-every-generators-indexeddb)
   - [AICC pack — Lore Library, character round-trip & repair](#aicc-pack--lore-library-character-round-trip--repair)
@@ -38,6 +41,7 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
 - [Privacy & safety](#privacy--safety)
 - [Compatibility & caveats](#compatibility--caveats)
 - [Relationship to Weld](#relationship-to-weld)
+- [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -53,10 +57,11 @@ No account and no configuration are needed to start. GitHub sync and a custom AI
 
 ## Features
 
-Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled like a native item, so nothing of Perchance's is replaced, displaced, or covered. It opens the **Weld drawer**, which holds a result-tools row in its header (copy / save / pin / undo-reroll) and seven tabs:
+Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled like a native item, so nothing of Perchance's is replaced, displaced, or covered. It opens the **Weld drawer**, which holds a result-tools row in its header (copy / save / pin / undo-reroll) and feature tabs:
 
 | Tab | What's in it |
 | :-- | :----------- |
+| **Skills** | 166 presets in 17 grouped sections for dashboards, chat/story systems, SillyTavern/Chub card and lore features, Skybridge setup, rebranding, AI input helpers, prompt studios, plugins, debugging and more, with type/mode filters and native AI handoff. |
 | ★ **Generators** | Your whole generator directory grouped by your real Perchance folders, plus favorites & recents — with search, sort (incl. **Edited** / **Views**), per-row open/edit, and a **Stats** button that pulls real **view counts + last-edited times** from Perchance's public API. A **This Generator** panel shows the open generator's status and an **About this page** card (public stats — views, last edited, title, imports — for *any* generator, even ones you don't own), plus owner actions. |
 | 📒 **Library** | The reader's home, grouped by task. **📚 Collect**: a permanent **Scrapbook** of saved results (searchable, taggable, exportable), **Chat stories** (read or export any AICC thread as styled HTML, Markdown, or text), **clipboard history**, and your **👍/👎 ratings**. **🛡 Care**: a **backup guardian**, a **time tracker** (per-generator minutes, CSV export), a **time capsule**, **output rules** (post-processing on save), and **Move everything** (full state export/import). Plus **search everything**, **session replay**, and a **spaced-repetition review queue** in Collect; **My Perchance** stats, **tab snapshots**, **My boundaries**, and a **Ctrl/Cmd+Shift+S** quick-save hotkey; a **keepsake HTML archive** and **recommendation bundles** to share generators; **lore link health** (catches removed/quarantined uploads before they break a character), **generator watch** (update notifications for favorites), and a one-click **platform speed check**; night light gains an **ambient mode** that follows hour and season. A sticky header keeps save / read-aloud / rate / random-favorite in reach. |
 | 🗃 **Data** | A launcher for the **Data Manager**: browse, edit, back up, export and import the IndexedDB databases of every generator you've visited — full CRUD, deep-scan search, sweep backup, undo for destructive actions. When an AI Character Chat database is open, the **AICC pack** panels appear automatically. |
@@ -213,13 +218,17 @@ If you've saved a note on a generator, a small floating 🗒 badge appears when 
 
 **Read aloud** speaks the current page's output, any Scrapbook entry, or a whole chat story using the browser's built-in speech — local, no network, no key. **Per-generator notes** let you jot "great for elf names" on any generator, searchable from the Scrapbook box. **🎲 Random favorite** (in the sticky header) jumps to a random starred generator. **Night light** now lives in the **Comfort** tab beside the theme it controls — it auto-applies a comfort theme (Warm, Dim, Sepia, Gray, or Dark) on an hour schedule, e.g. Warm from 20:00 to 07:00 — or in **ambient mode**, where the theme follows the hour and season (warm in the evening, earlier in winter, later in summer; dark late at night; southern-hemisphere aware) — restoring your previous theme outside those hours; your manual comfort settings always win when it's off.
 
-### Character & World Studio
+### Character & World Studio (v1.56.0, expanded in v1.63.0 and v1.64.0)
 
 The **Studio** tab adds guided character editing, shared world lore with activation and knowledge rules, relationships, timelines, five chatbot templates, model-connected conversation tests, side-by-side reply comparisons, approved playthrough memory, consistency checking, and project export/import with snapshots. It uses your existing AI provider settings and character/lore interfaces.
 
-See [the Studio guide](STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
+Version 1.63.0 adds a sample world and welcome screen, Tavern V2/V3 card import and export (JSON and PNG), World Info and lorebook import/export, advanced lore (secondary keys, probability, sticky/cooldown/delay, groups, recursion), alternate greetings, message variants, Continue/Regenerate/Impersonate, personas, macros, Author's Note, quick replies, regex rules, a prompt inspector, summaries, chat import/export, a world bible export and model-assisted drafting with undo.
 
-### Project — read, check & export any generator
+Version 1.64.0 reads and writes Dad Chat (dad-chat-v2) files: characters, chats with variants, personas, lorebooks, world books, Story Forge zips, Tavern/Chub PNG cards and full backups, with a preview before anything changes, plus Dad Chat export formats and a zip pack.
+
+See [the Studio guide](docs/STUDIO.md) for setup, privacy and knowledge rules, persistence, AICC export limitations, and development commands.
+
+### Project — read, check & export any generator (v1.57.0)
 
 The **🔬 Project** tab works on whatever generator you are looking at. It reads the **published** lists panel, HTML panel and whole import tree of any public generator (or your live editor, including unsaved edits) and then:
 
@@ -230,7 +239,25 @@ The **🔬 Project** tab works on whatever generator you are looking at. It read
 - **checks its links** (anonymous requests, on your confirmation);
 - **exports it** as a ZIP bundle (source, imports, findings, manifest), Markdown, or a budgeted **AI context pack**, and adds the pack, a "selected code" option and a token estimate to the AI Helper.
 
-See [the Project guide](PROJECT.md).
+See [the Project guide](docs/PROJECT.md).
+
+### Skills — application and generator library (v1.60.0)
+
+The **Skills** tab provides **166 presets in 17 collapsible sections**, with search, generator/application type filters, review/implementation filters and saved favorites. It treats Perchance projects as full applications: data terminals, advanced branching story bots, image/vision studios, prompt editors and reusable plugins. Presets cover real feed contracts and calculations, source freshness, report/AI-packet parity, branch isolation, sync conflicts, character-card interoperability and bounded model routing, alongside debugging, design, performance and quality. Each task includes a workflow and acceptance checks; selected research sources are linked in the detail view. Add your goal, optionally include fresh editor findings, review the editable prompt and send it directly to Perchance's native AI input. Existing helper drafts are preserved; press **Send** there to run it. Review-only instructions request an audit without code changes. No third-party skill code, agents or hooks are installed.
+
+See [the Skills guide](docs/SKILLS.md). No separate model configuration is required for the native handoff.
+
+### Dev — folder sync, AI agents & GitHub (v1.58.0)
+
+The **🧩 Dev** tab connects the generator you are editing to files, to AI coding agents and to GitHub, with one rule: **nothing changes your editor without showing you a diff and getting your click.**
+
+- **Folder sync** mirrors the open generator to plain files in a folder you choose (Chromium browsers). Work on them with any editor or agent; Weld notices changes, shows a diff, and applies it only when you say so. Conflicts are flagged, never overwritten.
+- **Agent bridge (MCP)**: run `npm run bridge`, and agents such as Claude Code, Codex, Gemini CLI, Antigravity and Copilot's agent mode can read the live editor, run Weld's analysis, and **propose** edits that you review. Local only, behind a secret token.
+- **GitHub agents**: hand a task to Copilot's cloud agent, Claude or Codex through an issue in your backup repo, and get a pull request back. **Push as PR** opens a pull request instead of writing to your branch, and Push shows Weld's findings first.
+- **AI helper upgrades**: a Perchance syntax primer in every request, a "look things up first" mode, OpenRouter and GitHub Models providers, and prompt caching for Claude.
+- **Find usages and rename** across both panels, **editor markers** beside lines with findings, and a **regression check** that compares output before and after an edit.
+
+See [the Dev guide](docs/DEV.md) for setup, per-agent instructions, the security model, and what has and has not been verified.
 
 ### Tools — AI Helper & character files
 
@@ -240,7 +267,9 @@ The **🛠 Tools** tab holds self-contained tool cards.
 
 The AI Helper is now a **review-first project workspace**. It can explain a generator, debug a failure, or propose DSL/HTML changes without silently replacing either editor pane.
 
-It also has **Stop**, cancellation when clearing, and a configurable **Maximum output tokens** setting (256–32768, default 4096). The last reply stays available if a new request fails or is stopped. Replies cut off by a provider's token limit are reported as incomplete. Workspace text survives closing and reopening the drawer in the same page session; it is not saved across page reloads.
+**Tools → Model chat** puts your message box and the model's visible reply first, with **Model connection and AI settings** beneath them. Choose Local — OpenAI-compatible for LM Studio, Ollama, or a configured cloud provider. The panel shows which model receives your message. Follow-ups include up to six recent completed exchanges within a 24,000-character history budget; failed or stopped requests are excluded. Recent conversation is expandable, and Clear cancels any request and starts fresh. History stays in memory for this page session and resets before sending to a different generator, provider, model, or endpoint. Editor context is selected separately for each request. Built-in Perchance still uses its native message and reply panel.
+
+Version 1.55.1 adds **Stop**, cancellation when clearing, and a configurable **Maximum output tokens** setting (256–32768, default 4096). The last reply stays available if a new request fails or is stopped. Replies cut off by a provider's token limit are reported as incomplete. Workspace text survives closing and reopening the drawer in the same page session; it is not saved across page reloads.
 
 Review expects one complete code block for the selected pane (perchance/dsl or html). Ambiguous or mismatched fenced blocks are rejected; plain text can still be reviewed after editing it into a complete replacement. Applying replaces the entire selected pane, so check the diff. If the editor changes while the review is open, reopen the review before applying.
 
@@ -413,7 +442,7 @@ Two consent-free **meta-requests** help a plugin introspect the link without cat
   - Your **AI key** is sent only to the provider you pick — and a **local model** (Ollama / OpenAI-compatible) needs no key at all, reaching only `localhost`.
   - Your **GitHub token** is sent only to `api.github.com`, in the `Authorization` header — never logged, never placed in commit messages or file content. Use a fine-grained, single-repo, Contents-read/write token.
 - **Your Perchance login is never handled by this script.** Directory loading, rename, and delete all drive Perchance's own controls, which carry their own credentials. The Companion reads the results but never reads or transmits your session token.
-- **Pull is read-only and anonymous** — it fetches `raw.githubusercontent.com` files with no auth or cookies, fills the editor locally, and never saves or pushes on its own.
+- **Pull is read-only** — with no token it fetches public `raw.githubusercontent.com` files with no auth or cookies; with a saved GitHub token it reads through GitHub's API instead, so **private repos work** (the token goes only to `api.github.com`). It fills the editor locally and never saves or pushes on its own.
 - **Declared `@connect` hosts:**
 
   ```
@@ -462,7 +491,7 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 *All offline unless noted.*
 
 - **Companion-to-Companion sync** — encode full state as a QR code or short link; scan on another device to import. No server. *(offline)*
-- **Asset manager** — inventory every external asset a generator loads, check liveness, offer to re-host dead ones to user.uploads.dev, maintain a personal asset library reusable across generators. *(online)* *(the Project tab inventories every external address and checks liveness from the Project tab; re-hosting is still open.)*
+- **Asset manager** — inventory every external asset a generator loads, check liveness, offer to re-host dead ones to user.uploads.dev, maintain a personal asset library reusable across generators. *(online)* *(1.57.0 inventories every external address and checks liveness from the Project tab; re-hosting is still open.)*
 - **Grief recovery / session archaeology** — given any IndexedDB dump, reconstruct a human-readable timeline including deleted rows. Not just "here are your characters" but the full database history. *(offline)*
 
 ---
@@ -503,13 +532,13 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 
 - **Ritual and habit support** — honour daily creative rituals; quiet streak tracking; gentle prompt if you haven't done your morning pull. *(offline)*
 - **Living style guide** — extract implicit consistency rules from saved outputs ("all your northern city names end in -vik"), surface them, flag when a new output breaks your canon. *(offline)*
-- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)* *(the Project tab adds an on-demand analyzer with click-to-jump findings in the Project tab; live underlining is still open.)*
+- **Weld Lint overlay** — run the brace-trap scanner live in the editor; underline issues as you type. *(offline)* *(1.57.0 adds an on-demand analyzer with click-to-jump findings in the Project tab; 1.58.0 draws markers beside flagged lines in the editor; live underlining as you type is still open.)*
 - **Accessibility audit** — basic check of output contrast ratio, font size, `prefers-reduced-motion` compliance. One-line result in the Generators tab. *(offline)*
-- **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)* *(the Project tab keeps local snapshots with compare and restore; a per-edit history is still open.)*
+- **Local version history** — track every edit to your generators over time; rollback to any previous version; diff between any two. *(offline)* *(1.57.0 keeps local snapshots with compare and restore; a per-edit history is still open.)*
 - **Contextual platform tutorial** — "how does this work?" panel explaining the DSL, HTML panel, and imports for the specific generator you're looking at. *(offline)*
 - **DSL reader / explainer** — "explain this generator in plain English," "what does this line do." The AI Helper writes code; this reads it. *(online — uses AI)*
 - **Atomic GitHub commits** — push DSL + HTML as a single commit rather than two. *(online)*
-- **Richer GitHub manager** — sync-status badge and pre-Pull/Push diff. *(online)*
+- **Richer GitHub manager** — sync-status badge and pre-Pull/Push diff. *(online)* *(1.58.0 adds Push as pull request and an analyzer check in the Push dialog; the badge is still open.)*
 - **Conflict detection for collaborators** — hash editor content, detect divergence via the bus, alert both authors before either saves. *(offline)*
 - **Taste learning from your Scrapbook** — analyse saved outputs to identify what you consistently like; suggest generator prompt adjustments. *(online — uses AI)*
 - **Creative writing coach** — identify recurring themes, stylistic patterns, and tendencies in your writing; suggest prompts to develop range. *(online — uses AI)*
@@ -562,6 +591,17 @@ Items are grouped by the capability or tool they extend, then sorted easiest-fir
 - **Character preservation and grief support** — extra backup redundancy for flagged characters; read-only memorial archive; restore path in plain human terms. *(offline)*
 - **Mental health awareness** — opt-in, private session pattern tracking. Gentle check-in if patterns suggest distress. *(offline)*
 - **Bereavement and attachment care** — treat cherished characters like photographs; long-term archival in plain readable JSON. *(offline)*
+
+## Development
+
+The installable script is `weld-companion.user.js`. The Studio, Project, Dev and Skills tabs are maintained as modules in `src/` and built into it, so edit `src/` and then run:
+
+```bash
+npm run build   # regenerate the embedded modules in the userscript
+npm run check   # stale-bundle check + syntax check + all tests (same as CI)
+```
+
+Guides: [Studio](docs/STUDIO.md) · [Project](docs/PROJECT.md). Generator source for the Weld plugin suite lives in `weld-page/` and `weld-skybridge/`.
 
 ## Contributing
 
