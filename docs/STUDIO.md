@@ -1,6 +1,6 @@
 # Character & World Studio
 
-Available in Weld → **Studio**, starting with userscript **1.56.0**.
+Available in Weld → **Studio**, starting with userscript **1.56.0**. Version **1.63.0** adds the features below.
 
 ## Start a project
 
@@ -85,3 +85,25 @@ For an optional live LM Studio smoke test using a synthetic world and the produc
     node tests/studio-lm-smoke.js
 
 The smoke test expects a running local server at http://127.0.0.1:1234. Optional arguments select endpoint and model ID. It is excluded from ordinary CI because CI has no local model server.
+
+## What 1.63.0 adds
+
+**Getting started.** An empty Studio now offers *Open the sample world*, *Start from a Tavern card (PNG or JSON)* and project creation with nine templates (adds Companion, Dungeon master, Tutor and NPC / shopkeeper). The **Overview** tab shows counts, size and health, lets you duplicate or delete a project, and drafts characters or lore from a concept.
+
+**Characters.** Tags, creator, version, creator notes, scenario, alternate greetings, system prompt override (`{{original}}` keeps the default), post-history instructions, a character reminder injected at a chosen depth, talkativeness, token estimates, duplicate, and per-field *Fill with model* / *Rewrite with model* buttons with one-step undo. Every model call names the provider and asks before sending.
+
+**Cards and lorebooks.** Export a Tavern V2 card as JSON, or embed it in a PNG you choose (`chara` tEXt chunk, valid CRC, your image untouched; no placeholder is invented). Import V1, V2 and V3 cards from JSON or PNG; V3 `ccv3` is preferred when both chunks exist and only `tEXt` chunks are read. Cards carry the lore the character may know, never private author notes (unless you opt in in code). Import and export lorebooks as the V2 `character_book` or SillyTavern-style World Info JSON; unknown fields are ignored on import. Studio-only fields (goals, boundaries, beliefs) round-trip through `extensions.weld_studio`.
+
+**Lore.** Secondary keys with *require* / *block* logic, case-sensitive and whole-word matching, activation chance, sticky / cooldown / delay measured in messages, inclusion groups, recursion (lore can trigger lore), search and filters, duplicate, bulk disable, a keyword test box, and a prompt inspector that says why each entry fired.
+
+**Test chat.** Opening greeting picker, message **variants** (Regenerate adds one; flip with Previous / Next), Continue, Impersonate (drafts your reply, never sends it), edit, hide-from-model, delete, quick replies, editable story-so-far summary with a model button, Author Note at a chosen depth, user persona, `{{user}}` / `{{char}}` / `{{random:a,b}}` / `{{roll:2d6}}` / `{{time}}` / `{{date}}` macros, regex find-and-replace (display-only, prompt-only or both; stored messages are never rewritten), JSONL chat import/export in a SillyTavern-style layout, and a Markdown transcript.
+
+**Export.** Project JSON, Markdown world bible, World Info JSON, V2 cards, chats and snapshots.
+
+### Honest limits
+
+- Card, World Info and chat formats follow the public V2/V3 specs and common SillyTavern exports. They were checked with round trips in tests, **not** against live SillyTavern or Chub imports. Check an exported file in your target app before relying on it, and expect apps that use extra fields to ignore Studio's.
+- Model features (fill, rewrite, draft, summarize, suggest) were tested with a simulated model and strict parsers, not a real model. Output is validated and capped, and nothing is applied without you seeing it, but quality depends on your model.
+- Macros and lore timing run inside Studio's own test chat. Exported cards carry the text; the target app decides whether it expands macros.
+- The *Avatar image URL* is stored as text only and is never loaded by Studio.
+- Older projects open unchanged; missing fields get defaults when loaded.
