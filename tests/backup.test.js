@@ -78,10 +78,35 @@ assert.equal(C.checkStoreWrite('weld:genvault:alpha/snapshot', { generator: 'alp
 assert.equal(C.checkStoreWrite('weld:genvault:alpha/chat/snap-1-a', null).ok, true, 'tombstones pass');
 assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkStoreWrite('free:form', { generator: 'x' }).ok, true);
 
+// ---- backup-folder layout (pure)
+{
+  const snap = { key: 'weld:genvault:alpha/snapshot', value: { at: Date.UTC(2026, 9, 6, 12, 30, 5), generator: 'alpha' } };
+  assert.match(C.backupTarget(snap).name, /^snapshot-20261006-123005-[0-9a-f]{4}\.json$/); assert.deepEqual(C.backupTarget(snap).dir, ['alpha', 'snapshot']);
+  const changed = { key: snap.key, value: { at: snap.value.at, generator: 'alpha', title: 'x' } };
+  assert.notEqual(C.backupTarget(snap).name, C.backupTarget(changed).name, 'a changed record gets a new file name');
+  assert.equal(C.backupTarget({ key: 'weld:genvault:alpha/chat/snap-1-abc123', value: {} }).name, 'snap-1-abc123.json');
+  assert.deepEqual(C.backupTarget({ key: 'dadchat:vault:index', value: [1] }).dir, ['_legacy']);
+  assert.deepEqual(C.backupTarget({ key: 'weld:link-record', value: {} }).dir, ['_operational']);
+  assert.ok(!/[\\/:]/.test(C.backupTarget({ key: 'weld:genvault:alpha/chat/snap-../../x', value: {} }).name), 'names never carry path separators');
+}
+
 // ---- UI against a fake host
 const bytes = () => JSON.stringify([...store].sort());
 const listeners = [], downloads = []; let listFail = false, removed = [];
+class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += x; }, close: async () => { this.text = b; } }; } }
+class FakeDir {
+  constructor(n) { this.name = n; this.kind = 'directory'; this.items = new Map(); this.perm = 'granted'; }
+  async getDirectoryHandle(n, o = {}) { let d = this.items.get(n); if (!d) { if (!o.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); d = new FakeDir(n); this.items.set(n, d); } return d; }
+  async getFileHandle(n, o = {}) { let f = this.items.get(n); if (!f) { if (!o.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); f = new FakeFile(n); this.items.set(n, f); } return f; }
+  async queryPermission() { return this.perm; } async requestPermission() { this.perm = 'granted'; return 'granted'; }
+  files(prefix = '') { return [...this.items].flatMap(([n, x]) => x.kind === 'directory' ? x.files(prefix + n + '/') : [prefix + n]); }
+}
+const pickedDir = new FakeDir('MyDrive'); let pickerCalls = 0;
+const settings = new Map();
 const host = {
+  get: (k, d) => settings.has(k) ? settings.get(k) : d, set: (k, v) => { settings.set(k, v); return true; },
+  pageWindow: () => ({ showDirectoryPicker: async () => { pickerCalls++; return pickedDir; } }),
+  slug: () => 'alpha',
   el: (t, a, c) => new Element(t, a, c),
   vault: {
     list: () => listFail ? { ok: false, reason: 'consent-denied' } : { ok: true, items: [...store.keys()].map(g => { const r = g.slice(SBK.length), i = r.indexOf(':'); return { gmKey: g, caller: r.slice(0, i), key: r.slice(i + 1) }; }) },
@@ -93,7 +118,7 @@ const host = {
   }
 };
 const window = { WeldBackupCore: C, weldProjectHost: host }; window.top = window;
-vm.runInNewContext(fs.readFileSync('src/backup-ui.js', 'utf8'), { window, console });
+vm.runInNewContext(fs.readFileSync('src/backup-ui.js', 'utf8'), { window, console, setTimeout, clearTimeout });
 const parent = new Element('main');
 const btn = label => walk(parent).find(n => n.tagName === 'button' && (n.attrs.text === label || n.attrs['aria-label'] === label));
 const click = label => { const b = btn(label); assert.ok(b, 'missing ' + label); b.click(); };
@@ -157,8 +182,43 @@ assert.equal(C.isVaultUpdate({ type: 'vault-updated' }), true);
 listFail = true; window.weldBackup.render(parent);
 assert.match(txt(parent), /Could not list stored backups: consent-denied/);
 assert.ok(!walk(parent).some(n => n.attrs['data-gen']));
-listFail = false; delete host.vault; window.weldBackup.render(parent); assert.match(txt(parent), /unavailable/);
+listFail = false; const vaultApi = host.vault; delete host.vault; window.weldBackup.render(parent); assert.match(txt(parent), /unavailable/);
 
 // no logging of content anywhere in the new sources
 for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\.|GM_log|localStorage|sendBeacon|fetch\(|XMLHttpRequest|postMessage/.test(fs.readFileSync(f, 'utf8')), f + ' must not log or transmit');
-console.log('backup tests passed');
+// ---- save to a user-chosen folder (async tail; restores the vault API removed above)
+(async () => {
+  host.vault = vaultApi; window.weldBackup.render(parent);
+  const sleep = ms => new Promise(r => setTimeout(r, ms)), until = async (fn, what) => { for (let i = 0; i < 200; i++) { if (fn()) return; await sleep(10); } throw new Error('timed out: ' + what); };
+  assert.ok(btn('Choose folder...') && !btn('Allow access'), 'no folder yet');
+  assert.equal(btn('Save all to folder now').disabled, true);
+  click('Choose folder...'); await until(() => pickerCalls === 1 && btn('Change folder...'), 'folder chosen');
+  assert.match(txt(walk(parent).find(n => n.attrs['data-folder-state'])), /MyDrive · access allowed/);
+  click('Save all to folder now'); await until(() => /Saved \d+ new file/.test(txt(parent)), 'first sync');
+  const first = pickedDir.files();
+  assert.ok(first.some(f => /^alpha\/snapshot\/snapshot-\d{8}-\d{6}-[0-9a-f]{4}\.json$/.test(f)), 'snapshot file: ' + first.join(', '));
+  assert.ok(first.some(f => /^beta\/snapshot\//.test(f)) && first.some(f => /^_legacy\//.test(f)) && first.some(f => /^_operational\//.test(f)) && first.some(f => /^alpha\/chat\/index-/.test(f)));
+  assert.ok(!first.some(f => /\/chat\/snap-/.test(f)), 'chat copies with plaintext secret-shaped config are held back');
+  assert.match(txt(parent), /Held back \(plaintext secret-shaped values; not copied to your folder\): .*snap-1700000001000-abc123/);
+  const onDisk = JSON.parse(pickedDir.items.get('alpha').items.get('snapshot').items.values().next().value.text);
+  assert.deepEqual([onDisk.format, onDisk.record.key, onDisk.record.value.generator], ['weld-backup-record', 'weld:genvault:alpha/snapshot', 'alpha']);
+  // second pass writes nothing; a changed record is added as a NEW file and the old one is untouched
+  const before = new Map(first.map(f => [f, f.split('/').reduce((d, n) => d.items.get(n), pickedDir).text]));
+  click('Save all to folder now'); await until(() => /Saved 0 new files/.test(txt(parent)), 'second sync');
+  const alphaSnap = [...store.keys()].find(k => k.endsWith('weld:genvault:alpha/snapshot'));
+  store.set(alphaSnap, JSON.stringify(Object.assign(JSON.parse(store.get(alphaSnap)), { title: 'Alpha v2' })));
+  click('Save all to folder now'); await until(() => /Saved 1 new file /.test(txt(parent)), 'versioned sync');
+  const after = pickedDir.files(); assert.equal(after.length, first.length + 1);
+  for (const [f, t] of before) assert.equal(f.split('/').reduce((d, n) => d.items.get(n), pickedDir).text, t, 'existing file untouched: ' + f);
+  // permission lost after a browser restart: Allow access, and nothing is written while it is missing
+  pickedDir.perm = 'prompt'; window.weldBackup._state.perm = 'prompt'; window.weldBackup.render(parent);
+  assert.ok(btn('Allow access')); assert.equal(btn('Save all to folder now').disabled, true); click('Allow access'); await until(() => !btn('Allow access'), 'access allowed');
+  // automatic mirror: a vault-updated event copies a newly stored record without a click
+  const auto = walk(parent).find(n => n.attrs['aria-label'] === 'Save new backups to the folder automatically'); auto.checked = true; auto.events.change();
+  assert.equal(settings.get('backupFolderAuto'), true);
+  await until(() => pickedDir.files().length === after.length, 'auto settled'); put('delta', 'weld:genvault:delta/snapshot', { v: 1, at: 5, protocol: 1, generator: 'delta', folder: 'delta', savedBy: 'delta', title: 'D', modelText: 'm' });
+  listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'delta' })); await until(() => pickedDir.files().some(f => f.startsWith('delta/snapshot/')), 'auto mirror');
+  // disconnect never deletes
+  const kept = pickedDir.files().length; click('Disconnect folder (nothing in it is deleted)'); await until(() => btn('Choose folder...'), 'disconnected'); assert.equal(pickedDir.files().length, kept);
+  console.log('backup tests passed');
+})().catch(e => { console.error(e); process.exit(1); });

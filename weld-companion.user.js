@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.70.0
+// @version      1.71.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.70.0';
+  var WC_VERSION = '1.71.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -17254,10 +17254,25 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     if (p.gen && isObj(value) && typeof value.generator === 'string' && value.generator !== p.gen) return { ok: false, reason: 'owner-mismatch' };
     return { ok: true };
   }
+
+  // ---- backup folder layout. Names are derived from the content/time so a file is never rewritten:
+  // a changed record gets a NEW file, an unchanged one is skipped.
+  function hash8(t) { let h = 5381; t = String(t); for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return ('00000000' + h.toString(16)).slice(-8); }
+  const stampPart = t => { const n = num(t); if (n === null || n <= 0) return ''; try { return new Date(n).toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); } catch (e) { return ''; } };
+  // rec: { key, value } -> { dir: [segments], name }
+  function backupTarget(rec) {
+    const p = parseKey(rec.key), v = rec.value, body = JSON.stringify(v === undefined ? null : v), at = isObj(v) ? stampPart(v.at) : '';
+    const tail = slugPart(String(rec.key).slice(String(rec.key).lastIndexOf('/') + 1).replace(/^.*:/, ''));
+    if (p.kind === 'snapshot') return { dir: [p.gen, 'snapshot'], name: 'snapshot-' + (at || hash8(body)) + '-' + hash8(body).slice(0, 4) + '.json' };
+    if (p.kind === 'chat-copy') return { dir: [p.gen, 'chat'], name: tail + '.json' };
+    if (p.kind === 'chat-index') return { dir: [p.gen, 'chat'], name: 'index-' + hash8(body) + '.json' };
+    if (p.gen) return { dir: [p.gen, 'other'], name: slugPart(p.sub) + '-' + hash8(body) + '.json' };
+    return { dir: [p.kind === 'legacy' ? '_legacy' : p.kind === 'operational' ? '_operational' : '_other'], name: slugPart(p.sub || rec.key) + '-' + hash8(body) + '.json' };
+  }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor };
 });
 
 /* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
@@ -17423,6 +17438,113 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     card.appendChild(E('div', { 'data-presence': '1', style: Object.assign({ marginTop: '6px' }, small), text: 'Presence: ' + open + ' open tab' + (open === 1 ? '' : 's') + ' seen for ' + S.pick + ' · ' + (pres.ignored || 0) + ' malformed or duplicate message' + (pres.ignored === 1 ? '' : 's') + ' ignored' }));
     return card;
   }
+
+  // ------------------------------------------------------------- backup folder (any drive or cloud-sync folder)
+  // The user picks a folder with the browser's folder picker (Chrome/Edge). Records are copied there as JSON files.
+  // Files are only ever ADDED: a changed record gets a new file, an unchanged one is skipped, nothing is overwritten or deleted.
+  const AUTO_KEY = 'backupFolderAuto';
+  const F = { supported: false, handle: null, name: '', perm: 'none', auto: false, busy: false, error: '', last: null };
+  const memKv = new Map();
+  let dbp = null;
+  function kvdb() {
+    if (dbp) return dbp;
+    dbp = new Promise(resolve => {
+      try {
+        const open = indexedDB.open('weldCompanionBackupFolder', 1);
+        open.onupgradeneeded = () => open.result.createObjectStore('kv');
+        open.onsuccess = () => resolve(open.result); open.onerror = () => resolve(null); open.onblocked = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+    return dbp;
+  }
+  const kvOp = (mode, fn) => kvdb().then(d => new Promise((resolve, reject) => {
+    if (!d) return reject(new Error('no-db'));
+    try { const t = d.transaction('kv', mode), r = fn(t.objectStore('kv')); t.oncomplete = () => resolve(r && 'result' in r ? r.result : undefined); t.onerror = () => reject(t.error); t.onabort = () => reject(t.error); } catch (e) { reject(e); }
+  }));
+  const kvGet = k => kvOp('readonly', st => st.get(k)).then(v => (v === undefined ? memKv.get(k) : v), () => memKv.get(k));
+  const kvSet = (k, v) => kvOp('readwrite', st => st.put(v, k)).catch(() => { memKv.set(k, v); });
+  const kvDel = k => kvOp('readwrite', st => st.delete(k)).catch(() => {}).then(() => { memKv.delete(k); });
+  const pageWin = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
+  async function permission(handle, ask) {
+    try {
+      let st = await handle.queryPermission({ mode: 'readwrite' });
+      if (st !== 'granted' && ask) st = await handle.requestPermission({ mode: 'readwrite' });
+      return st;
+    } catch (e) { return 'denied'; }
+  }
+  async function chooseFolder() {
+    F.supported = typeof pageWin().showDirectoryPicker === 'function';
+    if (!F.supported) { F.error = 'This browser cannot open folders. Use Chrome or Edge, or use the Download buttons.'; return draw(); }
+    try {
+      const h = await pageWin().showDirectoryPicker({ id: 'weld-backup-folder', mode: 'readwrite' });
+      F.handle = h; F.name = h.name; F.perm = await permission(h, true); F.error = F.perm === 'granted' ? '' : 'Folder chosen, but write permission was not granted.';
+      await kvSet('handle', h); say(F.perm === 'granted' ? 'Backup folder set: ' + h.name : F.error, F.perm !== 'granted');
+    } catch (e) { if (!(e && e.name === 'AbortError')) F.error = (e && e.message) || String(e); }
+    draw();
+  }
+  async function allowFolder() {
+    if (!F.handle) return;
+    F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.'; draw();
+  }
+  async function forgetFolder() {
+    F.handle = null; F.name = ''; F.perm = 'none'; await kvDel('handle'); say('Backup folder disconnected. Nothing in it was deleted.'); draw();
+  }
+  function setAuto(on) { F.auto = !!on; H.set(AUTO_KEY, F.auto); if (F.auto) scheduleSync(300); draw(); }
+  async function dirAt(root, segs, create) { let d = root; for (const s of segs) d = await d.getDirectoryHandle(s, { create }); return d; }
+  async function exists(dir, name) {
+    try { await dir.getFileHandle(name); return true; } catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return false; throw e; }
+  }
+  // Copy every readable, non-stale record into the folder. Records holding plaintext secret-shaped values are held back.
+  async function syncToFolder(manual) {
+    if (F.busy) return; if (!F.handle || F.perm !== 'granted') { if (manual) { F.error = 'Choose a backup folder and allow access first.'; draw(); } return; }
+    F.busy = true; const res = { at: Date.now(), written: 0, skipped: 0, held: [], failed: 0 };
+    try {
+      load();
+      for (const row of (S.rows || [])) {
+        const rec = full(row.gmKey);
+        if (!rec || rec.unreadable || rec.parseError) { res.failed++; continue; }
+        if (rec.stale) { res.skipped++; continue; }
+        if (C.parseKey(rec.key).kind === 'chat-copy' && rec.value && C.secretScan(rec.value.data).length) { res.held.push(rec.key); continue; }
+        try {
+          const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, true);
+          if (await exists(dir, t.name)) { res.skipped++; continue; }
+          const w = await (await dir.getFileHandle(t.name, { create: true })).createWritable();
+          await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close(); res.written++;
+        } catch (e) { res.failed++; if (e && e.name === 'NotAllowedError') { F.perm = 'prompt'; break; } }
+      }
+      F.last = res; F.error = '';
+      say('Saved ' + res.written + ' new file' + (res.written === 1 ? '' : 's') + ' to ' + F.name + ' (' + res.skipped + ' already there' + (res.held.length ? ', ' + res.held.length + ' held back for secret-shaped values' : '') + (res.failed ? ', ' + res.failed + ' failed' : '') + ').', res.failed > 0);
+    } catch (e) { F.error = 'Save to folder failed: ' + ((e && e.message) || e); }
+    F.busy = false; if (manual || host) draw();
+  }
+  let syncTimer = null;
+  function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
+  async function bootFolder() {
+    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true;
+    try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
+    const v = V(); if (v && typeof v.onChange === 'function') v.onChange(() => { if (F.auto) scheduleSync(1500); });   // a generator saved: mirror it
+    if (F.auto) scheduleSync(3000);
+    if (host) draw();
+  }
+  function folderCard() {
+    const card = E('div', { 'data-folder': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
+    card.appendChild(E('div', { text: 'Backup location', style: { fontWeight: '600' } }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Choose any folder on a drive or inside a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox). Copies are saved there as files that are only ever added: nothing is overwritten or deleted, so browser cache clears cannot touch them.' }));
+    if (!F.supported) card.appendChild(E('div', { style: { fontSize: '12px', color: '#e0a030' }, text: 'This browser cannot open folders (Chrome or Edge can). The Download buttons below still work.' }));
+    card.appendChild(E('div', { 'data-folder-state': '1', style: { fontSize: '12px', margin: '4px 0' }, text: F.handle ? 'Folder: ' + F.name + ' · ' + (F.perm === 'granted' ? 'access allowed' : 'needs permission (press Allow access)') : 'No folder chosen yet.' }));
+    if (F.error) card.appendChild(E('div', { role: 'alert', style: { fontSize: '12px', color: '#ff9e92' }, text: F.error }));
+    const row = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '6px 0' } });
+    row.appendChild(btn(F.handle ? 'Change folder...' : 'Choose folder...', () => { chooseFolder(); }, { disabled: !F.supported }));
+    if (F.handle && F.perm !== 'granted') row.appendChild(btn('Allow access', () => { allowFolder(); }));
+    row.appendChild(btn('Save all to folder now', () => { syncToFolder(true); }, { disabled: !F.handle || F.perm !== 'granted' || F.busy }));
+    if (F.handle) row.appendChild(btn('Disconnect folder', () => { forgetFolder(); }, { 'aria-label': 'Disconnect folder (nothing in it is deleted)' }));
+    card.appendChild(row);
+    const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
+    auto.addEventListener('change', () => setAuto(auto.checked));
+    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
+    return card;
+  }
   function render(parent) {
     host = parent; S.msg = '';
     load();
@@ -17450,6 +17572,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
       (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' · ' + C.fmtBytes(inv.bytes) + ' used by backups' +
       (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
     if (!inv.count) wrap.appendChild(note('No generator backups are stored yet. They appear here after a generator saves a copy through Skybridge storage.'));
+    wrap.appendChild(folderCard());
     wrap.appendChild(familyCard(rerender));
     const bar = confirmBar(rerender); if (bar) wrap.appendChild(bar);
     inv.generators.forEach(g => {
@@ -17480,7 +17603,8 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     wrap.appendChild(inspector(rerender));
     parent.appendChild(wrap);
   }
-  window.weldBackup = { render };
+  bootFolder().catch(() => {});
+  window.weldBackup = { render, _sync: syncToFolder, _state: F };
 })();
 /* END GENERATED BACKUP */
 

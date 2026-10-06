@@ -248,8 +248,23 @@
     if (p.gen && isObj(value) && typeof value.generator === 'string' && value.generator !== p.gen) return { ok: false, reason: 'owner-mismatch' };
     return { ok: true };
   }
+
+  // ---- backup folder layout. Names are derived from the content/time so a file is never rewritten:
+  // a changed record gets a NEW file, an unchanged one is skipped.
+  function hash8(t) { let h = 5381; t = String(t); for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return ('00000000' + h.toString(16)).slice(-8); }
+  const stampPart = t => { const n = num(t); if (n === null || n <= 0) return ''; try { return new Date(n).toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); } catch (e) { return ''; } };
+  // rec: { key, value } -> { dir: [segments], name }
+  function backupTarget(rec) {
+    const p = parseKey(rec.key), v = rec.value, body = JSON.stringify(v === undefined ? null : v), at = isObj(v) ? stampPart(v.at) : '';
+    const tail = slugPart(String(rec.key).slice(String(rec.key).lastIndexOf('/') + 1).replace(/^.*:/, ''));
+    if (p.kind === 'snapshot') return { dir: [p.gen, 'snapshot'], name: 'snapshot-' + (at || hash8(body)) + '-' + hash8(body).slice(0, 4) + '.json' };
+    if (p.kind === 'chat-copy') return { dir: [p.gen, 'chat'], name: tail + '.json' };
+    if (p.kind === 'chat-index') return { dir: [p.gen, 'chat'], name: 'index-' + hash8(body) + '.json' };
+    if (p.gen) return { dir: [p.gen, 'other'], name: slugPart(p.sub) + '-' + hash8(body) + '.json' };
+    return { dir: [p.kind === 'legacy' ? '_legacy' : p.kind === 'operational' ? '_operational' : '_other'], name: slugPart(p.sub || rec.key) + '-' + hash8(body) + '.json' };
+  }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor };
 });

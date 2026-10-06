@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.70.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.71.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -61,6 +61,7 @@ Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled lik
 
 | Tab | What's in it |
 | :-- | :----------- |
+| **Backups** | Inventory, inspect, download and delete the generator backup copies held in Weld, check a Dad-Chat family generator's persistence rungs, and **save copies to a folder you choose** (local drive or cloud-synced folder; add-only, secrets held back). See [docs/BACKUPS.md](docs/BACKUPS.md). |
 | **Skills** | 206 presets in 18 grouped sections for dashboards, chat/story systems, SillyTavern/Chub card and lore features, Dad-Chat projects (code and Dad-native content), Skybridge setup, rebranding, AI input helpers, prompt studios, plugins, debugging and more, with type/mode filters and native AI handoff. |
 | ★ **Generators** | Your whole generator directory grouped by your real Perchance folders, plus favorites & recents — with search, sort (incl. **Edited** / **Views**), per-row open/edit, and a **Stats** button that pulls real **view counts + last-edited times** from Perchance's public API. A **This Generator** panel shows the open generator's status and an **About this page** card (public stats — views, last edited, title, imports — for *any* generator, even ones you don't own), plus owner actions. |
 | 📒 **Library** | The reader's home, grouped by task. **📚 Collect**: a permanent **Scrapbook** of saved results (searchable, taggable, exportable), **Chat stories** (read or export any AICC thread as styled HTML, Markdown, or text), **clipboard history**, and your **👍/👎 ratings**. **🛡 Care**: a **backup guardian**, a **time tracker** (per-generator minutes, CSV export), a **time capsule**, **output rules** (post-processing on save), and **Move everything** (full state export/import). Plus **search everything**, **session replay**, and a **spaced-repetition review queue** in Collect; **My Perchance** stats, **tab snapshots**, **My boundaries**, and a **Ctrl/Cmd+Shift+S** quick-save hotkey; a **keepsake HTML archive** and **recommendation bundles** to share generators; **lore link health** (catches removed/quarantined uploads before they break a character), **generator watch** (update notifications for favorites), and a one-click **platform speed check**; night light gains an **ambient mode** that follows hour and season. A sticky header keeps save / read-aloud / rate / random-favorite in reach. |
