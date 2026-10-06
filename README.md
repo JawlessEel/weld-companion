@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.65.1-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.65.2-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -397,7 +397,7 @@ Both options are gated by the **cooperative sentry**: if an AICC tab is open on 
 
 ### Skybridge — the bridge to Weld generators
 
-Weld Companion is the **anchor end** of `weld.skybridge`. A generator that imports the **`weld-skybridge-plugin`** can — *with your per-generator consent* — ask the Companion for things it cannot do from inside the sandbox:
+Weld Companion is the **anchor end** of `weld.skybridge`. A generator that imports the **`weld-skybridge-plugin`** can ask the Companion for things it cannot do from inside the sandbox:
 
 - **Cross-generator storage** — namespaced, persistent key/value held on the generator's behalf. With no Companion installed, the plugin falls back to its own storage and honestly reports `has('storage') === false`.
 - **Your own AI model — cloud or local** — run a completion through the model **you** configured (OpenAI / Anthropic / Google, or a free local **Ollama / OpenAI-compatible** model). Your key **never crosses the bridge**; only the prompt goes up and the text streams back. A generator's `ai` capability can therefore be powered by your **local** model — free and private, no key anywhere.
@@ -406,7 +406,7 @@ Weld Companion is the **anchor end** of `weld.skybridge`. A generator that impor
 - **Web search** — a keyless DuckDuckGo Instant-Answer lookup (title / url / snippet) for lightweight grounding.
 - **Model info** — the name and approximate context size of the model you configured (never the key, no network call).
 
-Under the hood it's a two-way `postMessage` handshake between the Companion (top frame) and the plugin (the generator's `*.perchance.org` child iframe), with a negotiated protocol, per-message nonce, and origin checks. The Companion identifies itself in the handshake (`agent: "weld-companion"`) so a plugin knows which anchor answered. Consent is **per-capability and per-generator**, asked once and remembered. Both ends log the handshake to the console (`[WeldCompanion]` / `[skybridge]`) so a misconnection is diagnosable rather than silent.
+Under the hood it's a two-way `postMessage` handshake between the Companion (top frame) and the plugin (the generator's `*.perchance.org` child iframe), with a negotiated protocol, per-message nonce, and origin checks. The Companion identifies itself in the handshake (`agent: "weld-companion"`) so a plugin knows which anchor answered. Since 1.65.2 there are **no consent prompts by default**: you installed and run the Companion, so a generator's Skybridge requests simply work (an old remembered "no" is ignored). If you would rather be asked, turn on **Ask before a generator uses Skybridge** in the GitHub tab; the answer is then remembered per capability and per generator, a suppressed browser dialog is never saved as a "no", and **Reset permissions** clears the saved answers. Note that with prompts off, any generator you open on perchance.org can use your configured AI model and the fetch/search capabilities. Both ends log the handshake to the console (`[WeldCompanion]` / `[skybridge]`) so a misconnection is diagnosable rather than silent.
 
 Two consent-free **meta-requests** help a plugin introspect the link without catching the one-shot handshake: `request('describe')` returns the live manifest (agent, version, build, protocol range, capabilities, and an advertised **`features`** list so a client can feature-detect the extras), and `request('ping')` is a liveness / round-trip probe. Capability errors carry a stable, branchable **`code`** (`denied` / `unsupported` / `error`) alongside the human-readable `reason`. For deeper troubleshooting, run **`weldCompanion.skybridgeDiagnostics()`** in the top-frame console — it returns the anchor's agent/version/build, bound-window state, visible child-frame count, advertised capabilities **and features**, remembered per-generator permissions, and a ring buffer of recent handshake events (the same state the **🧪 Diagnostics** self-test copies).
 

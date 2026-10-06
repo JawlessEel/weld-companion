@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.65.1
+// @version      1.65.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.65.1';
+  var WC_VERSION = '1.65.2';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1867,6 +1867,19 @@
     cardLint.appendChild(row([ el('button', { class: 'wc-btn', text: 'Lint JS now', title: 'Check the HTML pane\u2019s <script> blocks now', onclick: lintNow }), el('button', { class: 'wc-btn', text: 'Find bugs (AI)', title: 'AI review of the active pane via Perchance\u2019s editor copilot', onclick: aiBugCheck }) ]));
     colB.appendChild(cardLint);
 
+    var cardSb = el('div', { class: 'wc-card' });
+    cardSb.appendChild(head('Skybridge'));
+    cardSb.appendChild(note('Generators that import the weld-skybridge plugin can use storage, your own AI model, web fetch/search and the message bus through Weld. By default they just work, with no prompts. Turn this on only if you want a prompt the first time each generator uses each capability.'));
+    var sbChk = el('input', { type: 'checkbox', id: 'wc-sb-ask', style: { margin: '0 8px 0 0' } });
+    sbChk.checked = sbAskMode();
+    sbChk.onchange = function () { gset('sbAsk', !!sbChk.checked); toast('Skybridge asks before use: ' + (sbChk.checked ? 'ON' : 'OFF (always allowed)')); };
+    cardSb.appendChild(el('div', { class: 'wc-row', style: { alignItems: 'center', marginTop: '4px' } }, [
+      sbChk,
+      el('label', { class: 'wc-section-note', for: 'wc-sb-ask', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Ask before a generator uses Skybridge (off = always allowed)' })
+    ]));
+    cardSb.appendChild(row([ el('button', { class: 'wc-btn', text: 'Reset permissions', title: 'Forget every saved allow/deny answer (only used when asking is on)', onclick: function () { gset('sb:perm', {}); toast('Skybridge: permissions reset'); } }) ]));
+    colB.appendChild(cardSb);
+
     var gOwner = field(base.owner, 'default owner (all generators)', 'github username');
     var gRepo = field(base.repo, 'default repo', 'repository name');
     var gBranch = field(base.branch, 'default branch', 'main');
@@ -2965,7 +2978,7 @@
   var SB_WIN = (function () {
     try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { return window; }
   })();
-  var SB_BUILD = 'sb-anchor/2026-06-25.1';   // bump on every change; printed at mount so a stale userscript is obvious
+  var SB_BUILD = 'sb-anchor/2026-10-05.1';   // bump on every change; printed at mount so a stale userscript is obvious
   // verbose-logging toggle: ?sbdebug in the URL, or window.WELD_SKYBRIDGE_DEBUG = true
   var SB_DEBUG = false;
   try {
@@ -2990,16 +3003,23 @@
     var all = sbPerms(); if (!all[gen]) all[gen] = {}; all[gen][cap] = !!allowed; gset('sb:perm', all);
   }
   // ask the user once per (generator, capability). Returns a Promise<bool>.
+  // Default: no prompts. The user installed and runs this script, so every capability is allowed and any
+  // stored "no" is ignored (a suppressed confirm() used to be saved as a permanent denial). The opt-in
+  // 'sbAsk' setting restores the per-generator prompt for people who want it.
+  function sbAskMode() { return gget('sbAsk', false) === true; }
   function sbConsent(gen, cap) {
     return new Promise(function (resolve) {
+      if (!sbAskMode()) return resolve(true);
       var prior = sbPermFor(gen, cap);
       if (prior === true) return resolve(true);
       if (prior === false) return resolve(false);   // remembered "no"
       var labels = { storage: 'save data that persists across generators', ai: 'use your own AI model', fetch: 'fetch pages from the web on its behalf', search: 'search the web on its behalf', model: 'read which AI model you have configured (name only -- never your API key)', bus: 'relay messages between your open generators (cross-tab pub/sub)' };
       var what = labels[cap] || ('use the "' + cap + '" capability');
       var msg = 'This generator (' + (gen || 'unknown') + ') wants to ' + what + ' via Weld Companion.\n\nAllow it? (remembered for this generator)';
-      var ok = false;
+      var ok = false, shownAt = Date.now();
       try { ok = window.confirm(msg); } catch (e) { ok = false; }
+      // A "no" that came back instantly means the browser suppressed the dialog: refuse this call but do not remember it.
+      if (!ok && Date.now() - shownAt < 150) { try { toast('Skybridge: the browser blocked the prompt, so ' + cap + ' was not allowed this time'); } catch (e) {} return resolve(false); }
       sbSetPerm(gen, cap, ok);
       try { toast(ok ? ('Skybridge: ' + cap + ' allowed') : ('Skybridge: ' + cap + ' blocked')); } catch (e) {}
       resolve(ok);
