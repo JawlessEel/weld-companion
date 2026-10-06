@@ -98,6 +98,17 @@ assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkS
   assert.deepEqual(C.indexRefs(tpl('31-vault-chat-index.json')), ['weld:genvault:example-generator/chat/snap-1720000000000-abc123']);
 }
 
+// ---- a sibling generator's own records (dad-chat): chat folder stamped ".../chat/", modelText generator copy, no redacted count
+{
+  const sib = (gen, at) => ({ chat: { v: 1, at, protocol: 1, generator: gen, folder: 'weld:genvault:' + gen + '/chat/', savedBy: gen, name: 'chats-1', kind: 'dad-full', size: 5, data: { threads: {}, currentThreadId: null, config: { pollinationsApiKey: '[redacted]' } } },
+    gen: { v: 1, at, protocol: 0, generator: gen, folder: 'weld:genvault:' + gen + '/', savedBy: 'dad-chat', title: 'T', modelText: 'm', outputTemplate: 'o', srcManifest: { 'app.js': { key: 'h.js', size: 1 } } } });
+  const r = sib('dad-chat', 1720000000000);
+  assert.deepEqual(C.inspect({ key: 'weld:genvault:dad-chat/chat/snap-1720000000000-ab12cd', size: 9, value: r.chat }, {}).anomalies, []);
+  assert.deepEqual(C.inspect({ key: 'weld:genvault:dad-chat/snapshot', size: 9, value: r.gen }, {}).anomalies, []);
+  assert.ok(C.inspect({ key: 'weld:genvault:dad-chat/chat/snap-1-a', size: 9, value: Object.assign({}, r.chat, { folder: 'weld:genvault:other/chat/' }) }, {}).anomalies.some(a => /Folder field/.test(a)), 'a folder naming another generator is still flagged');
+  assert.equal(C.checkStoreWrite('weld:genvault:dad-chat/snapshot', r.gen).ok, true);
+}
+
 // ---- backup-folder layout (pure)
 {
   const snap = { key: 'weld:genvault:alpha/snapshot', value: { at: Date.UTC(2026, 9, 6, 12, 30, 5), generator: 'alpha' } };

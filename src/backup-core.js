@@ -135,7 +135,8 @@
       if (miss.length) anomalies.push('Missing expected fields: ' + miss.join(', ') + '.');
       if ((p.kind === 'chat-copy' || p.kind === 'snapshot') && shape === 'unknown') anomalies.push('Unknown record shape (neither a known generator copy nor chat copy).');
       if (p.gen && typeof v.generator === 'string' && v.generator && v.generator !== p.gen) anomalies.push('Owner mismatch: the key belongs to "' + p.gen + '" but the record says generator "' + v.generator + '".');
-      if (p.gen && typeof v.folder === 'string' && v.folder && v.folder !== p.gen && v.folder !== PREFIX + p.gen + '/' && v.folder !== 'weld:genvault:' + p.gen) anomalies.push('Folder field "' + text(v.folder) + '" does not match the key owner "' + p.gen + '".');
+      // the folder may name the generator or a sub-folder of it (for example .../chat/)
+      if (p.gen && typeof v.folder === 'string' && v.folder && v.folder !== p.gen && v.folder !== PREFIX + p.gen && v.folder.indexOf(PREFIX + p.gen + '/') !== 0) anomalies.push('Folder field "' + text(v.folder) + '" does not match the key owner "' + p.gen + '".');
     } else if (!rec.parseError && p.kind !== 'legacy' && p.kind !== 'operational' && p.kind !== 'chat-index' && p.kind !== 'other') anomalies.push('Unknown record shape: expected an object.');
     if (rec.size > MAX_VALUE_BYTES) anomalies.push('Oversized value: ' + fmtBytes(rec.size) + ' is over the ~2 MB limit.');
     if (p.kind === 'other' && p.gen === '' && String(rec.key).indexOf(PREFIX) === 0) anomalies.push('Key is under the vault prefix but its generator folder name is invalid.');
