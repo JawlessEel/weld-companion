@@ -13,6 +13,7 @@ class Element {
   appendChild(c) { if (c) { c.parentNode = this; this.children.push(c); } return c; }
   removeChild(c) { this.children = this.children.filter(x => x !== c); return c; }
   get firstChild() { return this.children[0] || null; }
+  addEventListener(type, fn) { this.events[type] = fn; }
   get isConnected() { return true; }
   click() { if (!this.disabled) this.events.click?.(); }
 }
@@ -58,6 +59,25 @@ assert.ok(C.inspect({ key: 'weld:genvault:a/snapshot', size: 3 * 1024 * 1024, va
 const ex = C.exportRecord(rec, Date.UTC(2026, 9, 6));
 assert.match(ex.filename, /^weld-backup-beta-.*2026-10-06\.json$/); assert.equal(JSON.parse(ex.text).record.key, rec.key);
 
+// ---- envelopes, presence tracker, store-write guard
+const now = 1700000000000, beat = (o = {}) => Object.assign({ v: 1, type: 'presence', id: 'tab12345:1', from: 'tab12345', gen: 'alpha', at: now }, o);
+assert.equal(C.validateEnvelope('dad-chat:presence', beat(), now).ok, true);
+for (const [bad, why] of [[beat({ v: 2 }), 'bad-version'], [beat({ type: 'x' }), 'unknown-type'], [beat({ from: '' }), 'bad-from'], [beat({ id: undefined }), 'bad-id'], [beat({ at: now - 6 * 60000 }), 'bad-time'], [beat({ gen: 5 }), 'bad-gen'], [beat({ gen: 'x'.repeat(3000) }), 'too-large'], ['str', 'not-an-object']])
+  assert.equal(C.validateEnvelope('dad-chat:presence', bad, now).reason, why);
+assert.equal(C.validateEnvelope('dad:genvault', { v: 1, type: 'vault-updated', generator: 'alpha', at: now, from: 'alpha' }, now).ok, true);
+assert.equal(C.validateEnvelope('dad:genvault', { v: 1, type: 'vault-updated', at: now }, now).reason, 'bad-generator');
+assert.equal(C.validateEnvelope('other:channel', 'anything', now).known, false, 'unknown channels are not judged');
+const pt = C.presenceTracker();
+assert.equal(pt.observe(beat(), now), true); assert.equal(pt.observe(beat(), now), false, 'duplicate id ignored');
+pt.observe(beat({ from: 'tab99999', id: 'tab99999:1' }), now); pt.observe({ junk: 1 }, now);
+assert.deepEqual(pt.snapshot(now), { tabs: { alpha: 2 }, ignored: 2 });
+pt.observe(beat({ type: 'presence-bye', id: 'tab12345:2' }), now); assert.deepEqual(pt.snapshot(now).tabs, { alpha: 1 });
+assert.deepEqual(pt.snapshot(now + 61000).tabs, {}, 'peers expire after ~60s of silence');
+assert.equal(C.checkStoreWrite('weld:genvault:alpha/snapshot', { generator: 'beta' }).reason, 'owner-mismatch');
+assert.equal(C.checkStoreWrite('weld:genvault:alpha/snapshot', { generator: 'alpha' }).ok, true);
+assert.equal(C.checkStoreWrite('weld:genvault:alpha/chat/snap-1-a', null).ok, true, 'tombstones pass');
+assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkStoreWrite('free:form', { generator: 'x' }).ok, true);
+
 // ---- UI against a fake host
 const bytes = () => JSON.stringify([...store].sort());
 const listeners = [], downloads = []; let listFail = false, removed = [];
@@ -68,6 +88,7 @@ const host = {
     read: g => { if (!store.has(g)) return { ok: true, size: 0, value: null }; const raw = store.get(g); try { return { ok: true, size: raw.length, value: JSON.parse(raw) }; } catch (e) { return { ok: true, size: raw.length, value: null, parseError: true }; } },
     remove: g => { removed.push(g); store.delete(g); return { ok: true }; },
     onChange: fn => { listeners.push(fn); return () => { listeners.splice(listeners.indexOf(fn), 1); }; },
+    presence: () => ({ tabs: { 'futuretag-9': 2 }, ignored: 3 }),
     info: () => ({ backend: 'Fake GM' }), download: (n, t) => downloads.push({ n, t })
   }
 };
@@ -98,6 +119,15 @@ click('Inspect weld:genvault:beta/snapshot-big'); assert.match(txt(parent), /Ove
 // secret scan: names only
 click('Scan for plaintext secrets');
 const sec = txt(parent); assert.match(sec, /config\.webhookUrl \(value hidden\)/); assert.ok(!sec.includes('SECRETVALUE123'));
+
+// family section: picker, four rungs, presence
+const fam = () => walk(parent).find(n => n.attrs['data-family']);
+assert.ok(fam(), 'family card'); assert.deepEqual(['Live session', 'Named slots', 'Vault copies', 'Cloud Backup mirror'], walk(fam()).filter(n => n.attrs['data-rung']).map(n => n.attrs['data-rung']));
+assert.match(txt(fam()), /Live session.*Not visible to the companion/);
+const pick = walk(fam()).find(n => n.attrs['aria-label'] === 'Generator'); assert.deepEqual(walk(pick).filter(n => n.tagName === 'option').map(o => o.attrs.value), ['alpha', 'beta', 'futuretag-9']);
+pick.value = 'alpha'; pick.events.change(); assert.match(txt(fam().parentNode.children.find(n => n.attrs['data-family']) || fam()), /2 chat copies/);
+pick.value = 'futuretag-9'; pick.events.change(); assert.match(txt(fam()), /No vault copies stored/); assert.match(txt(walk(fam()).find(n => n.attrs['data-presence'])), /Presence: 2 open tabs seen for futuretag-9 · 3 malformed/);
+assert.ok(!walk(parent).some(n => n.tagName === 'button' && n.attrs.disabled === false), 'never pass disabled:false');
 
 // export
 click('Export folder alpha'); const d1 = downloads.pop();

@@ -6,6 +6,9 @@ default export for characters, lore, or worlds — they drop data
 (see §9).** Imports keep accepting Tavern shapes; only exports are
 restricted. Any authoring tool (human, WELD-side, or AI) targeting
 this app must emit Dad-native shapes from this file, not Tavern cards.
+Working examples of every envelope in §5 (plus all accepted import shapes)
+live in `src/file-templates/` — they shadow this spec, so a change here must
+update the matching template(s) in the same pass, and vice versa.
 
 All field behavior below is read from the app source
 (`src/app.js`, `src/forge-bridge.js`, `src/forge-studio.js`).

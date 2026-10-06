@@ -33,7 +33,8 @@ const meta = {
   '24': ['Weld AI result', 'wire', '', 'weld'],
   '25': ['Weld model info result', 'wire', '', 'weld'],
   '26': ['Weld storage link record', 'wire', '', 'weld'],
-  '27': ['Weld bus envelope', 'wire', '', 'weld']
+  '27': ['Weld bus envelope', 'wire', '', 'weld'],
+  '28': ['Vault save (Weld storage)', 'wire', '', 'weld']
 };
 const files = fs.readdirSync(dir).filter(f => /^\d\d-/.test(f)).sort();
 const rows = files.map(f => {

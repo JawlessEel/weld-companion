@@ -6,11 +6,12 @@
   const C = window.WeldBackupCore, H = window.weldProjectHost;
   if (!C || !H) return;
   const E = H.el;
-  const S = { rows: null, inv: null, error: '', selected: null, inspected: null, pendingDelete: null, secrets: null, msg: '', stamp: 0 };
+  const S = { pick: '', rows: null, inv: null, error: '', selected: null, inspected: null, pendingDelete: null, secrets: null, msg: '', stamp: 0 };
   let host = null, unsub = null;
   const note = t => E('div', { class: 'wc-section-note', text: t });
   const small = { fontSize: '12px', opacity: '.75' };
-  const btn = (label, fn, extra) => E('button', Object.assign({ type: 'button', class: 'wc-btn wc-mini', text: label, onclick: fn }, extra || {}));
+  // el() sets attributes with setAttribute, so a false `disabled` would still disable the button: only pass it when true.
+  const btn = (label, fn, extra) => { const a = Object.assign({ type: 'button', class: 'wc-btn wc-mini', text: label, onclick: fn }, extra || {}); if (!a.disabled) delete a.disabled; return E('button', a); };
   const V = () => H.vault || null;
 
   function say(t, isErr) { S.msg = t; S.msgErr = !!isErr; }
@@ -132,6 +133,34 @@
     return wrap;
   }
 
+
+  // Dad-Chat family: one generator at a time (keyed by tag), four persistence rungs. The companion can only see the
+  // vault rung and presence; the rest live in the generator's own page, so they are reported as not visible, not guessed.
+  function familyCard(rerender) {
+    const inv = S.inv, v = V(), pres = (v && typeof v.presence === 'function' && v.presence()) || { tabs: {}, ignored: 0 };
+    const tags = new Set(inv.generators.map(g => g.gen));
+    Object.keys(pres.tabs || {}).forEach(t => { if (C.GEN_RE.test(t)) tags.add(t); });
+    const here = typeof H.slug === 'function' ? H.slug() : ''; if (here && C.GEN_RE.test(here)) tags.add(here);
+    const list = Array.from(tags).sort();
+    const card = E('div', { 'data-family': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
+    card.appendChild(E('div', { text: 'Dad-Chat family', style: { fontWeight: '600' } }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Any generator that stores copies under its own tag appears here. The companion only watches; it never routes chats or subscribes channels for a generator.' }));
+    if (!list.length) { card.appendChild(note('No generator tags seen yet.')); return card; }
+    if (!S.pick || !tags.has(S.pick)) S.pick = list.indexOf(here) >= 0 ? here : list[0];
+    const sel = E('select', { 'aria-label': 'Generator', style: { margin: '4px 0 8px' } }, list.map(t => E('option', { value: t, text: t })));
+    sel.value = S.pick; sel.addEventListener('change', () => { S.pick = sel.value; rerender(); });
+    card.appendChild(sel);
+    const g = inv.generators.find(x => x.gen === S.pick);
+    const vaultState = !g ? 'No vault copies stored' : [g.snapshot ? (g.snapshot.stale ? 'source copy is stale' : 'source copy ' + (g.snapshot.at ? C.fmtDate(g.snapshot.at) : 'present')) : 'no source copy', g.chats + ' chat cop' + (g.chats === 1 ? 'y' : 'ies'), C.fmtBytes(g.bytes)].join(', ');
+    const open = (pres.tabs || {})[S.pick] || 0;
+    [['Live session', 'Not visible to the companion (kept in the generator\'s own page storage)'],
+     ['Named slots', 'Not visible to the companion (local to the generator; the companion never syncs or manages them)'],
+     ['Vault copies', vaultState],
+     ['Cloud Backup mirror', 'Not visible to the companion (a public file the generator keeps itself)']].forEach(r =>
+      card.appendChild(E('div', { 'data-rung': r[0], style: { display: 'flex', gap: '8px', fontSize: '12px', padding: '2px 0' } }, [E('span', { text: r[0], style: { minWidth: '130px', fontWeight: '600' } }), E('span', { text: r[1] })])));
+    card.appendChild(E('div', { 'data-presence': '1', style: Object.assign({ marginTop: '6px' }, small), text: 'Presence: ' + open + ' open tab' + (open === 1 ? '' : 's') + ' seen for ' + S.pick + ' · ' + (pres.ignored || 0) + ' malformed or duplicate message' + (pres.ignored === 1 ? '' : 's') + ' ignored' }));
+    return card;
+  }
   function render(parent) {
     host = parent; S.msg = '';
     load();
@@ -159,6 +188,7 @@
       (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' · ' + C.fmtBytes(inv.bytes) + ' used by backups' +
       (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
     if (!inv.count) wrap.appendChild(note('No generator backups are stored yet. They appear here after a generator saves a copy through Skybridge storage.'));
+    wrap.appendChild(familyCard(rerender));
     const bar = confirmBar(rerender); if (bar) wrap.appendChild(bar);
     inv.generators.forEach(g => {
       const d = E('details', { 'data-gen': g.gen, style: { margin: '6px 0' } });

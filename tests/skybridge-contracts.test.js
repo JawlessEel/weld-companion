@@ -94,7 +94,7 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
   const gget = (k, d) => { const v = GM_getValue(NS + ':' + k, undefined); return v === undefined ? d : JSON.parse(v); };
   const gset = (k, v) => { GM_setValue(NS + ':' + k, JSON.stringify(v)); return true; };
   const GM_listValues = () => Array.from(store.keys());
-  const anchorStorage = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS, gget, gset, GM_listValues, Promise });
+  const anchorStorage = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS, gget, gset, GM_listValues, Promise, window: { WeldBackupCore: require('../src/backup-core.js') } });
   const call = (gen, payload) => anchorStorage.sbServiceStorage(gen, payload);
   call('gen-a', { op: 'set', key: 'slot1', value: { n: 1 } })
     .then(() => call('gen-a', { op: 'set', key: 'slot2', value: 2 }))
@@ -108,7 +108,20 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
       assert.deepEqual(Array.from(r.value), ['slot2']);
       return call('gen-a', { op: 'get', key: 'slot1' });
     })
-    .then((r) => { assert.deepEqual(r.value, { n: 1 }); console.log('Skybridge anchor storage set/get/list tests passed'); })
+    .then((r) => {
+      assert.deepEqual(r.value, { n: 1 });
+      return call('alpha', { op: 'set', key: 'weld:genvault:alpha/snapshot', value: { generator: 'beta' } });
+    })
+    .then((r) => {
+      assert.deepEqual([r.ok, r.reason], [false, 'owner-mismatch'], 'a record naming another owner is refused');
+      return call('alpha', { op: 'get', key: 'weld:genvault:alpha/snapshot' });
+    })
+    .then((r) => {
+      assert.equal(r.value, null, 'nothing was stored by the refused write');
+      return call('alpha', { op: 'set', key: 'weld:genvault:alpha/snapshot', value: { generator: 'alpha' } });
+    })
+    .then((r) => { assert.equal(r.ok, true); return call('alpha', { op: 'set', key: '', value: 1 }); })
+    .then((r) => { assert.deepEqual([r.ok, r.reason], [false, 'bad-key']); console.log('Skybridge anchor storage set/get/list tests passed'); })
     .catch((e) => { console.error(e); process.exit(1); });
 }
 
@@ -321,4 +334,34 @@ console.log('skybridge and GitHub push contract tests passed');
     assert.ok(sent[0].url.startsWith('https://example.com/') && !(sent[0].headers && sent[0].headers.Authorization), 'non-GitHub URLs never get the token');
     console.log('Private-repo Pull/Diff fetch tests passed');
   })().catch((e) => { console.error(e); process.exit(1); });
+}
+
+// Bus: known channels are validated before relay, presence is observed (never published), other channels pass through as before.
+{
+  const BC = require('../src/backup-core.js');
+  const sent = [];
+  const code = between('var sbBusSubs = {};', '// ---- the outer Helper as a bus AGENT') + between('function sbServiceBus(', 'function sbHandleMessage(');
+  const env = { window: { WeldBackupCore: BC }, SB: 'weld.skybridge', BroadcastChannel: undefined, Promise, Date, sbMaybeAgent() {} };
+  const ctx = { console, ...env }; vm.createContext(ctx); vm.runInContext(code, ctx);
+  const frame = { postMessage: (m) => sent.push(m) };
+  const run = async () => {
+    const pub = (channel, message) => ctx.sbServiceBus({ op: 'publish', channel, message }, frame, 'https://x');
+    await ctx.sbServiceBus({ op: 'subscribe', channel: 'dad-chat:presence' }, frame, 'https://x');
+    await ctx.sbServiceBus({ op: 'subscribe', channel: 'dad:genvault' }, frame, 'https://x');
+    await ctx.sbServiceBus({ op: 'subscribe', channel: 'free:chan' }, frame, 'https://x');
+    const now = Date.now(), beat = { v: 1, type: 'presence', id: 'tab12345:1', from: 'tab12345', gen: 'alpha', at: now };
+    assert.equal((await pub('dad-chat:presence', beat)).ok, true);
+    const bad = await pub('dad-chat:presence', { ...beat, v: 9 });
+    assert.deepEqual([bad.ok, bad.code], [false, 'malformed']);
+    assert.equal((await pub('dad-chat:presence', beat)).ok, true, 'a duplicate id is accepted by the publisher but never relayed or counted');
+    assert.equal((await pub('free:chan', 'anything goes')).ok, true, 'channels without rules are untouched');
+    assert.equal((await pub('dad:genvault', { v: 1, type: 'vault-updated', generator: 'alpha', at: now })).ok, true);
+    assert.equal((await pub('dad:genvault', { v: 1, type: 'vault-updated' })).ok, false);
+    const relayed = sent.filter((m) => m.type === 'bus').map((m) => m.busChannel);
+    assert.deepEqual(relayed, ['dad-chat:presence', 'free:chan', 'dad:genvault'], 'only valid, non-duplicate messages are relayed');
+    const snap = ctx.sbPresence.snapshot();
+    assert.deepEqual(Object.assign({}, snap.tabs), { alpha: 1 }); assert.equal(snap.ignored, 3);   // bad publish + duplicate + bad vault-updated
+    console.log('Skybridge bus envelope validation and presence tests passed');
+  };
+  run().catch((e) => { console.error(e); process.exit(1); });
 }

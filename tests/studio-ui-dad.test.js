@@ -70,7 +70,7 @@ const dadChar = name => ({ type: 'dad-char', version: 2, data: { id: 'char_' + n
     click('Download all templates (zip)');
     assert.equal(byteDownloads.length, zips + 1); assert.equal(byteDownloads[byteDownloads.length - 1].name, 'dad-chat-file-templates.zip');
     const entries = await D.unzip(byteDownloads[byteDownloads.length - 1].bytes);
-    assert.equal(entries.length, 27);
+    assert.equal(entries.length, 28);
     downloads.length = before; byteDownloads.length = zips;
   }
 

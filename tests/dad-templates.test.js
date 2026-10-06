@@ -9,12 +9,12 @@ const C = require('../src/skills-core.js');
 
 const dir = path.join(__dirname, '..', 'docs', 'dad-chat', 'file-templates');
 const onDisk = fs.readdirSync(dir).filter(f => /^\d\d-/.test(f)).sort();
-assert.equal(T.rows.length, 27);
+assert.equal(T.rows.length, 28);
 assert.deepEqual(T.rows.map(r => r.file), onDisk, 'module and docs folder list the same files');
 for (const r of T.rows) {
   assert.equal(r.text, fs.readFileSync(path.join(dir, r.file), 'utf8').replace(/\r\n/g, '\n'), r.file + ' matches the docs copy');
   assert.ok(r.label && r.direction && r.group, r.file + ' has metadata');
-  assert.ok(!/(api[_-]?key|token|secret|password|bearer)\s*["']?\s*:/i.test(r.text), r.file + ' must not carry credentials');
+  assert.ok(!/(api[_-]?key|token|secret|password|bearer)\s*["']?\s*:(?!\s*"\[redacted\]")/i.test(r.text), r.file + ' must not carry credentials');
 }
 assert.equal(new Set(T.rows.map(r => r.file)).size, T.rows.length);
 assert.ok(Object.isFrozen(T.rows) && T.byFile['01-dad-char.json'].label);

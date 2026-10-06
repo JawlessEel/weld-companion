@@ -1,5 +1,12 @@
 # DadChat file templates
 
+> MAINTENANCE RULE: these templates shadow the code. Any change to an
+> import/export shape, a converter (`forge-core.js` / `forge-bridge.js` /
+> `PngUtils`), the transcript builder, the user-profile or cloud-backup
+> format, or a Weld wire shape must update the matching template(s) in the
+> SAME pass — then re-verify (`ForgeCore.tolerantParse` + `detectType`, plus
+> the round-trip checks in this README's table).
+
 Copy-paste starters for **every file shape DadChat writes and reads**, so work
 done outside the generator (Claude, Codex, scripts) intakes and outputs
 correctly. Files are prefixed in intake/output groups:
@@ -29,6 +36,7 @@ correctly. Files are prefixed in intake/output groups:
 | 21 | `storyforge-characters.json` | Story Forge ZIP part | — | ZIP also holds `*_World.png`, `*_Name.png`, `worldbook.json` (= 04), `README.txt`. |
 | 22 | `dad-char-hub.json` | Hub publish payload | `dad-char` | `{type:"dad-char",version:3.0,timestamp,data,meta}`. Card bodies live in per-user editable files. |
 | 23–27 | `weld-*.json` | Weld Skybridge wire shapes | — | `ai` request/result, `modelInfo` result, storage link record, bus envelope. |
+| 28 | `vault-snapshot.json` | Vault save (Weld storage) | — | Chat copy: `{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full", size, redacted, data:{…}}` at `weld:genvault:<generator>/chat/snap-…`, index at `…/chat/index`. Generator copy: same envelope, `kind:"generator-source"`, at `weld:genvault:<generator>/snapshot`. |
 
 ## Rules for anything you build (human or AI)
 

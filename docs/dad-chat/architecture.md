@@ -18,7 +18,7 @@ each one owns, and how a chat turn flows through them.
 Order matters — later files call into earlier ones via `window.*`:
 
 1. `src/pjs-globals.js` — bridges perchance `root.*` imports to `window.*` (`kv`, `generateText`, `image`, `uploadPlugin`, `superFetchPlugin`); `ensureLib`/`ensureCss` lazy loaders; `escHtml`; `pjsLiteral` (must wrap **every** `root.image({prompt})` — the image plugin evaluates prompts as Perchance templates).
-2. `src/weld-skybridge.js` — optional Weld Companion link. Fully additive.
+2. `src/weld-bridge.js` — optional Weld Companion link (pill + popover indicator, presence). Fully additive.
 3. `src/agent-core.js` — VFS tool definitions + arg sanitizers for the chat agent (`window.DadAgentCore`).
 4. `src/code-viewer.js`, `src/providers.js` — provider/model catalog (`window.Dad_PROVIDER_GROUPS`: builtin, cloud, hubs, local runtimes).
 5. `src/on-device-webgpu.js` — WebGPU model download manager (Profile modal card).
@@ -27,6 +27,7 @@ Order matters — later files call into earlier ones via `window.*`:
 8. `src/image-forge.js` — `window.ImageForge`: world/style prompt prepend + AI-crafted negative + CFG. Wraps every image call.
 9. **`src/app.js`** (~2.4 MB) — the app itself: state, chat engine, prompt assembly, render, persistence, import/export, hub client, all modals.
 10. Studios (depend on `app.js` globals): `src/forge-studio.js` (`window.WS` — World Studio: worlds/entries editor, import, AI build), `src/story-forge.js` (`window.StoryForge` — world/character extraction from text), `src/scene-cast.js` (`window.SceneCast` — characters-from-scene), `src/immersive.js` (voice/SFX/scene image/directors; injects into history).
+11. `src/gen-vault.js` — `window.Vault` + `window.openVault()` (generator-source + named `dad-full` snapshots under `weld:genvault:<generator>/`). Last script: it reuses `app.js` live bindings and `weld-bridge.js` storage/bus, so it loads after both.
 
 CDN libs (`lucide`, `marked`, `DOMPurify`, `highlight.js`, `katex`) load eagerly; heavy libs (d3, pdf.js, CropperJS, wllama) lazy-load via `ensureLib` at first use.
 
@@ -61,6 +62,7 @@ All read only the newest `chatToCardMaxMessages` (40) messages, stripped of prov
 - **Story Forge** (`story-forge.js`) — places + cast extraction from pasted text/fi­c, portraits, PNG/Tavern export.
 - **Scene Cast** (`scene-cast.js`) — scan scene → per-character sheets → `applySheetToChar` (new or update-in-place) + portraits.
 - **Export dialog** (`exportData`, app.js) — Dad-native JSON/PNG first (lossless), Tavern V2/CCV2/Forge shapes labelled as lossy share copies; chat transcripts (full / last-40, plain / AI-labelled).
+- **Weld Vault** (`src/gen-vault.js`, `window.Vault`) — generator-source + named `dad-full` snapshots under `weld:genvault:<generator>/`, ownership-enforced reads/writes, secret-redacting saves, per-copy download.
 
 ## 6. Hub (sharing) flow
 
@@ -72,3 +74,4 @@ Client (`app.js` hub section) ↔ server (`index.html` top script) over `createS
 - Text is data: card/lore text is never evaluated; escape untrusted strings with `escHtml` for HTML and `pjsLiteral` for image prompts; only `{{char}}`/`{{user}}` are substituted at prompt time.
 - Debug handles: `window.ProseEngine`, `window.ImageForge`, `window.WS`, `window.StoryForge`, `window.SceneCast`, `window.DadAgentCore`, `window.OnDeviceWebGPU`.
 - Verify live: `page_refresh` then `page_eval` the touched path (open/close the modal, run the flow) with zero console + zero `perchanceErrors`. For visual work, snapshot and look.
+- Formats ship with examples: any change to an import/export shape, a converter, the transcript builder, or a Weld wire shape must update the matching `src/file-templates/*` template(s) + that README's table, plus `dad-native-format.md` for Dad-native changes — in the same pass, re-verified through `ForgeCore.detectType` and the real converters (see *Agent maintenance rule* in `src/README.md`).

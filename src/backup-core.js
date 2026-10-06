@@ -193,8 +193,63 @@
     return { filename: 'weld-backup-' + slugPart(label) + '-' + datePart(now) + '.json',
       text: JSON.stringify({ format: 'weld-backup-bundle', v: 1, exportedAt: now, scope: label, count: recs.length, records: recs.map(entryFor) }, null, 2) };
   }
+
+  // ---- bus envelopes (dad:genvault, dad-chat:presence): validate before relaying or displaying
+  const BUS_MAX_CHARS = 2048, PRESENCE_TTL_MS = 60000, PRESENCE_SKEW_MS = 5 * 60000;
+  const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+  function serializedLength(m) { try { return JSON.stringify(m).length; } catch (e) { return Infinity; } }
+  // -> { ok:true } | { ok:false, reason }. Channels without a rule are not judged here (relayed as before).
+  function validateEnvelope(channel, m, now) {
+    now = now == null ? Date.now() : now;
+    if (channel !== 'dad:genvault' && channel !== 'dad-chat:presence') return { ok: true, known: false };
+    if (!isObj(m)) return { ok: false, reason: 'not-an-object' };
+    if (serializedLength(m) > BUS_MAX_CHARS) return { ok: false, reason: 'too-large' };
+    if (m.v !== 1) return { ok: false, reason: 'bad-version' };
+    if (channel === 'dad:genvault') {
+      if (m.type !== 'vault-updated') return { ok: false, reason: 'unknown-type' };
+      if (!str(m.generator, 64)) return { ok: false, reason: 'bad-generator' };
+      if (num(m.at) === null) return { ok: false, reason: 'bad-time' };
+      if (m.from !== undefined && !str(m.from, 64)) return { ok: false, reason: 'bad-from' };
+      return { ok: true, known: true };
+    }
+    if (m.type !== 'presence' && m.type !== 'presence-bye') return { ok: false, reason: 'unknown-type' };
+    if (!str(m.from, 64)) return { ok: false, reason: 'bad-from' };
+    if (!str(m.id, 96)) return { ok: false, reason: 'bad-id' };
+    if (typeof m.gen !== 'string' || m.gen.length > 64) return { ok: false, reason: 'bad-gen' };
+    if (num(m.at) === null || Math.abs(now - m.at) > PRESENCE_SKEW_MS) return { ok: false, reason: 'bad-time' };
+    return { ok: true, known: true };
+  }
+  // Counts live tabs per generator tag from validated presence beats. Observes only; never publishes or synthesizes.
+  function presenceTracker() {
+    const tabs = new Map(), lastId = new Map();   // gen -> Map(from -> lastAt); from -> last id
+    let ignored = 0;
+    function observe(m, now) {
+      now = now == null ? Date.now() : now;
+      if (!validateEnvelope('dad-chat:presence', m, now).ok) { ignored++; return false; }
+      if (lastId.get(m.from) === m.id) { ignored++; return false; }   // duplicate id
+      lastId.set(m.from, m.id);
+      const gen = text(m.gen, 64) || '(unknown)';
+      if (m.type === 'presence-bye') { tabs.forEach(t => t.delete(m.from)); return true; }
+      let t = tabs.get(gen); if (!t) tabs.set(gen, t = new Map());
+      t.set(m.from, now); return true;
+    }
+    function snapshot(now) {
+      now = now == null ? Date.now() : now;
+      const out = {};
+      tabs.forEach((t, gen) => { t.forEach((at, from) => { if (now - at > PRESENCE_TTL_MS) t.delete(from); }); if (t.size) out[gen] = t.size; });
+      return { tabs: out, ignored };
+    }
+    return { observe, snapshot, countIgnored: () => { ignored++; } };
+  }
+  // Storage writes: refuse a vault record that names a different owner than its key. Null tombstones pass.
+  function checkStoreWrite(key, value) {
+    if (typeof key !== 'string' || !key || key.length > 512) return { ok: false, reason: 'bad-key' };
+    const p = parseKey(key);
+    if (p.gen && isObj(value) && typeof value.generator === 'string' && value.generator !== p.gen) return { ok: false, reason: 'owner-mismatch' };
+    return { ok: true };
+  }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite };
 });

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 195);
+assert.equal(C.presets.length, 197);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
 assert.equal(C.categories.length, 18);
 for (const p of C.presets) {
@@ -122,7 +122,7 @@ assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000'
 // Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
 assert.equal(cardSkills.length, 31);
-assert.equal(dadSkills.length, 29);
+assert.equal(dadSkills.length, 31);
 for (const p of cardSkills.concat(dadSkills)) {
   assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
   assert.ok(p.example.length > 80, p.id + ' needs a worked example');
@@ -139,7 +139,7 @@ for (const p of dadSkills) {
 assert.ok(!C.buildPrompt('fix-bugs').includes('STRUCTURE REFERENCE'));
 assert.ok(!C.buildPrompt('fix-bugs').includes('PROJECT CONTEXT'));
 assert.equal(C.sections.find(s => s.id === 'dad').title, 'Dad-Chat projects');
-for (const id of ['dad-orient', 'dad-diagnose', 'dad-fix', 'dad-add-feature', 'dad-improve-feature', 'dad-new-module', 'dad-prompt-tune', 'dad-provider-add', 'dad-ui-polish', 'dad-import-export', 'dad-hub-work', 'dad-prompt-audit', 'dad-persistence-audit', 'dad-safety-review', 'dad-perf-size', 'dad-release-check', 'dad-character-create', 'dad-character-improve', 'dad-lore-build', 'dad-lore-audit', 'dad-world-build', 'dad-token-diet', 'dad-convert-tavern', 'dad-greetings-examples', 'dad-file-validate', 'dad-file-chat', 'dad-file-backup', 'dad-file-convert', 'dad-weld-wire']) assert.ok(C.get(id), id);
+for (const id of ['dad-orient', 'dad-diagnose', 'dad-fix', 'dad-add-feature', 'dad-improve-feature', 'dad-new-module', 'dad-prompt-tune', 'dad-provider-add', 'dad-ui-polish', 'dad-import-export', 'dad-hub-work', 'dad-prompt-audit', 'dad-persistence-audit', 'dad-safety-review', 'dad-perf-size', 'dad-release-check', 'dad-character-create', 'dad-character-improve', 'dad-lore-build', 'dad-lore-audit', 'dad-world-build', 'dad-token-diet', 'dad-convert-tavern', 'dad-greetings-examples', 'dad-file-validate', 'dad-file-chat', 'dad-file-backup', 'dad-file-convert', 'dad-weld-wire', 'dad-vault-bridge', 'dad-session-slots']) assert.ok(C.get(id), id);
 assert.ok(C.search('dad-chat').length >= 29 && C.search('', 'dad', null, { type: 'dashboard' }).length === 0);
 const diagnose = C.buildPrompt('dad-diagnose', { slug: 'dad-chat', details: 'Lore never appears.' });
 assert.match(diagnose, /MODE: REVIEW ONLY/);

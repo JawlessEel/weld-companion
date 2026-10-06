@@ -221,6 +221,14 @@
     "detect": "",
     "group": "weld",
     "text": "{\n  \"channel\": \"dad:regions\",\n  \"message\": {\n    \"generator\": \"dad-chat\",\n    \"count\": 1\n  }\n}\n"
+  },
+  {
+    "file": "28-vault-snapshot.json",
+    "label": "Vault save (Weld storage)",
+    "direction": "wire",
+    "detect": "",
+    "group": "weld",
+    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"dad-chat-sync\",\n  \"folder\": \"weld:genvault:dad-chat-sync/\",\n  \"savedBy\": \"dad-chat-sync\",\n  \"name\": \"vault-1\",\n  \"kind\": \"dad-full\",\n  \"size\": 123456,\n  \"redacted\": 1,\n  \"data\": {\n    \"threads\": {},\n    \"currentThreadId\": null,\n    \"config\": {\n      \"characterBook\": {},\n      \"pollinationsApiKey\": \"[redacted]\"\n    }\n  }\n}\n"
   }
 ];
   return Object.freeze({ rows: Object.freeze(rows.map(r => Object.freeze(r))), byFile: Object.freeze(rows.reduce((m, r) => { m[r.file] = r; return m; }, {})) });

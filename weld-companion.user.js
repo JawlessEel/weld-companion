@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.68.0
+// @version      1.69.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.68.0';
+  var WC_VERSION = '1.69.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -3079,7 +3079,9 @@
       if (op === 'get') {
         resolve({ ok: true, value: gget(sbStoreKey(gen, payload.key), null) });
       } else if (op === 'set') {
-        gset(sbStoreKey(gen, payload.key), payload.value); resolve({ ok: true });
+        var BC = window.WeldBackupCore, chk = (BC && BC.checkStoreWrite) ? BC.checkStoreWrite(payload.key, payload.value) : { ok: true };   // refuses a vault record whose generator field names another owner
+        if (!chk.ok) return resolve({ ok: false, code: chk.reason, reason: chk.reason });
+        resolve(gset(sbStoreKey(gen, payload.key), payload.value) ? { ok: true } : { ok: false, code: 'quota', reason: 'storage-full' });
       } else if (op === 'list') {
         // gset() stores every key under the NS prefix (NS + ':' + key), so match the real stored name.
         var base = NS + ':' + sbStoreKey(gen, '');
@@ -3371,7 +3373,14 @@
     try { source.postMessage({ channel: SB, type: 'bus', busChannel: channel, message: message }, origin && origin !== 'null' ? origin : '*'); return true; } catch (e) { return false; }
   }
   var sbVaultListeners = [];   // Backups tab refresh hooks; the companion only listens on dad:genvault, it never publishes there
+  var sbPresence = null;   // lazy: counts live tabs per generator from validated dad-chat:presence beats (observe only, never publishes)
   function sbBusDeliverLocal(channel, message) {
+    var BC = window.WeldBackupCore;
+    if (BC && (channel === 'dad:genvault' || channel === 'dad-chat:presence')) {
+      if (!sbPresence) sbPresence = BC.presenceTracker();
+      if (channel === 'dad-chat:presence') { if (!sbPresence.observe(message)) return; }   // malformed or duplicate: counted, not relayed
+      else if (!BC.validateEnvelope(channel, message).ok) { sbPresence.countIgnored(); return; }
+    }
     if (channel === 'dad:genvault') sbVaultListeners.slice().forEach(function (fn) { try { fn(message); } catch (e) {} });
     var subs = sbBusSubs[channel]; if (!subs) return;
     var live = [];   // prune subscribers whose frame is gone (postMessage throws) so dead iframes don't accumulate forever
@@ -3696,6 +3705,8 @@
         return resolve({ ok: true, unsubscribed: channel });
       }
       if (op === 'publish') {
+        var BCv = window.WeldBackupCore, bv = BCv ? BCv.validateEnvelope(channel, payload.message) : { ok: true };
+        if (!bv.ok) { if (!sbPresence && BCv) sbPresence = BCv.presenceTracker(); if (sbPresence) sbPresence.countIgnored(); return resolve({ ok: false, code: 'malformed', reason: 'malformed: ' + bv.reason }); }
         sbBusDeliverLocal(channel, payload.message);                                      // same-tab subscribers
         var bc = sbBusChannel(); if (bc) { try { bc.postMessage({ channel: channel, message: payload.message }); } catch (e) {} }   // other tabs
         sbMaybeAgent(channel, payload.message);                                           // outer Helper reacts to inner->helper messages
@@ -3910,6 +3921,7 @@
         },
         onChange: function (fn) { sbVaultListeners.push(fn); return function () { var i = sbVaultListeners.indexOf(fn); if (i >= 0) sbVaultListeners.splice(i, 1); }; },
         info: function () { return { backend: 'Userscript manager storage (GM_*)' }; },
+        presence: function () { return sbPresence ? sbPresence.snapshot() : { tabs: {}, ignored: 0 }; },
         download: function (name, text) { downloadBlobText(name, text); }
       };
     })(),
@@ -11181,6 +11193,14 @@
     "detect": "",
     "group": "weld",
     "text": "{\n  \"channel\": \"dad:regions\",\n  \"message\": {\n    \"generator\": \"dad-chat\",\n    \"count\": 1\n  }\n}\n"
+  },
+  {
+    "file": "28-vault-snapshot.json",
+    "label": "Vault save (Weld storage)",
+    "direction": "wire",
+    "detect": "",
+    "group": "weld",
+    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"dad-chat-sync\",\n  \"folder\": \"weld:genvault:dad-chat-sync/\",\n  \"savedBy\": \"dad-chat-sync\",\n  \"name\": \"vault-1\",\n  \"kind\": \"dad-full\",\n  \"size\": 123456,\n  \"redacted\": 1,\n  \"data\": {\n    \"threads\": {},\n    \"currentThreadId\": null,\n    \"config\": {\n      \"characterBook\": {},\n      \"pollinationsApiKey\": \"[redacted]\"\n    }\n  }\n}\n"
   }
 ];
   return Object.freeze({ rows: Object.freeze(rows.map(r => Object.freeze(r))), byFile: Object.freeze(rows.reduce((m, r) => { m[r.file] = r; return m; }, {})) });
@@ -15274,6 +15294,192 @@ bus envelope          { "channel": "dad:regions", "message": { "generator": "dad
 Rules: never put a key, token or webhook URL in a request, a result, a stored record or a bus
 message; check ok before reading value; keep the feature working when the companion is absent.
 `),
+    // Dad-Chat family Weld-app skills (from the generator's prompts/weld-app; the generator source wins on any disagreement)
+    pack('dad-skill-vault-bridge', 'Skill: generator-vault-bridge (vault storage and bus contract)', String.raw`
+## generator-vault-bridge
+
+Purpose: let any dad-chat-family generator keep persistent off-origin backup
+copies through companion storage, surviving browser cache resets. (Sender
+reference: dad-chat-sync \`src/gen-vault.js\`, skybridge protocol 1. Replaces
+the older vault skill text — that one documented a sibling-only shape.)
+
+Key namespaces (all values JSON, up to ~2MB; \`get\` is null-safe on miss):
+- \`weld:genvault:<gen>/snapshot\` — generator-source copy, ONE key per
+  generator. \`<gen>\` matches \`^[a-z0-9-]{1,64}$\`.
+- \`weld:genvault:<gen>/chat/index\` — chat-copy index (array of
+  \`{name, key, takenAt, threadCount, charCount}\`).
+- \`weld:genvault:<gen>/chat/snap-<at>-<rand6>\` — chat copies (max 10/gen):
+  \`{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full",
+  size, redacted, data:{threads, currentThreadId, config}}\`. \`redacted\` is
+  OPTIONAL (sibling senders omit it) — never require it.
+- Generator-copy records come in TWO shapes — support both, never assume one:
+  (a) \`{v, at, protocol, generator, folder, savedBy, title,
+  bundle:{name,imports,code}, source:{apiUrl,fetchedAt,bytes,truncated,
+  reason,coverage}}\` (note: covers main.pjs + imports only — index.html and
+  src/ files are NOT in it); (b) \`{v, at, protocol, generator, folder,
+  savedBy, title, modelText, outputTemplate, srcManifest}\`.
+- Legacy \`dadchat:vault:index\` + \`dadchat:vault:*\`: read-only visibility.
+  Generators own migration; the app never migrates, renames, or deletes these.
+
+Ops: \`set\` (write/overwrite), \`get\` (null-safe), \`list\` (prefix match on
+\`weld:genvault:\`). Resolve result objects (\`{ok:true,…}\` / \`{ok:false,
+reason}\`) — never throw across the bridge.
+Bus: relay \`dad:genvault\` envelopes \`{v:1, type:"vault-updated", generator,
+at, from}\` (~2KB cap, drop malformed) so member views refresh. Never publish
+on member channels yourself.
+Consent: vault reads/writes ride the standard per-capability storage consent.
+Denial resolves \`{ok:false, reason:'denied by the user'}\` — senders fall back
+to kv, then memory, on their own.
+Privacy: never log or persist storage values, prompts, keys, or tokens
+outside the storage tier itself. Records arrive secret-redacted
+(\`[redacted]\`); sibling records may carry a \`redacted\` count or not. Never
+un-redact, and flag (never transmit) any plaintext secret-shaped value found.
+Custodian rule: never rewrite \`generator\`/\`folder\`, never move keys across
+owners, never "repair" records, exact-key deletes only with user confirm.
+
+Health check: generator \`dad-chat-sync\` round-trips (set → get → list shows
+\`weld:genvault:dad-chat-sync/snapshot\`); a mismatched-\`generator\` record is
+refused everywhere except byte-identical passthrough reads.
+`),
+    pack('dad-skill-session-slots', 'Skill: dadchat-session-slots (local save slots, file compatibility)', String.raw`
+## dadchat-session-slots
+
+Purpose: the named-restore-point system of dad-chat-family generators, for
+reimplementation or file-level compatibility elsewhere. (Reference: dad-chat-sync
+\`SaveSlots\`, \`src/app.js\`, \`window.SaveSlots\` + \`window.openSaveSlots()\`.)
+
+Scope note: slots live in each generator's LOCAL kv store — the companion
+app never sees them live and MUST NOT try to sync, mirror, or manage them.
+This skill exists so files exported from slots stay readable/writable by
+other tools, and so the slot system can be rebuilt faithfully elsewhere.
+
+Keys (local kv folder, e.g. \`kv.chatApp\`): index \`save_slots\` (object
+id → \`{name, takenAt, threadCount, charCount, currentTitle}\`) + one record
+per slot at \`saveslot:<id>\`, id = \`slot_<base36time>_<rand6>\`
+(\`/^slot_[a-z0-9]+_[a-z0-9]+$/\`). Existing session keys (\`threads\`,
+\`current_thread_id\`, \`config\`) are never touched by slot writes.
+Record: \`{version:1, name, takenAt,
+data:{threads, currentThreadId, config}}\` — a full live snapshot (threads =
+branch-tree map, config = whole config incl. characterBook). Max 8 slots;
+names 1–40 printable chars, no control chars, unique case-insensitively,
+confirm before replace. Validate on list AND restore (version, name,
+timestamp, data/threads/config/currentThreadId); damaged slots are offered
+for deletion, never applied.
+Flows: save clones the LIVE objects; restore always confirms (stronger
+wording while generation/pending-save runs), stops live generation, then
+assign → per-thread image migration → persist → reload. Quota failure toasts
+a recovery path (download slot as \`dad-full\` file, delete old slots) and
+never half-writes. Delete offers download-first. Slots survive factory reset
+— they are the recovery path.
+NOT snapshotted: image blobs + per-thread VFS workspaces (shared live by
+uuid; restores are instant, placeholders only if the image store was wiped).
+File shape: slot downloads are \`dad-full\` JSON — see skill
+\`dadchat-dad-full\`. Slot keys can never collide with \`weld:genvault:*\` or
+\`dadchat:vault:*\` (disjoint namespaces by construction, local-kv only).
+
+Health check: save → index + \`saveslot:*\` exist, session keys untouched;
+restore round-trips counts; reset keeps slots restorable.
+`),
+    pack('dad-skill-presence-bus', 'Skill: dadchat-presence-bus (presence and dad:genvault channels)', String.raw`
+## dadchat-presence-bus
+
+Purpose: the two skybridge-bus channels dad-chat-family generators use, and
+what the companion app relays vs owns. (Reference: dad-chat-sync
+\`src/weld-bridge.js\`; bus used only when the companion advertises \`bus\`.)
+
+\`dad-chat:presence\` — per-tab liveness. Envelopes
+\`{v:1, type, id, from, gen, at}\` where type is \`presence\` or \`presence-bye\`,
+\`id\` = \`<tabId>:<seq>\`, \`from\` = tab id (8–64 chars \`[A-Za-z0-9_-]\`), \`gen\` =
+generator tag (≤64), \`at\` = epoch ms. Validation (relay AND display): object,
+≤2048 serialized chars, \`v:1\`, known type, non-empty \`from\` (≤64), \`at\` sane
+and within ±5 min, \`id\` present (≤96), \`gen\` string (≤64). Beats every ~20s;
+peers expire after ~60s silence; \`presence-bye\` on tab hide. Own-tab echoes
+and duplicate ids are ignored; malformed messages count as ignored, never
+error. The app's role: relay + count peers per tab. It never synthesizes
+presence for a generator.
+\`dad:genvault\` — vault change notices. Envelopes \`{v:1,
+type:"vault-updated", generator, at, from}\`, ~2KB cap. Purpose: refresh open
+vault views cross-tab. The app relays and may refresh its own family-section
+view; it NEVER publishes these (generators announce their own saves/deletes).
+\`dad:regions\` is server-side pubsub (hub live-region counts), NOT companion
+bus — the family section does not subscribe to it; per-country presence is
+the hub server's job.
+General bus rules: small envelopes only; validate shape + size, drop
+malformed silently with a counter; \`{ok:false, reason}\` on denial/failure,
+never throw; no routing of chats and no channel subscriptions on a member's
+behalf — AI and bus stay opt-in helpers.
+
+Health check: two tabs beating show "1 other tab" each; a \`vault-updated\`
+envelope refreshes the family view within seconds; malformed envelopes
+increment the ignored counter and nothing else.
+`),
+    pack('dad-skill-dad-full', 'Skill: dadchat-dad-full (dad-full JSON envelope)', String.raw`
+## dadchat-dad-full
+
+Purpose: the \`dad-full\` JSON envelope — the interchange format for full
+session payloads across the dad-chat family. Download it, read it, write it
+compatibly. (Reference: dad-chat-sync template \`src/file-templates/
+03-dad-full.json\`; producers: slot download, vault chat-copy download, full
+backup.)
+
+Envelope: \`{type:"dad-full", version:2, appVersion:"Dad-CORE v2.0",
+date:<ISO>, config, threads, currentThreadId}\` plus provenance (\`slotName\`
+for slot files, \`vaultName\` for vault files — either, never both required).
+- \`config\`: whole config object — \`characterBook\` (Dad-native character
+  objects per \`src/dad-native-format.md\` §1: id/name/avatar/description/
+  systemPrompt/profile/exampleDialogue/firstMessage/tags/lorebook/
+  lorebookRefs…), \`worldBook\` (\`{version, activeWorldId, worlds}\`), settings.
+  Local-only fields may be present (\`lorebookArchive\`, \`lastLoreRun\`,
+  per-entry \`useCount/lastInjectedAt\`) — a compatible reader MUST ignore and
+  MUST NOT author them. Secret-shaped values should arrive as \`[redacted]\`;
+  treat any plaintext secret-shaped value as untrusted (flag, never forward).
+- \`threads\`: map id → \`{id, title, characterId, rootId, nodes:{id →
+  {id, parentId, nextId, role, content…}}}\` — a branch tree; the active
+  branch is what renders. \`currentThreadId\` may be null (empty session).
+- Filenames: \`dad-save-<safe-name>-<epoch>.json\` (slots),
+  \`genvault_<gen>_chat_<safe-name>-<epoch>.json\` (vault copies).
+- Writers: Dad-native shapes only, never Tavern; \`{{char}}\`/\`{{user}}\` are
+  the only placeholders (literal replace at prompt time — never evaluate
+  text on import). Readers: validate \`type\`/\`version\`/threads/config before
+  applying anything; damaged payloads are refused with the reason named,
+  never partially applied.
+
+Health check: a slot-downloaded file re-imports with identical thread and
+character counts; a tampered \`type\` field is refused with a named reason.
+`),
+    pack('dad-skill-wire-envelopes', 'Skill: dadchat-wire-envelopes (ai, model, storage, bus shapes)', String.raw`
+## dadchat-wire-envelopes
+
+Purpose: compact reference for every small wire shape between
+dad-chat-family generators and the companion app. (References: dad-chat-sync
+\`src/file-templates/23–27\`, \`src/weld-bridge.js\`.)
+
+- AI request (generator → app): \`{prompt, system?, maxTokens?, temperature?,
+  json?}\` (template 23). Prompts are opaque text — never log or persist them.
+  Cap \`maxTokens\` to the model's \`maxOutput\` when known.
+- AI result (app → generator): \`{ok:true, value}\` or \`{ok:false, reason}\`
+  (template 24). Reasons are short machine strings (\`unsupported\`,
+  \`disconnected\`, \`denied…\`, \`error\`) — never stack traces, never key
+  material.
+- Model info (app → generator): \`{ok:true, provider, model, contextWindow,
+  maxOutput}\` (template 25). Absent companion model → \`{ok:false,
+  reason:"no-own-model"}\` — healthy bridge, not a fault; display honestly.
+- Storage record (either direction): any JSON value up to ~2MB; the minimal
+  shape is \`{at, protocol}\` (template 26, the link-record shape
+  \`weld:link-record\` \`{at, protocol, backend, build}\`). \`get\` on missing keys
+  resolves null inside \`{ok:true}\`; \`list(prefix)\` returns matching keys
+  (may include tombstoned keys — surface as stale, never purge).
+- Bus envelope (either direction): \`{v:1, type, …fields}\` ≤ ~2KB (template
+  27 shows the shape class). Known types: \`presence\` / \`presence-bye\` (channel
+  \`dad-chat:presence\`), \`vault-updated\` (channel \`dad:genvault\`). Validate
+  \`v\` + \`type\` + size; drop malformed with a counter.
+- Universal: every cross-bridge call resolves a result object — \`{ok:true,…}\`
+  or \`{ok:false, reason}\` — and NEVER throws across the bridge.
+
+Health check: \`modelInfo\` → ok-shape or honest \`no-own-model\`; storage
+self-test \`set=true get=true list=true\`; an over-size bus message is dropped
+and counted.
+`),
     // ------------------------------------------------------------ Tavern / SillyTavern / Chub
     pack('st-layout', 'Where card, lore and chat features live in a chat app', String.raw`
 A chat-card app is a pipeline. Find these stages in the REAL project before editing:
@@ -15847,7 +16053,18 @@ enabled true, scanDepth null }. Dropped: selectiveLogic, probability, group, sti
 Request: "let the greeting generator use my own model". Gate on sb.has('ai'); call sb.ai(prompt, { system,
 maxTokens: 200, temperature: 0.7 }) with the request fields shown in the reference; branch on ok; on
 { ok: false, reason } show the reason and fall back to the existing provider path. No key leaves the
-page, and with no companion the feature behaves exactly as before.`
+page, and with no companion the feature behaves exactly as before.`,
+    'dad-vault-bridge': String.raw`
+Request: "keep a backup copy of this generator in the companion". Write one record under
+weld:genvault:<tag>/snapshot (a bundle or modelText shape, with generator and folder set to YOUR tag),
+announce it on dad:genvault with { v: 1, type: "vault-updated", generator, at, from }, check ok on every
+call, and on { ok: false, reason: "denied by the user" } fall back to kv, then memory. Never copy another
+generator's key or rewrite its generator field; secret-shaped config values are stored as [redacted].`,
+    'dad-session-slots': String.raw`
+Request: "add named restore points". Keep an index object save_slots (id -> { name, takenAt, threadCount,
+charCount, currentTitle }) and one record per slot at saveslot:<id> with { version: 1, name, takenAt,
+data: { threads, currentThreadId, config } }, max 8 slots, confirm before replacing or restoring, and
+offer a dad-full download before deleting. Slots stay in local kv; they never touch weld:genvault keys.`
   };
 
   // Which packs each preset receives (preset id -> pack ids, in display order).
@@ -15918,7 +16135,9 @@ page, and with no companion the feature behaves exactly as before.`
     'dad-file-chat': ['dad-file-chat', 'dad-file-index'],
     'dad-file-backup': ['dad-file-chat', 'dad-file-index'],
     'dad-file-convert': ['dad-file-interop', 'dad-file-index', 'st-dad-map'],
-    'dad-weld-wire': ['dad-file-weld', 'dad-layout', 'dad-code-rules']
+    'dad-weld-wire': ['dad-file-weld', 'dad-layout', 'dad-code-rules'],
+    'dad-vault-bridge': ['dad-skill-vault-bridge', 'dad-skill-presence-bus', 'dad-skill-wire-envelopes', 'dad-skill-dad-full'],
+    'dad-session-slots': ['dad-skill-session-slots', 'dad-skill-dad-full', 'dad-data']
   };
 
   const byId = Object.freeze(packs.reduce((m, p) => { m[p.id] = p; return m; }, {}));
@@ -15998,7 +16217,11 @@ page, and with no companion the feature behaves exactly as before.`
     ['dad', 'dad-file-convert', 'Convert a foreign lore or chat file to Dad-native', 'Map World Info, JanitorAI, dexie, Story Forge or chat logs into Dad-native files.', 'review',
       'Convert the file in USER DETAILS to its Dad-native equivalent using the interop references. First identify the source shape (SillyTavern World Info with entries as an object, bare V2 book, JanitorAI array, Perchance dexie export, generic chat log, Story Forge list). Then return the Dad-native file in one fenced block: lore entries get real names, 3-6 lowercase keys, priority and scanDepth null, characters become dad-char with persona in systemPrompt and greetings in firstMessage, chat logs become a dad-char-chat thread. Follow with the fields that have no Dad-native slot and were dropped, with the affected entries. Never invent canon. Do not edit the generator.', fit, src],
     ['dad', 'dad-weld-wire', 'Connect a Dad-Chat feature to Weld Skybridge', 'Use ai, storage and bus calls with the real wire shapes and a safe fallback.', 'change',
-      'Add the Weld Skybridge integration in USER DETAILS to Dad-Chat. Read the real skybridge plugin source first and use only the API it exposes. Detect each capability before use, send prompts up and read completions as { ok, value } or { ok: false, reason } without throwing, keep keys, tokens and webhook URLs out of requests, stored records and bus messages, and keep the feature working when the companion is absent (storage falls back to kv, then persist, then memory). Match the wire shapes in the reference exactly, keep load order and window.* names unchanged, and say what you could not run.', fit, src]
+      'Add the Weld Skybridge integration in USER DETAILS to Dad-Chat. Read the real skybridge plugin source first and use only the API it exposes. Detect each capability before use, send prompts up and read completions as { ok, value } or { ok: false, reason } without throwing, keep keys, tokens and webhook URLs out of requests, stored records and bus messages, and keep the feature working when the companion is absent (storage falls back to kv, then persist, then memory). Match the wire shapes in the reference exactly, keep load order and window.* names unchanged, and say what you could not run.', fit, src],
+    ['dad', 'dad-vault-bridge', 'Add or repair Dad-Chat vault copies', 'Keep off-origin backups in Weld storage with owner-safe keys, consent fallbacks and bus notices.', 'change',
+      'Add or repair the vault feature in USER DETAILS using the vault bridge references. Use only the keys under weld:genvault:<your tag>/ (snapshot, chat/index, chat/snap-*), support both generator-copy shapes when reading, stamp generator and folder with your own tag, store secret-shaped config values as [redacted] and never un-redact them, and announce saves and deletes on dad:genvault with a small validated envelope. Resolve every call as { ok, ... } data, fall back from storage to kv to memory when denied, and never touch another generator or the legacy dadchat:vault keys. Verify a set, get and list round trip and a denied-consent path, and say what you could not run.', fit, src],
+    ['dad', 'dad-session-slots', 'Add or repair named session slots', 'Build local restore points that stay compatible with dad-full files.', 'change',
+      'Add or repair named save slots as described in USER DETAILS using the session slot references. Keep the index and per-slot records in local kv only, validate version, name, timestamps, threads, config and currentThreadId on list and restore, never apply a damaged slot, confirm every replace and restore, avoid half-writes on quota failure, and let slot downloads use the dad-full envelope. Do not sync slots to Weld storage. Verify save, restore, delete and a factory reset that keeps slots, and say what you could not run.', fit, src]
   ];
   return Object.freeze({ rows });
 });
@@ -16877,10 +17100,65 @@ page, and with no companion the feature behaves exactly as before.`
     return { filename: 'weld-backup-' + slugPart(label) + '-' + datePart(now) + '.json',
       text: JSON.stringify({ format: 'weld-backup-bundle', v: 1, exportedAt: now, scope: label, count: recs.length, records: recs.map(entryFor) }, null, 2) };
   }
+
+  // ---- bus envelopes (dad:genvault, dad-chat:presence): validate before relaying or displaying
+  const BUS_MAX_CHARS = 2048, PRESENCE_TTL_MS = 60000, PRESENCE_SKEW_MS = 5 * 60000;
+  const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+  function serializedLength(m) { try { return JSON.stringify(m).length; } catch (e) { return Infinity; } }
+  // -> { ok:true } | { ok:false, reason }. Channels without a rule are not judged here (relayed as before).
+  function validateEnvelope(channel, m, now) {
+    now = now == null ? Date.now() : now;
+    if (channel !== 'dad:genvault' && channel !== 'dad-chat:presence') return { ok: true, known: false };
+    if (!isObj(m)) return { ok: false, reason: 'not-an-object' };
+    if (serializedLength(m) > BUS_MAX_CHARS) return { ok: false, reason: 'too-large' };
+    if (m.v !== 1) return { ok: false, reason: 'bad-version' };
+    if (channel === 'dad:genvault') {
+      if (m.type !== 'vault-updated') return { ok: false, reason: 'unknown-type' };
+      if (!str(m.generator, 64)) return { ok: false, reason: 'bad-generator' };
+      if (num(m.at) === null) return { ok: false, reason: 'bad-time' };
+      if (m.from !== undefined && !str(m.from, 64)) return { ok: false, reason: 'bad-from' };
+      return { ok: true, known: true };
+    }
+    if (m.type !== 'presence' && m.type !== 'presence-bye') return { ok: false, reason: 'unknown-type' };
+    if (!str(m.from, 64)) return { ok: false, reason: 'bad-from' };
+    if (!str(m.id, 96)) return { ok: false, reason: 'bad-id' };
+    if (typeof m.gen !== 'string' || m.gen.length > 64) return { ok: false, reason: 'bad-gen' };
+    if (num(m.at) === null || Math.abs(now - m.at) > PRESENCE_SKEW_MS) return { ok: false, reason: 'bad-time' };
+    return { ok: true, known: true };
+  }
+  // Counts live tabs per generator tag from validated presence beats. Observes only; never publishes or synthesizes.
+  function presenceTracker() {
+    const tabs = new Map(), lastId = new Map();   // gen -> Map(from -> lastAt); from -> last id
+    let ignored = 0;
+    function observe(m, now) {
+      now = now == null ? Date.now() : now;
+      if (!validateEnvelope('dad-chat:presence', m, now).ok) { ignored++; return false; }
+      if (lastId.get(m.from) === m.id) { ignored++; return false; }   // duplicate id
+      lastId.set(m.from, m.id);
+      const gen = text(m.gen, 64) || '(unknown)';
+      if (m.type === 'presence-bye') { tabs.forEach(t => t.delete(m.from)); return true; }
+      let t = tabs.get(gen); if (!t) tabs.set(gen, t = new Map());
+      t.set(m.from, now); return true;
+    }
+    function snapshot(now) {
+      now = now == null ? Date.now() : now;
+      const out = {};
+      tabs.forEach((t, gen) => { t.forEach((at, from) => { if (now - at > PRESENCE_TTL_MS) t.delete(from); }); if (t.size) out[gen] = t.size; });
+      return { tabs: out, ignored };
+    }
+    return { observe, snapshot, countIgnored: () => { ignored++; } };
+  }
+  // Storage writes: refuse a vault record that names a different owner than its key. Null tombstones pass.
+  function checkStoreWrite(key, value) {
+    if (typeof key !== 'string' || !key || key.length > 512) return { ok: false, reason: 'bad-key' };
+    const p = parseKey(key);
+    if (p.gen && isObj(value) && typeof value.generator === 'string' && value.generator !== p.gen) return { ok: false, reason: 'owner-mismatch' };
+    return { ok: true };
+  }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite };
 });
 
 /* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
@@ -16891,11 +17169,12 @@ page, and with no companion the feature behaves exactly as before.`
   const C = window.WeldBackupCore, H = window.weldProjectHost;
   if (!C || !H) return;
   const E = H.el;
-  const S = { rows: null, inv: null, error: '', selected: null, inspected: null, pendingDelete: null, secrets: null, msg: '', stamp: 0 };
+  const S = { pick: '', rows: null, inv: null, error: '', selected: null, inspected: null, pendingDelete: null, secrets: null, msg: '', stamp: 0 };
   let host = null, unsub = null;
   const note = t => E('div', { class: 'wc-section-note', text: t });
   const small = { fontSize: '12px', opacity: '.75' };
-  const btn = (label, fn, extra) => E('button', Object.assign({ type: 'button', class: 'wc-btn wc-mini', text: label, onclick: fn }, extra || {}));
+  // el() sets attributes with setAttribute, so a false `disabled` would still disable the button: only pass it when true.
+  const btn = (label, fn, extra) => { const a = Object.assign({ type: 'button', class: 'wc-btn wc-mini', text: label, onclick: fn }, extra || {}); if (!a.disabled) delete a.disabled; return E('button', a); };
   const V = () => H.vault || null;
 
   function say(t, isErr) { S.msg = t; S.msgErr = !!isErr; }
@@ -17017,6 +17296,34 @@ page, and with no companion the feature behaves exactly as before.`
     return wrap;
   }
 
+
+  // Dad-Chat family: one generator at a time (keyed by tag), four persistence rungs. The companion can only see the
+  // vault rung and presence; the rest live in the generator's own page, so they are reported as not visible, not guessed.
+  function familyCard(rerender) {
+    const inv = S.inv, v = V(), pres = (v && typeof v.presence === 'function' && v.presence()) || { tabs: {}, ignored: 0 };
+    const tags = new Set(inv.generators.map(g => g.gen));
+    Object.keys(pres.tabs || {}).forEach(t => { if (C.GEN_RE.test(t)) tags.add(t); });
+    const here = typeof H.slug === 'function' ? H.slug() : ''; if (here && C.GEN_RE.test(here)) tags.add(here);
+    const list = Array.from(tags).sort();
+    const card = E('div', { 'data-family': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
+    card.appendChild(E('div', { text: 'Dad-Chat family', style: { fontWeight: '600' } }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Any generator that stores copies under its own tag appears here. The companion only watches; it never routes chats or subscribes channels for a generator.' }));
+    if (!list.length) { card.appendChild(note('No generator tags seen yet.')); return card; }
+    if (!S.pick || !tags.has(S.pick)) S.pick = list.indexOf(here) >= 0 ? here : list[0];
+    const sel = E('select', { 'aria-label': 'Generator', style: { margin: '4px 0 8px' } }, list.map(t => E('option', { value: t, text: t })));
+    sel.value = S.pick; sel.addEventListener('change', () => { S.pick = sel.value; rerender(); });
+    card.appendChild(sel);
+    const g = inv.generators.find(x => x.gen === S.pick);
+    const vaultState = !g ? 'No vault copies stored' : [g.snapshot ? (g.snapshot.stale ? 'source copy is stale' : 'source copy ' + (g.snapshot.at ? C.fmtDate(g.snapshot.at) : 'present')) : 'no source copy', g.chats + ' chat cop' + (g.chats === 1 ? 'y' : 'ies'), C.fmtBytes(g.bytes)].join(', ');
+    const open = (pres.tabs || {})[S.pick] || 0;
+    [['Live session', 'Not visible to the companion (kept in the generator\'s own page storage)'],
+     ['Named slots', 'Not visible to the companion (local to the generator; the companion never syncs or manages them)'],
+     ['Vault copies', vaultState],
+     ['Cloud Backup mirror', 'Not visible to the companion (a public file the generator keeps itself)']].forEach(r =>
+      card.appendChild(E('div', { 'data-rung': r[0], style: { display: 'flex', gap: '8px', fontSize: '12px', padding: '2px 0' } }, [E('span', { text: r[0], style: { minWidth: '130px', fontWeight: '600' } }), E('span', { text: r[1] })])));
+    card.appendChild(E('div', { 'data-presence': '1', style: Object.assign({ marginTop: '6px' }, small), text: 'Presence: ' + open + ' open tab' + (open === 1 ? '' : 's') + ' seen for ' + S.pick + ' · ' + (pres.ignored || 0) + ' malformed or duplicate message' + (pres.ignored === 1 ? '' : 's') + ' ignored' }));
+    return card;
+  }
   function render(parent) {
     host = parent; S.msg = '';
     load();
@@ -17044,6 +17351,7 @@ page, and with no companion the feature behaves exactly as before.`
       (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' · ' + C.fmtBytes(inv.bytes) + ' used by backups' +
       (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
     if (!inv.count) wrap.appendChild(note('No generator backups are stored yet. They appear here after a generator saves a copy through Skybridge storage.'));
+    wrap.appendChild(familyCard(rerender));
     const bar = confirmBar(rerender); if (bar) wrap.appendChild(bar);
     inv.generators.forEach(g => {
       const d = E('details', { 'data-gen': g.gen, style: { margin: '6px 0' } });
