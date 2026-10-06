@@ -264,7 +264,7 @@
     area(parent, 'Persona description (optional, sent to the model)', p.persona.description, v => { p.persona.description = v; save(); });
     area(parent, 'Author note: steering text injected into the conversation', p.settings.authorNote, v => { p.settings.authorNote = v; save(); });
     fields(parent, p.settings, [['authorNoteDepth', 'Author note depth (0 = after the last message): 0–100', 'number']]);
-    note(parent, 'Put secrets in private lore entries. World description and rules are sent to every character. All Studio model calls use the provider saved in Tools → AI Helper, and each asks before sending.');
+    note(parent, 'Put secrets in private lore entries. World description and rules are sent to every character. All Studio model calls use the provider saved in Tools → Model connection and AI settings, and each asks before sending.');
   }
 
   // ---- Characters ----

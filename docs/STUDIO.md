@@ -4,7 +4,7 @@ Available in Weld → **Studio**, starting with userscript **1.56.0**. Version *
 
 ## Start a project
 
-1. In **Tools → AI Helper**, save your local or cloud provider and model. For LM Studio, use the OpenAI-compatible provider and your server endpoint. Studio uses these existing settings; it does not need a second API key.
+1. In **Tools → Model connection and AI settings**, save your local or cloud provider and model. For LM Studio, use the OpenAI-compatible provider and your server endpoint. Studio uses these existing settings; it does not need a second API key.
 2. Open **Studio → New project / chatbot template**. Name the world and choose Single character, Narrated adventure, Ensemble cast, Quest giver, or World simulator.
 3. Fill **World & settings** with the public setting, rules, and chatbot instruction.
 4. In **Characters**, write personality, voice, goals, boundaries, opening message, example dialogue, and personal beliefs. Author notes are excluded from ordinary chat requests.

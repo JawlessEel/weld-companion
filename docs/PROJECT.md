@@ -69,7 +69,7 @@ Lists every external address in the HTML panel grouped by host, external scripts
 
 - **ZIP bundle**: `dsl.txt`, `html.html`, `README.md` (overview and findings), `manifest.json`, `analysis.json`, and `imports/<name>.txt` for every dependency. File names are sanitized; the archive uses only stored (uncompressed) entries and opens in any extractor.
 - **Markdown**, **DSL**, **HTML**: single files.
-- **AI context pack**: a prompt-ready summary (counts, findings, list outline, import sizes, the lists panel, and the HTML panel or, when it is too large, a structural map of ids, functions, `root.*` use, storage and hosts) sized to a character budget you choose. In **Tools → AI Helper**, the context menu now also offers *Summary + findings + source* and *Only the code I selected*, and shows an estimate of the tokens a request will use. Nothing is sent until you press Ask, and replies still go through the existing diff-before-apply review.
+- **AI context pack**: a prompt-ready summary (counts, findings, list outline, import sizes, the lists panel, and the HTML panel or, when it is too large, a structural map of ids, functions, `root.*` use, storage and hosts) sized to a character budget you choose. In **Tools → Model connection and AI settings**, the context menu now also offers *Summary + findings + source* and *Only the code I selected*, and shows an estimate of the tokens a request will use. Nothing is sent until you press Ask, and replies still go through the existing diff-before-apply review.
 
 ## Snapshots
 

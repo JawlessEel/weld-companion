@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.65.3
+// @version      1.65.4
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.65.3';
+  var WC_VERSION = '1.65.4';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1542,9 +1542,9 @@
   function renderTools(body) {
     var grid = el('div', { class: 'wc-cols' });
     var aiCard = el('div', { class: 'wc-card wc-col', style: { gridColumn: '1 / -1' } });
-    aiCard.appendChild(el('label', { class: 'wc-label', text: '\uD83E\uDD16 Model chat \u00b7 AI Helper' }));
+    aiCard.appendChild(el('label', { class: 'wc-label', text: '\uD83E\uDD16 Model chat \u00b7 AI Agent' }));
     var aiBody = el('div', {}); aiCard.appendChild(aiBody);
-    try { renderAI(aiBody); } catch (e) { aiBody.appendChild(el('div', { class: 'wc-section-note', text: 'AI Helper failed to render.' })); }
+    try { renderAI(aiBody); } catch (e) { aiBody.appendChild(el('div', { class: 'wc-section-note', text: 'AI Agent settings failed to render.' })); }
     var cfCard = el('div', { class: 'wc-card wc-col' });
     cfCard.appendChild(el('label', { class: 'wc-label', text: '\uD83D\uDC64 Character files \u00b7 AI Character Chat' }));
     var cfBody = el('div', {}); cfCard.appendChild(cfBody);
@@ -2978,7 +2978,7 @@
   var SB_WIN = (function () {
     try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { return window; }
   })();
-  var SB_BUILD = 'sb-anchor/2026-10-05.2';   // bump on every change; printed at mount so a stale userscript is obvious
+  var SB_BUILD = 'sb-anchor/2026-10-05.3';   // bump on every change; printed at mount so a stale userscript is obvious
   // verbose-logging toggle: ?sbdebug in the URL, or window.WELD_SKYBRIDGE_DEBUG = true
   var SB_DEBUG = false;
   try {
@@ -3059,11 +3059,21 @@
     });
   }
 
+  // The bridge can only call a provider Weld can reach itself. "Perchance built-in" is the native AI Agent
+  // panel (a person presses Send), so there is nothing for a generator to call. Say so, once a minute, on the page.
+  var sbNoModelToastAt = 0;
+  function sbNoModel(reason) {
+    var cfg = aiConfig(), builtin = !cfg || !cfg.provider || cfg.provider === 'builtin';
+    var hint = (builtin ? 'Weld is set to "Perchance built-in", which only works through the native AI Agent panel. ' : 'The selected provider is not usable. ') +
+      'Open Weld > Tools > Model connection and AI settings, pick a provider (OpenAI, Anthropic, Google, OpenRouter, GitHub Models, or a local server such as LM Studio or Ollama) and Save.';
+    if (Date.now() - sbNoModelToastAt > 60000) { sbNoModelToastAt = Date.now(); try { toast('Skybridge: a generator asked for your AI model. ' + hint, 9000); } catch (e) {} }
+    return { ok: false, reason: reason, code: 'no-own-model', hint: hint };   // reason strings are kept: existing generators match on them
+  }
   function sbServiceAI(payload, emit) {
     return new Promise(function (resolve) {
       var cfg = aiConfig();
       if (!cfg || cfg.provider === 'builtin' || !cfg.provider) {
-        return resolve({ ok: false, reason: 'no-own-model' });   // user hasn't set up their own model
+        return resolve(sbNoModel('no-own-model'));   // user hasn't set up their own model
       }
       var sys = payload.system || 'You are a helpful assistant inside a Perchance generator.';
       var user = String(payload.prompt || '');
@@ -3260,7 +3270,7 @@
     return new Promise(function (resolve) {
       var cfg = aiConfig();
       var prov = cfg && cfg.provider;
-      if (!prov || prov === 'builtin' || !PROVIDERS[prov]) { resolve({ ok: false, reason: 'no own model configured' }); return; }
+      if (!prov || prov === 'builtin' || !PROVIDERS[prov]) { resolve(sbNoModel('no own model configured')); return; }
       var model = (cfg.models || {})[prov] || PROVIDERS[prov].defaultModel;
       var lim = lookupModelLimits(model);
       resolve({ ok: true, provider: prov, model: model, contextWindow: lim.context, maxOutput: lim.maxOut });
@@ -3576,7 +3586,7 @@
   function seBeginAccept(id) {
     if (seApplyBusy) { toast('Another proposal is being applied — wait for it to finish'); return; }
     var cfg; try { cfg = aiConfig(); } catch (e) { cfg = null; }
-    if (!cfg || cfg.provider === 'builtin') { toast('Configure a real model in AI Helper first — the built-in model cannot draft edits'); return; }
+    if (!cfg || cfg.provider === 'builtin') { toast('Configure a real model under Model connection and AI settings first — the built-in model cannot draft edits'); return; }
     var view = dslView();
     if (!view) { toast('DSL editor not found on this page'); return; }
     var item = seFind(id); if (!item) return;
@@ -3757,7 +3767,7 @@
     },
     ask: function (system, user, callback) {
       var cfg = aiConfig();
-      if (cfg.provider === 'builtin') { callback('Select and save a local or cloud provider in Tools → AI Helper first.'); return null; }
+      if (cfg.provider === 'builtin') { callback('Select and save a local or cloud provider in Tools → Model connection and AI settings first.'); return null; }
       return callOwnAI(cfg, system, user, callback, false, cfg.maxTokens, 0.7);
     }
   };
@@ -11137,7 +11147,7 @@
     area(parent, 'Persona description (optional, sent to the model)', p.persona.description, v => { p.persona.description = v; save(); });
     area(parent, 'Author note: steering text injected into the conversation', p.settings.authorNote, v => { p.settings.authorNote = v; save(); });
     fields(parent, p.settings, [['authorNoteDepth', 'Author note depth (0 = after the last message): 0–100', 'number']]);
-    note(parent, 'Put secrets in private lore entries. World description and rules are sent to every character. All Studio model calls use the provider saved in Tools → AI Helper, and each asks before sending.');
+    note(parent, 'Put secrets in private lore entries. World description and rules are sent to every character. All Studio model calls use the provider saved in Tools → Model connection and AI settings, and each asks before sending.');
   }
 
   // ---- Characters ----

@@ -36,6 +36,28 @@ for (const url of [
 }
 assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
 
+// With "Perchance built-in" selected the bridge cannot run a model: replies keep the legacy reason strings and add a code and a hint.
+{
+  const toasts = [];
+  const cfg = { provider: 'builtin' };
+  const env = { aiConfig: () => cfg, toast: (m) => toasts.push(String(m)), Date, PROVIDERS: {}, lookupModelLimits: () => ({}), Promise };
+  const code = between('var sbNoModelToastAt', 'function sbServiceAI(') + between('function sbServiceModel(', 'function sbOriginOk(');
+  const m = load(['sbNoModel', 'sbServiceModel'], code, env);
+  const r = m.sbNoModel('no-own-model');
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'no-own-model'); // legacy string stays: generators match on it
+  assert.equal(r.code, 'no-own-model');
+  assert.match(r.hint, /Perchance built-in/);
+  assert.match(r.hint, /Model connection and AI settings/);
+  assert.equal(toasts.length, 1, 'first request shows one toast');
+  m.sbNoModel('no-own-model');
+  assert.equal(toasts.length, 1, 'toast is throttled');
+  m.sbServiceModel().then((x) => {
+    assert.equal(x.ok, false);
+    assert.equal(x.reason, 'no own model configured');
+    assert.ok(x.hint && x.code === 'no-own-model');
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
 // Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
 {
   const store = new Map();
