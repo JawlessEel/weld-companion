@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.65.0
+// @version      1.65.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.65.0';
+  var WC_VERSION = '1.65.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -15344,7 +15344,7 @@ all in her voice, none narrating {{user}}'s actions.`
     'dad-persistence-audit': ['dad-data', 'dad-layout', 'dad-code-rules'],
     'dad-hub-work': ['dad-hub', 'dad-layout', 'dad-code-rules'],
     'dad-safety-review': ['dad-layout', 'dad-code-rules', 'dad-hub'],
-    'dad-import-export': ['dad-character', 'dad-world', 'dad-lore', 'st-dad-map', 'dad-layout'],
+    'dad-import-export': ['dad-character', 'dad-world', 'st-dad-map'],
     'dad-release-check': ['dad-layout', 'dad-code-rules'],
     // Dad-Chat content skills
     'dad-character-create': ['dad-character', 'dad-lore', 'dad-rules'],
@@ -15352,8 +15352,8 @@ all in her voice, none narrating {{user}}'s actions.`
     'dad-lore-build': ['dad-lore', 'dad-world', 'dad-rules'],
     'dad-lore-audit': ['dad-lore', 'dad-flow', 'dad-rules'],
     'dad-world-build': ['dad-world', 'dad-lore', 'dad-rules'],
-    'dad-token-diet': ['dad-rules', 'dad-character', 'dad-lore', 'dad-flow'],
-    'dad-convert-tavern': ['st-dad-map', 'st-card-v2', 'st-lore', 'dad-character', 'dad-lore'],
+    'dad-token-diet': ['dad-rules', 'dad-character', 'dad-lore'],
+    'dad-convert-tavern': ['st-dad-map', 'st-card-v2', 'dad-character', 'dad-lore'],
     'dad-greetings-examples': ['dad-character', 'dad-rules']
   };
 
@@ -15913,7 +15913,10 @@ all in her voice, none narrating {{user}}'s actions.`
     return parts.join('\n\n');
   }
   const refPack = id => Refs.byId[id] || null;
-  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt, refPack });
+  // Pessimistic estimate (diagrams and JSON tokenize worse than prose); the native helper input is believed to cap near 6k tokens.
+  const estimateTokens = text => Math.ceil(String(text || '').length / 3);
+  const TOKEN_WARN = 5000;
+  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt, refPack, estimateTokens, TOKEN_WARN });
 });
 
 /* Skills tab: reviewable generator presets routed to Perchance's native AI input. */
@@ -15953,7 +15956,9 @@ all in her voice, none narrating {{user}}'s actions.`
           options.findings = P.analyze({ name: slug, dsl: live.dsl, html: live.html }).findings;
         }
         S.draft = C.buildPrompt(S.selected, options); S.dirty = false; prompt.value = S.draft;
-        message(S.findings ? 'Prompt built with current editor findings. Review it below.' : 'Prompt ready. Review or edit it below.');
+        const tokens = C.estimateTokens(S.draft), big = tokens > C.TOKEN_WARN;
+        message((S.findings ? 'Prompt built with current editor findings. Review it below.' : 'Prompt ready. Review or edit it below.') +
+          ' About ' + tokens + ' tokens (estimate).' + (big ? ' This is large; the native AI input may reject more than about 6,000 tokens, so shorten the details or findings.' : ''), big);
       } catch (e) { S.dirty = true; message(e.message || String(e), true); }
       ready();
     }

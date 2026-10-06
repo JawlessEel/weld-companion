@@ -916,7 +916,7 @@ all in her voice, none narrating {{user}}'s actions.`
     'dad-persistence-audit': ['dad-data', 'dad-layout', 'dad-code-rules'],
     'dad-hub-work': ['dad-hub', 'dad-layout', 'dad-code-rules'],
     'dad-safety-review': ['dad-layout', 'dad-code-rules', 'dad-hub'],
-    'dad-import-export': ['dad-character', 'dad-world', 'dad-lore', 'st-dad-map', 'dad-layout'],
+    'dad-import-export': ['dad-character', 'dad-world', 'st-dad-map'],
     'dad-release-check': ['dad-layout', 'dad-code-rules'],
     // Dad-Chat content skills
     'dad-character-create': ['dad-character', 'dad-lore', 'dad-rules'],
@@ -924,8 +924,8 @@ all in her voice, none narrating {{user}}'s actions.`
     'dad-lore-build': ['dad-lore', 'dad-world', 'dad-rules'],
     'dad-lore-audit': ['dad-lore', 'dad-flow', 'dad-rules'],
     'dad-world-build': ['dad-world', 'dad-lore', 'dad-rules'],
-    'dad-token-diet': ['dad-rules', 'dad-character', 'dad-lore', 'dad-flow'],
-    'dad-convert-tavern': ['st-dad-map', 'st-card-v2', 'st-lore', 'dad-character', 'dad-lore'],
+    'dad-token-diet': ['dad-rules', 'dad-character', 'dad-lore'],
+    'dad-convert-tavern': ['st-dad-map', 'st-card-v2', 'dad-character', 'dad-lore'],
     'dad-greetings-examples': ['dad-character', 'dad-rules']
   };
 

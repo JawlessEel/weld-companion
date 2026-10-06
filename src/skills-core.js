@@ -483,5 +483,8 @@
     return parts.join('\n\n');
   }
   const refPack = id => Refs.byId[id] || null;
-  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt, refPack });
+  // Pessimistic estimate (diagrams and JSON tokenize worse than prose); the native helper input is believed to cap near 6k tokens.
+  const estimateTokens = text => Math.ceil(String(text || '').length / 3);
+  const TOKEN_WARN = 5000;
+  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt, refPack, estimateTokens, TOKEN_WARN });
 });

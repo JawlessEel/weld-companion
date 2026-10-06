@@ -35,7 +35,9 @@
           options.findings = P.analyze({ name: slug, dsl: live.dsl, html: live.html }).findings;
         }
         S.draft = C.buildPrompt(S.selected, options); S.dirty = false; prompt.value = S.draft;
-        message(S.findings ? 'Prompt built with current editor findings. Review it below.' : 'Prompt ready. Review or edit it below.');
+        const tokens = C.estimateTokens(S.draft), big = tokens > C.TOKEN_WARN;
+        message((S.findings ? 'Prompt built with current editor findings. Review it below.' : 'Prompt ready. Review or edit it below.') +
+          ' About ' + tokens + ' tokens (estimate).' + (big ? ' This is large; the native AI input may reject more than about 6,000 tokens, so shorten the details or findings.' : ''), big);
       } catch (e) { S.dirty = true; message(e.message || String(e), true); }
       ready();
     }

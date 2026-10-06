@@ -188,6 +188,9 @@ assert.ok(Array.isArray(JSON.parse(lore[0]).entries)); assert.ok(JSON.parse(lore
 const chat = Refs.byId['st-chatlog'].text.split('\n').filter(l => l.startsWith('{"')).map(l => JSON.parse(l));
 assert.equal(chat.length, 3); assert.ok(chat[0].user_name && chat[1].swipes[chat[1].swipe_id] === chat[1].mes);
 
+// The native AI input is believed to take about 6k tokens: every built-in prompt must leave real headroom.
+for (const p of C.presets) assert.ok(C.estimateTokens(C.buildPrompt(p.id, { slug: 'a-long-generator-name', concise: true })) <= 4500, p.id + ' prompt too large');
+
 // The bundled copies of the Dad-Chat docs ship in the repo and agree with the packs on key names and numbers.
 const archDoc = fsx.readFileSync('docs/dad-chat/architecture.md', 'utf8'), formatDoc = fsx.readFileSync('docs/dad-chat/dad-native-format.md', 'utf8');
 for (const fact of ['6,656', 'chatToCardMaxMessages = 40', 'chatToCardMaxCast = 6', 'pjsLiteral', 'Dad_PROVIDER_GROUPS']) {
