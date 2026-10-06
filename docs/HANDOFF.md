@@ -5,7 +5,8 @@ Last updated: 2026-10-06. Read `AGENTS.md` first; it is the rulebook. This file 
 ## State of the fork
 
 - Fork `JawlessEel/weld-companion`, branch `main` at `8730527` ("pair the token automatically and add a hidden login autostart (1.67.0)"), VERIFIED on 2026-10-06.
-- Only `origin` is configured. `upstream` (`therealwestninja/weld-companion`, per AGENTS.md) has not been added.
+- `origin` and `upstream` (`therealwestninja/weld-companion`) are both configured as of 2026-10-06. `main` is 56 commits ahead of and 1 behind `upstream/main`.
+- Trial merge of `upstream/main` into `main` (aborted, nothing committed) hit 18 conflicts, mostly add/add. The one upstream-only commit (`aa68ab5`, PR #7, a squash of an earlier snapshot of this fork's own Dev/Skills/Studio work) differs from the fork mostly by lines the fork added later. Do not plain-merge it; decide between recording it with `git merge -s ours upstream/main` or leaving it.
 - Not run yet by the person writing this: `npm install`, `npm run build`, the tests.
 - Many feature branches exist on origin (`codex/*`, `feat/*`, `fix/*`, `pr/*`). Which are merged or stale is unchecked.
 
@@ -27,7 +28,7 @@ Last updated: 2026-10-06. Read `AGENTS.md` first; it is the rulebook. This file 
 
 ## Open items
 
-1. Add `upstream` remote; decide which branches to keep.
+1. Decide how to handle the upstream squash commit (see above) and which branches to keep.
 2. Run install/build/tests on a clean checkout and record the results here.
 3. Confirm the skybridge responder behavior above with a real browser session.
 
