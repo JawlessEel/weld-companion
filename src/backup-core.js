@@ -1,0 +1,200 @@
+/* Backup Manager core: read-only inventory, record inspection and export bundles for generator backup copies.
+   The companion is a storekeeper, not an owner: nothing here rewrites, moves or repairs a record. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldBackupCore = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  const GEN_RE = /^[a-z0-9-]{1,64}$/;
+  const MAX_VALUE_BYTES = 2 * 1024 * 1024;       // values are documented as "up to ~2MB"
+  const MAX_CHAT_COPIES = 10;                     // documented per-generator cap
+  const SECRET_NAME = /api[-_ ]?key|secret|token|webhook/i;
+  const PREFIX = 'weld:genvault:';
+  const LEGACY_PREFIX = 'dadchat:vault:';
+  const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
+  const text = (v, max) => typeof v === 'string' ? v.slice(0, max || 120) : '';
+
+  // key -> { kind, gen, sub }. kind: snapshot | chat-index | chat-copy | legacy | operational | other
+  function parseKey(key) {
+    key = String(key == null ? '' : key);
+    if (key.indexOf(PREFIX) === 0) {
+      const rest = key.slice(PREFIX.length), slash = rest.indexOf('/');
+      if (slash > 0) {
+        const gen = rest.slice(0, slash), sub = rest.slice(slash + 1);
+        if (GEN_RE.test(gen)) {
+          if (sub === 'snapshot') return { kind: 'snapshot', gen, sub };
+          if (sub === 'chat/index') return { kind: 'chat-index', gen, sub };
+          if (/^chat\/snap-[^/]+$/.test(sub)) return { kind: 'chat-copy', gen, sub };
+          return { kind: 'other', gen, sub };
+        }
+      }
+      return { kind: 'other', gen: '', sub: rest };
+    }
+    if (key === 'dadchat:vault:index' || key.indexOf(LEGACY_PREFIX) === 0) return { kind: 'legacy', gen: '', sub: key.slice(LEGACY_PREFIX.length) };
+    if (key === 'weld:link-record' || key.indexOf('weld:selftest:') === 0) return { kind: 'operational', gen: '', sub: key };
+    return { kind: 'other', gen: '', sub: key };
+  }
+  // Is this stored key part of the backup domain at all?
+  const inScope = key => { const k = parseKey(key).kind; return k !== 'other' || String(key).indexOf(PREFIX) === 0; };
+
+  // Which generator-copy shape is this? Both shapes are valid; unknown shapes are only flagged.
+  function snapshotShape(r) {
+    if (!isObj(r)) return 'unknown';
+    if (isObj(r.bundle) && typeof r.bundle.code === 'string') return 'bundle';
+    if (typeof r.modelText === 'string' || typeof r.outputTemplate === 'string') return 'model-text';
+    return 'unknown';
+  }
+  const COMMON = ['v', 'at', 'protocol', 'generator', 'folder', 'savedBy'];
+  const CHAT_REQUIRED = COMMON.concat(['name', 'kind', 'size', 'data']);   // `redacted` is optional (siblings may omit it)
+  function missingFields(record, kind, shape) {
+    if (!isObj(record)) return ['(not an object)'];
+    let need = COMMON;
+    if (kind === 'chat-copy') need = CHAT_REQUIRED;
+    else if (kind === 'snapshot') need = COMMON.concat(['title']).concat(shape === 'bundle' ? ['bundle'] : shape === 'model-text' ? [] : ['bundle|modelText']);
+    return need.filter(f => record[f] === undefined || record[f] === null);
+  }
+
+  function indexRefs(index) {
+    const list = Array.isArray(index) ? index : isObj(index) ? (Array.isArray(index.entries) ? index.entries : Array.isArray(index.items) ? index.items : Array.isArray(index.list) ? index.list : null) : null;
+    if (!list) return null;
+    const refs = [];
+    list.forEach(e => {
+      const id = typeof e === 'string' ? e : isObj(e) ? (typeof e.key === 'string' ? e.key : typeof e.id === 'string' ? e.id : '') : '';
+      if (id) refs.push(id);
+    });
+    return refs;
+  }
+  const refToKey = (gen, ref) => ref.indexOf(PREFIX) === 0 ? ref : PREFIX + gen + '/' + (ref.indexOf('chat/') === 0 ? ref : 'chat/' + ref);
+
+  function chatSummary(data) {
+    const out = { threads: [], characters: [], configKeys: [] };
+    if (!isObj(data)) return out;
+    const threads = Array.isArray(data.threads) ? data.threads : isObj(data.threads) ? Object.keys(data.threads).map(k => Object.assign({ id: k }, isObj(data.threads[k]) ? data.threads[k] : {})) : [];
+    const chars = new Set();
+    threads.forEach(t => {
+      if (!isObj(t)) return;
+      const msgs = Array.isArray(t.messages) ? t.messages.length : (num(t.messageCount) || 0);
+      out.threads.push({ title: text(t.title || t.name || t.id || '(untitled)'), messages: msgs });
+      const c = t.characterName || (isObj(t.character) && t.character.name) || (isObj(t.char) && t.char.name);
+      if (typeof c === 'string' && c) chars.add(text(c, 80));
+    });
+    const cfg = isObj(data.config) ? data.config : {};
+    const cc = cfg.characters;
+    (Array.isArray(cc) ? cc : isObj(cc) ? Object.keys(cc).map(k => cc[k]) : []).forEach(c => { const n = isObj(c) ? c.name : null; if (typeof n === 'string' && n) chars.add(text(n, 80)); });
+    out.characters = Array.from(chars);
+    out.configKeys = Object.keys(cfg);     // names only, never values
+    return out;
+  }
+
+  // Plaintext secret-shaped config values -> [{ path }]. Values never leave this function.
+  function secretScan(data) {
+    const hits = [];
+    (function walk(v, path, depth) {
+      if (depth > 8 || v === null || typeof v !== 'object') return;
+      Object.keys(v).forEach(k => {
+        const val = v[k], p = path ? path + '.' + k : k;
+        if (SECRET_NAME.test(k) && typeof val === 'string' && val.trim() && val !== '[redacted]') hits.push({ path: p });
+        else walk(val, p, depth + 1);
+      });
+    })(isObj(data) && isObj(data.config) ? data.config : {}, 'config', 0);
+    return hits;
+  }
+
+  /* Inspect one record. `rec` is { key, raw (string or null), size, value, parseError, stale }.
+     `siblings` is the list of every in-scope key (strings) plus a getter for the generator's chat index, so
+     index <-> copy consistency can be reported. Nothing is changed. */
+  function inspect(rec, ctx) {
+    ctx = ctx || {};
+    const p = parseKey(rec.key), v = rec.value, anomalies = [], meta = [];
+    const add = (label, value) => { if (value !== undefined && value !== null && value !== '') meta.push([label, String(value)]); };
+    add('Key', rec.key); add('Stored by', rec.caller); add('Size', fmtBytes(rec.size));
+    let shape = null, sum = null;
+    if (rec.stale) anomalies.push('Stale: the key is listed but its value is null (set to null by a generator). Left in place.');
+    else if (rec.parseError) anomalies.push('Value is not valid JSON, so it cannot be inspected.');
+    else if (isObj(v)) {
+      add('Generator', v.generator); add('Folder', v.folder); add('Saved by', v.savedBy); add('Saved', fmtDate(v.at)); add('Protocol', v.protocol);
+      if (p.kind === 'chat-copy') {
+        add('Kind', v.kind); add('Name', text(v.name)); add('Redacted fields', v.redacted === undefined ? '(not reported)' : v.redacted);
+        sum = chatSummary(v.data);
+        add('Threads', sum.threads.length); add('Messages', sum.threads.reduce((a, t) => a + t.messages, 0)); add('Characters', sum.characters.length);
+        shape = isObj(v.data) && v.data.threads !== undefined ? 'chat-copy' : 'unknown';
+      } else if (p.kind === 'snapshot') {
+        shape = snapshotShape(v); add('Shape', shape); add('Title', text(v.title));
+        if (shape === 'bundle') { add('Bundle', text(v.bundle.name)); add('Imports', Array.isArray(v.bundle.imports) ? v.bundle.imports.length : ''); }
+        if (isObj(v.source)) {
+          add('Source bytes', v.source.bytes); add('Fetched', fmtDate(v.source.fetchedAt));
+          add('Truncated', v.source.truncated === true ? 'yes' + (v.source.reason ? ' (' + text(v.source.reason) + ')' : '') : v.source.truncated === false ? 'no' : '(not reported)');
+          add('Coverage', text(v.source.coverage, 200));
+        }
+        if (shape === 'model-text') add('Lists text', (v.modelText || '').length + ' chars');
+      }
+      const miss = (p.kind === 'chat-copy' || p.kind === 'snapshot') ? missingFields(v, p.kind, shape) : [];
+      if (miss.length) anomalies.push('Missing expected fields: ' + miss.join(', ') + '.');
+      if ((p.kind === 'chat-copy' || p.kind === 'snapshot') && shape === 'unknown') anomalies.push('Unknown record shape (neither a known generator copy nor chat copy).');
+      if (p.gen && typeof v.generator === 'string' && v.generator && v.generator !== p.gen) anomalies.push('Owner mismatch: the key belongs to "' + p.gen + '" but the record says generator "' + v.generator + '".');
+      if (p.gen && typeof v.folder === 'string' && v.folder && v.folder !== p.gen && v.folder !== PREFIX + p.gen + '/' && v.folder !== 'weld:genvault:' + p.gen) anomalies.push('Folder field "' + text(v.folder) + '" does not match the key owner "' + p.gen + '".');
+    } else if (!rec.parseError && p.kind !== 'legacy' && p.kind !== 'operational' && p.kind !== 'chat-index' && p.kind !== 'other') anomalies.push('Unknown record shape: expected an object.');
+    if (rec.size > MAX_VALUE_BYTES) anomalies.push('Oversized value: ' + fmtBytes(rec.size) + ' is over the ~2 MB limit.');
+    if (p.kind === 'other' && p.gen === '' && String(rec.key).indexOf(PREFIX) === 0) anomalies.push('Key is under the vault prefix but its generator folder name is invalid.');
+    if (p.kind === 'chat-index' && !rec.stale && !rec.parseError) {
+      const refs = indexRefs(v);
+      if (refs === null) anomalies.push('Index shape not recognized, so its entries could not be checked.');
+      else {
+        const have = new Set(ctx.keys || []);
+        const dangling = refs.filter(r => !have.has(refToKey(p.gen, r)));
+        if (dangling.length) anomalies.push(dangling.length + ' index entr' + (dangling.length === 1 ? 'y points' : 'ies point') + ' at missing keys: ' + dangling.slice(0, 5).join(', ') + (dangling.length > 5 ? ', ...' : '') + '. Index cleanup is the generator\'s job.');
+        meta.push(['Index entries', String(refs.length)]);
+      }
+    }
+    if (p.kind === 'chat-copy' && ctx.index !== undefined) {
+      const refs = indexRefs(ctx.index);
+      if (refs && !refs.some(r => refToKey(p.gen, r) === rec.key)) anomalies.push('This copy is not listed in its generator\'s chat index.');
+    }
+    return { kind: p.kind, gen: p.gen, shape, meta, anomalies, chat: sum };
+  }
+
+  // Inventory rows come from the host: [{ key, caller, size, stale, parseError, at }]
+  function buildInventory(rows) {
+    const gens = new Map(), legacy = [], operational = [], other = [];
+    (rows || []).forEach(r => {
+      const p = parseKey(r.key);
+      if (p.kind === 'legacy') return legacy.push(r);
+      if (p.kind === 'operational') return operational.push(r);
+      if (!p.gen) return other.push(r);
+      let g = gens.get(p.gen);
+      if (!g) gens.set(p.gen, g = { gen: p.gen, snapshot: null, chats: 0, chatIndex: null, bytes: 0, newest: null, oldest: null, stale: 0, keys: [] });
+      g.keys.push(r); g.bytes += r.size || 0; if (r.stale) g.stale++;
+      if (p.kind === 'snapshot') g.snapshot = r;
+      else if (p.kind === 'chat-index') g.chatIndex = r;
+      else if (p.kind === 'chat-copy' && !r.stale) g.chats++;
+      if (num(r.at) !== null && !r.stale) { g.newest = g.newest === null ? r.at : Math.max(g.newest, r.at); g.oldest = g.oldest === null ? r.at : Math.min(g.oldest, r.at); }
+    });
+    const list = Array.from(gens.values()).sort((a, b) => a.gen < b.gen ? -1 : 1);
+    list.forEach(g => { if (g.chats > MAX_CHAT_COPIES) g.overCap = true; g.keys.sort((a, b) => a.key < b.key ? -1 : 1); });
+    const bytes = list.reduce((a, g) => a + g.bytes, 0) + [legacy, operational, other].reduce((a, l) => a + l.reduce((s, r) => s + (r.size || 0), 0), 0);
+    return { generators: list, legacy, operational, other, bytes, count: (rows || []).length };
+  }
+
+  function fmtBytes(n) { n = Number(n) || 0; return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB'; }
+  function fmtDate(t) { const n = num(t); if (n === null || n <= 0) return ''; try { return new Date(n).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'; } catch (e) { return ''; } }
+  const slugPart = s => String(s || 'unknown').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'unknown';
+  const datePart = t => { try { return new Date(t).toISOString().slice(0, 10); } catch (e) { return 'undated'; } };
+
+  // Export bundles. Values are copied exactly as stored; owner identity stays in the key and filename.
+  function entryFor(rec) { return { key: rec.key, storedBy: rec.caller, size: rec.size, stale: !!rec.stale, value: rec.value === undefined ? null : rec.value }; }
+  function exportRecord(rec, now) {
+    const p = parseKey(rec.key), who = p.gen || (p.kind === 'legacy' ? 'legacy' : 'misc');
+    const tail = slugPart(rec.key.slice(rec.key.lastIndexOf('/') + 1).replace(/^.*:/, ''));
+    return { filename: 'weld-backup-' + slugPart(who) + '-' + (p.kind === 'snapshot' ? 'snapshot' : tail) + '-' + datePart(now) + '.json',
+      text: JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: now, record: entryFor(rec) }, null, 2) };
+  }
+  function exportBundle(label, recs, now) {
+    return { filename: 'weld-backup-' + slugPart(label) + '-' + datePart(now) + '.json',
+      text: JSON.stringify({ format: 'weld-backup-bundle', v: 1, exportedAt: now, scope: label, count: recs.length, records: recs.map(entryFor) }, null, 2) };
+  }
+  const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
+
+  return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate };
+});

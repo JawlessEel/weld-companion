@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.67.1
+// @version      1.68.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.67.0';
+  var WC_VERSION = '1.68.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1391,6 +1391,7 @@
       { id: 'project', glyph: '\u{1F52C}', label: 'Project' },
       { id: 'skills', glyph: '\u2728', label: 'Skills' },
       { id: 'dev', glyph: '\u{1F9E9}', label: 'Dev' },
+      { id: 'backup', glyph: '\u{1F4BE}', label: 'Backups' },
       { id: 'comfort', glyph: '\u{1F441}', label: 'Comfort' },
       { id: 'snippets', glyph: '\u2702', label: 'Snippets' },
       { id: 'studio', glyph: '\u270E', label: 'Studio' },
@@ -1466,6 +1467,10 @@
     else if (WC_TAB === 'skills') {
       if (window.weldSkills) { try { window.weldSkills.render(body); } catch (e) { body.appendChild(el('div', { class: 'wc-section-note', text: 'The Skills tab hit an error: ' + ((e && e.message) || e) })); } }
       else body.appendChild(el('div', { class: 'wc-section-note', text: 'Skills module is unavailable. Reinstall the complete userscript.' }));
+    }
+    else if (WC_TAB === 'backup') {
+      if (window.weldBackup) { try { window.weldBackup.render(body); } catch (e) { body.appendChild(el('div', { class: 'wc-section-note', text: 'The Backups tab hit an error: ' + ((e && e.message) || e) })); } }
+      else body.appendChild(el('div', { class: 'wc-section-note', text: 'Backups module is unavailable. Reinstall the complete userscript.' }));
     }
     else if (WC_TAB === 'dev') {
       if (window.weldDev) { try { window.weldDev.render(body); } catch (e) { body.appendChild(el('div', { class: 'wc-section-note', text: 'The Dev tab hit an error: ' + ((e && e.message) || e) })); } }
@@ -3365,7 +3370,9 @@
   function sbBusPush(source, origin, channel, message) {
     try { source.postMessage({ channel: SB, type: 'bus', busChannel: channel, message: message }, origin && origin !== 'null' ? origin : '*'); return true; } catch (e) { return false; }
   }
+  var sbVaultListeners = [];   // Backups tab refresh hooks; the companion only listens on dad:genvault, it never publishes there
   function sbBusDeliverLocal(channel, message) {
+    if (channel === 'dad:genvault') sbVaultListeners.slice().forEach(function (fn) { try { fn(message); } catch (e) {} });
     var subs = sbBusSubs[channel]; if (!subs) return;
     var live = [];   // prune subscribers whose frame is gone (postMessage throws) so dead iframes don't accumulate forever
     for (var i = 0; i < subs.length; i++) { if (sbBusPush(subs[i].source, subs[i].origin, channel, message)) live.push(subs[i]); }
@@ -3875,6 +3882,37 @@
       api: function (method, path, body, cb) { var t = ghToken(); if (!t) return cb(new Error('No GitHub token saved'), 0, null); ghApi(method, path, t, body, cb); },
       fetch: function (url, cb) { ghFetch(url, cb); }
     },
+    // ---- used by the Backups tab: raw, exact-key access to what generators stored through Skybridge storage ----
+    vault: (function () {
+      var SBK = NS + ':sbk:';
+      function split(gm) {   // weldCompanion:sbk:<generator>:<key>  ->  { caller, key }
+        var rest = gm.slice(SBK.length), i = rest.indexOf(':');
+        return i < 0 ? null : { caller: rest.slice(0, i), key: rest.slice(i + 1) };
+      }
+      return {
+        list: function () {
+          if (typeof GM_listValues !== 'function') return { ok: false, reason: 'GM_listValues is not available in this userscript manager' };
+          var all; try { all = GM_listValues(); } catch (e) { return { ok: false, reason: 'storage listing failed' }; }
+          var items = [];
+          for (var i = 0; i < all.length; i++) { if (typeof all[i] === 'string' && all[i].indexOf(SBK) === 0) { var p = split(all[i]); if (p) items.push({ gmKey: all[i], caller: p.caller, key: p.key }); } }
+          return { ok: true, items: items };
+        },
+        read: function (gm) {
+          if (typeof gm !== 'string' || gm.indexOf(SBK) !== 0) return { ok: false, reason: 'bad-key' };
+          var raw; try { raw = GM_getValue(gm, undefined); } catch (e) { return { ok: false, reason: 'read-failed' }; }
+          if (raw === undefined) return { ok: true, size: 0, value: null };
+          var s = typeof raw === 'string' ? raw : JSON.stringify(raw), size = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(s).length : s.length;
+          try { return { ok: true, size: size, value: JSON.parse(s) }; } catch (e) { return { ok: true, size: size, value: null, parseError: true }; }
+        },
+        remove: function (gm) {   // exactly one key, and only inside the Skybridge storage namespace
+          if (typeof gm !== 'string' || gm.indexOf(SBK) !== 0) return { ok: false, reason: 'bad-key' };
+          try { GM_deleteValue(gm); return { ok: true }; } catch (e) { return { ok: false, reason: 'delete-failed' }; }
+        },
+        onChange: function (fn) { sbVaultListeners.push(fn); return function () { var i = sbVaultListeners.indexOf(fn); if (i >= 0) sbVaultListeners.splice(i, 1); }; },
+        info: function () { return { backend: 'Userscript manager storage (GM_*)' }; },
+        download: function (name, text) { downloadBlobText(name, text); }
+      };
+    })(),
     openTab: function (tab) { openWindow(tab); },
     refreshTab: function () { if (WC_TAB) renderTab(); },
     favorites: function () { return favorites().slice(); },
@@ -16642,3 +16680,399 @@ page, and with no companion the feature behaves exactly as before.`
   window.weldSkills = { render };
 })();
 /* END GENERATED SKILLS */
+
+/* BEGIN GENERATED BACKUP */
+/* Backup Manager core: read-only inventory, record inspection and export bundles for generator backup copies.
+   The companion is a storekeeper, not an owner: nothing here rewrites, moves or repairs a record. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldBackupCore = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  const GEN_RE = /^[a-z0-9-]{1,64}$/;
+  const MAX_VALUE_BYTES = 2 * 1024 * 1024;       // values are documented as "up to ~2MB"
+  const MAX_CHAT_COPIES = 10;                     // documented per-generator cap
+  const SECRET_NAME = /api[-_ ]?key|secret|token|webhook/i;
+  const PREFIX = 'weld:genvault:';
+  const LEGACY_PREFIX = 'dadchat:vault:';
+  const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
+  const text = (v, max) => typeof v === 'string' ? v.slice(0, max || 120) : '';
+
+  // key -> { kind, gen, sub }. kind: snapshot | chat-index | chat-copy | legacy | operational | other
+  function parseKey(key) {
+    key = String(key == null ? '' : key);
+    if (key.indexOf(PREFIX) === 0) {
+      const rest = key.slice(PREFIX.length), slash = rest.indexOf('/');
+      if (slash > 0) {
+        const gen = rest.slice(0, slash), sub = rest.slice(slash + 1);
+        if (GEN_RE.test(gen)) {
+          if (sub === 'snapshot') return { kind: 'snapshot', gen, sub };
+          if (sub === 'chat/index') return { kind: 'chat-index', gen, sub };
+          if (/^chat\/snap-[^/]+$/.test(sub)) return { kind: 'chat-copy', gen, sub };
+          return { kind: 'other', gen, sub };
+        }
+      }
+      return { kind: 'other', gen: '', sub: rest };
+    }
+    if (key === 'dadchat:vault:index' || key.indexOf(LEGACY_PREFIX) === 0) return { kind: 'legacy', gen: '', sub: key.slice(LEGACY_PREFIX.length) };
+    if (key === 'weld:link-record' || key.indexOf('weld:selftest:') === 0) return { kind: 'operational', gen: '', sub: key };
+    return { kind: 'other', gen: '', sub: key };
+  }
+  // Is this stored key part of the backup domain at all?
+  const inScope = key => { const k = parseKey(key).kind; return k !== 'other' || String(key).indexOf(PREFIX) === 0; };
+
+  // Which generator-copy shape is this? Both shapes are valid; unknown shapes are only flagged.
+  function snapshotShape(r) {
+    if (!isObj(r)) return 'unknown';
+    if (isObj(r.bundle) && typeof r.bundle.code === 'string') return 'bundle';
+    if (typeof r.modelText === 'string' || typeof r.outputTemplate === 'string') return 'model-text';
+    return 'unknown';
+  }
+  const COMMON = ['v', 'at', 'protocol', 'generator', 'folder', 'savedBy'];
+  const CHAT_REQUIRED = COMMON.concat(['name', 'kind', 'size', 'data']);   // `redacted` is optional (siblings may omit it)
+  function missingFields(record, kind, shape) {
+    if (!isObj(record)) return ['(not an object)'];
+    let need = COMMON;
+    if (kind === 'chat-copy') need = CHAT_REQUIRED;
+    else if (kind === 'snapshot') need = COMMON.concat(['title']).concat(shape === 'bundle' ? ['bundle'] : shape === 'model-text' ? [] : ['bundle|modelText']);
+    return need.filter(f => record[f] === undefined || record[f] === null);
+  }
+
+  function indexRefs(index) {
+    const list = Array.isArray(index) ? index : isObj(index) ? (Array.isArray(index.entries) ? index.entries : Array.isArray(index.items) ? index.items : Array.isArray(index.list) ? index.list : null) : null;
+    if (!list) return null;
+    const refs = [];
+    list.forEach(e => {
+      const id = typeof e === 'string' ? e : isObj(e) ? (typeof e.key === 'string' ? e.key : typeof e.id === 'string' ? e.id : '') : '';
+      if (id) refs.push(id);
+    });
+    return refs;
+  }
+  const refToKey = (gen, ref) => ref.indexOf(PREFIX) === 0 ? ref : PREFIX + gen + '/' + (ref.indexOf('chat/') === 0 ? ref : 'chat/' + ref);
+
+  function chatSummary(data) {
+    const out = { threads: [], characters: [], configKeys: [] };
+    if (!isObj(data)) return out;
+    const threads = Array.isArray(data.threads) ? data.threads : isObj(data.threads) ? Object.keys(data.threads).map(k => Object.assign({ id: k }, isObj(data.threads[k]) ? data.threads[k] : {})) : [];
+    const chars = new Set();
+    threads.forEach(t => {
+      if (!isObj(t)) return;
+      const msgs = Array.isArray(t.messages) ? t.messages.length : (num(t.messageCount) || 0);
+      out.threads.push({ title: text(t.title || t.name || t.id || '(untitled)'), messages: msgs });
+      const c = t.characterName || (isObj(t.character) && t.character.name) || (isObj(t.char) && t.char.name);
+      if (typeof c === 'string' && c) chars.add(text(c, 80));
+    });
+    const cfg = isObj(data.config) ? data.config : {};
+    const cc = cfg.characters;
+    (Array.isArray(cc) ? cc : isObj(cc) ? Object.keys(cc).map(k => cc[k]) : []).forEach(c => { const n = isObj(c) ? c.name : null; if (typeof n === 'string' && n) chars.add(text(n, 80)); });
+    out.characters = Array.from(chars);
+    out.configKeys = Object.keys(cfg);     // names only, never values
+    return out;
+  }
+
+  // Plaintext secret-shaped config values -> [{ path }]. Values never leave this function.
+  function secretScan(data) {
+    const hits = [];
+    (function walk(v, path, depth) {
+      if (depth > 8 || v === null || typeof v !== 'object') return;
+      Object.keys(v).forEach(k => {
+        const val = v[k], p = path ? path + '.' + k : k;
+        if (SECRET_NAME.test(k) && typeof val === 'string' && val.trim() && val !== '[redacted]') hits.push({ path: p });
+        else walk(val, p, depth + 1);
+      });
+    })(isObj(data) && isObj(data.config) ? data.config : {}, 'config', 0);
+    return hits;
+  }
+
+  /* Inspect one record. `rec` is { key, raw (string or null), size, value, parseError, stale }.
+     `siblings` is the list of every in-scope key (strings) plus a getter for the generator's chat index, so
+     index <-> copy consistency can be reported. Nothing is changed. */
+  function inspect(rec, ctx) {
+    ctx = ctx || {};
+    const p = parseKey(rec.key), v = rec.value, anomalies = [], meta = [];
+    const add = (label, value) => { if (value !== undefined && value !== null && value !== '') meta.push([label, String(value)]); };
+    add('Key', rec.key); add('Stored by', rec.caller); add('Size', fmtBytes(rec.size));
+    let shape = null, sum = null;
+    if (rec.stale) anomalies.push('Stale: the key is listed but its value is null (set to null by a generator). Left in place.');
+    else if (rec.parseError) anomalies.push('Value is not valid JSON, so it cannot be inspected.');
+    else if (isObj(v)) {
+      add('Generator', v.generator); add('Folder', v.folder); add('Saved by', v.savedBy); add('Saved', fmtDate(v.at)); add('Protocol', v.protocol);
+      if (p.kind === 'chat-copy') {
+        add('Kind', v.kind); add('Name', text(v.name)); add('Redacted fields', v.redacted === undefined ? '(not reported)' : v.redacted);
+        sum = chatSummary(v.data);
+        add('Threads', sum.threads.length); add('Messages', sum.threads.reduce((a, t) => a + t.messages, 0)); add('Characters', sum.characters.length);
+        shape = isObj(v.data) && v.data.threads !== undefined ? 'chat-copy' : 'unknown';
+      } else if (p.kind === 'snapshot') {
+        shape = snapshotShape(v); add('Shape', shape); add('Title', text(v.title));
+        if (shape === 'bundle') { add('Bundle', text(v.bundle.name)); add('Imports', Array.isArray(v.bundle.imports) ? v.bundle.imports.length : ''); }
+        if (isObj(v.source)) {
+          add('Source bytes', v.source.bytes); add('Fetched', fmtDate(v.source.fetchedAt));
+          add('Truncated', v.source.truncated === true ? 'yes' + (v.source.reason ? ' (' + text(v.source.reason) + ')' : '') : v.source.truncated === false ? 'no' : '(not reported)');
+          add('Coverage', text(v.source.coverage, 200));
+        }
+        if (shape === 'model-text') add('Lists text', (v.modelText || '').length + ' chars');
+      }
+      const miss = (p.kind === 'chat-copy' || p.kind === 'snapshot') ? missingFields(v, p.kind, shape) : [];
+      if (miss.length) anomalies.push('Missing expected fields: ' + miss.join(', ') + '.');
+      if ((p.kind === 'chat-copy' || p.kind === 'snapshot') && shape === 'unknown') anomalies.push('Unknown record shape (neither a known generator copy nor chat copy).');
+      if (p.gen && typeof v.generator === 'string' && v.generator && v.generator !== p.gen) anomalies.push('Owner mismatch: the key belongs to "' + p.gen + '" but the record says generator "' + v.generator + '".');
+      if (p.gen && typeof v.folder === 'string' && v.folder && v.folder !== p.gen && v.folder !== PREFIX + p.gen + '/' && v.folder !== 'weld:genvault:' + p.gen) anomalies.push('Folder field "' + text(v.folder) + '" does not match the key owner "' + p.gen + '".');
+    } else if (!rec.parseError && p.kind !== 'legacy' && p.kind !== 'operational' && p.kind !== 'chat-index' && p.kind !== 'other') anomalies.push('Unknown record shape: expected an object.');
+    if (rec.size > MAX_VALUE_BYTES) anomalies.push('Oversized value: ' + fmtBytes(rec.size) + ' is over the ~2 MB limit.');
+    if (p.kind === 'other' && p.gen === '' && String(rec.key).indexOf(PREFIX) === 0) anomalies.push('Key is under the vault prefix but its generator folder name is invalid.');
+    if (p.kind === 'chat-index' && !rec.stale && !rec.parseError) {
+      const refs = indexRefs(v);
+      if (refs === null) anomalies.push('Index shape not recognized, so its entries could not be checked.');
+      else {
+        const have = new Set(ctx.keys || []);
+        const dangling = refs.filter(r => !have.has(refToKey(p.gen, r)));
+        if (dangling.length) anomalies.push(dangling.length + ' index entr' + (dangling.length === 1 ? 'y points' : 'ies point') + ' at missing keys: ' + dangling.slice(0, 5).join(', ') + (dangling.length > 5 ? ', ...' : '') + '. Index cleanup is the generator\'s job.');
+        meta.push(['Index entries', String(refs.length)]);
+      }
+    }
+    if (p.kind === 'chat-copy' && ctx.index !== undefined) {
+      const refs = indexRefs(ctx.index);
+      if (refs && !refs.some(r => refToKey(p.gen, r) === rec.key)) anomalies.push('This copy is not listed in its generator\'s chat index.');
+    }
+    return { kind: p.kind, gen: p.gen, shape, meta, anomalies, chat: sum };
+  }
+
+  // Inventory rows come from the host: [{ key, caller, size, stale, parseError, at }]
+  function buildInventory(rows) {
+    const gens = new Map(), legacy = [], operational = [], other = [];
+    (rows || []).forEach(r => {
+      const p = parseKey(r.key);
+      if (p.kind === 'legacy') return legacy.push(r);
+      if (p.kind === 'operational') return operational.push(r);
+      if (!p.gen) return other.push(r);
+      let g = gens.get(p.gen);
+      if (!g) gens.set(p.gen, g = { gen: p.gen, snapshot: null, chats: 0, chatIndex: null, bytes: 0, newest: null, oldest: null, stale: 0, keys: [] });
+      g.keys.push(r); g.bytes += r.size || 0; if (r.stale) g.stale++;
+      if (p.kind === 'snapshot') g.snapshot = r;
+      else if (p.kind === 'chat-index') g.chatIndex = r;
+      else if (p.kind === 'chat-copy' && !r.stale) g.chats++;
+      if (num(r.at) !== null && !r.stale) { g.newest = g.newest === null ? r.at : Math.max(g.newest, r.at); g.oldest = g.oldest === null ? r.at : Math.min(g.oldest, r.at); }
+    });
+    const list = Array.from(gens.values()).sort((a, b) => a.gen < b.gen ? -1 : 1);
+    list.forEach(g => { if (g.chats > MAX_CHAT_COPIES) g.overCap = true; g.keys.sort((a, b) => a.key < b.key ? -1 : 1); });
+    const bytes = list.reduce((a, g) => a + g.bytes, 0) + [legacy, operational, other].reduce((a, l) => a + l.reduce((s, r) => s + (r.size || 0), 0), 0);
+    return { generators: list, legacy, operational, other, bytes, count: (rows || []).length };
+  }
+
+  function fmtBytes(n) { n = Number(n) || 0; return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB'; }
+  function fmtDate(t) { const n = num(t); if (n === null || n <= 0) return ''; try { return new Date(n).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'; } catch (e) { return ''; } }
+  const slugPart = s => String(s || 'unknown').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'unknown';
+  const datePart = t => { try { return new Date(t).toISOString().slice(0, 10); } catch (e) { return 'undated'; } };
+
+  // Export bundles. Values are copied exactly as stored; owner identity stays in the key and filename.
+  function entryFor(rec) { return { key: rec.key, storedBy: rec.caller, size: rec.size, stale: !!rec.stale, value: rec.value === undefined ? null : rec.value }; }
+  function exportRecord(rec, now) {
+    const p = parseKey(rec.key), who = p.gen || (p.kind === 'legacy' ? 'legacy' : 'misc');
+    const tail = slugPart(rec.key.slice(rec.key.lastIndexOf('/') + 1).replace(/^.*:/, ''));
+    return { filename: 'weld-backup-' + slugPart(who) + '-' + (p.kind === 'snapshot' ? 'snapshot' : tail) + '-' + datePart(now) + '.json',
+      text: JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: now, record: entryFor(rec) }, null, 2) };
+  }
+  function exportBundle(label, recs, now) {
+    return { filename: 'weld-backup-' + slugPart(label) + '-' + datePart(now) + '.json',
+      text: JSON.stringify({ format: 'weld-backup-bundle', v: 1, exportedAt: now, scope: label, count: recs.length, records: recs.map(entryFor) }, null, 2) };
+  }
+  const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
+
+  return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate };
+});
+
+/* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
+   Read-only except the exact-key Delete action. Record contents are never logged or sent anywhere. */
+(function () {
+  'use strict';
+  if (window.top !== window) return;
+  const C = window.WeldBackupCore, H = window.weldProjectHost;
+  if (!C || !H) return;
+  const E = H.el;
+  const S = { rows: null, inv: null, error: '', selected: null, inspected: null, pendingDelete: null, secrets: null, msg: '', stamp: 0 };
+  let host = null, unsub = null;
+  const note = t => E('div', { class: 'wc-section-note', text: t });
+  const small = { fontSize: '12px', opacity: '.75' };
+  const btn = (label, fn, extra) => E('button', Object.assign({ type: 'button', class: 'wc-btn wc-mini', text: label, onclick: fn }, extra || {}));
+  const V = () => H.vault || null;
+
+  function say(t, isErr) { S.msg = t; S.msgErr = !!isErr; }
+
+  // One pass over the stored keys. Values are parsed only to read their size, date and staleness, then dropped.
+  function load() {
+    const v = V();
+    S.rows = null; S.inv = null; S.error = ''; S.stamp = Date.now();
+    if (!v) { S.error = 'Storage access is unavailable in this build. Update the complete Weld userscript.'; return; }
+    let listed;
+    try { listed = v.list(); } catch (e) { listed = { ok: false, reason: String((e && e.message) || e) }; }
+    if (!listed || listed.ok !== true) { S.error = 'Could not list stored backups: ' + ((listed && listed.reason) || 'unknown error') + '.'; return; }
+    const rows = [];
+    (listed.items || []).forEach(it => {
+      if (!C.inScope(it.key)) return;
+      let r;
+      try { r = v.read(it.gmKey); } catch (e) { r = { ok: false, reason: 'read-failed' }; }
+      const row = { key: it.key, gmKey: it.gmKey, caller: it.caller, size: 0, stale: false, parseError: false, at: null };
+      if (!r || r.ok !== true) row.parseError = true;
+      else {
+        row.size = r.size || 0;
+        if (r.parseError) row.parseError = true;
+        else if (r.value === null || r.value === undefined) row.stale = true;
+        else if (r.value && typeof r.value === 'object' && typeof r.value.at === 'number') row.at = r.value.at;
+      }
+      rows.push(row);
+    });
+    S.rows = rows; S.inv = C.buildInventory(rows);
+    if (S.selected && !rows.some(r => r.gmKey === S.selected)) { S.selected = null; S.inspected = null; }
+    S.pendingDelete = null;
+  }
+  function full(gmKey) {   // fresh read of a single record for inspect / export
+    const row = (S.rows || []).find(r => r.gmKey === gmKey); if (!row) return null;
+    let r; try { r = V().read(gmKey); } catch (e) { r = { ok: false, reason: 'read-failed' }; }
+    if (!r || r.ok !== true) return Object.assign({}, row, { unreadable: true });
+    return Object.assign({}, row, { size: r.size || 0, value: r.value === undefined ? null : r.value, parseError: !!r.parseError, stale: !r.parseError && (r.value === null || r.value === undefined) });
+  }
+  function indexFor(gen) {
+    const row = (S.rows || []).find(r => C.parseKey(r.key).kind === 'chat-index' && C.parseKey(r.key).gen === gen);
+    const rec = row && full(row.gmKey); return rec && !rec.parseError && !rec.stale ? rec.value : undefined;
+  }
+  function inspectRow(gmKey) {
+    const rec = full(gmKey); S.selected = gmKey; S.pendingDelete = null; S.secrets = null;
+    if (!rec) { S.inspected = null; return; }
+    const keys = (S.rows || []).map(r => r.key), gen = C.parseKey(rec.key).gen;
+    S.inspected = rec.unreadable ? { rec, report: { meta: [['Key', rec.key]], anomalies: ['The value could not be read.'], chat: null } }
+      : { rec, report: C.inspect(rec, { keys, index: gen ? indexFor(gen) : undefined }) };
+  }
+
+  const stamp = () => Date.now();
+  function saveFile(file) {
+    try { H.vault.download(file.filename, file.text); say('Saved ' + file.filename + '.'); } catch (e) { say('Download failed.', true); }
+  }
+  function exportRows(label, rows) {
+    const recs = rows.map(r => full(r.gmKey)).filter(Boolean);
+    if (!recs.length) { say('Nothing to export.', true); return; }
+    saveFile(C.exportBundle(label, recs, stamp()));
+  }
+  function runDelete(gmKey) {
+    const row = (S.rows || []).find(r => r.gmKey === gmKey);
+    if (!row) { say('That key no longer exists.', true); return; }
+    let res; try { res = V().remove(gmKey); } catch (e) { res = { ok: false, reason: 'error' }; }
+    say(res && res.ok ? 'Deleted ' + row.key + '. Only that key was removed.' : 'Delete failed: ' + ((res && res.reason) || 'unknown') + '.', !(res && res.ok));
+    S.selected = null; S.inspected = null; load();
+  }
+  function scanSecrets() {
+    const hits = [];
+    (S.rows || []).forEach(r => {
+      if (C.parseKey(r.key).kind !== 'chat-copy' || r.stale || r.parseError) return;
+      const rec = full(r.gmKey); if (!rec || rec.parseError || !rec.value) return;
+      const found = C.secretScan(rec.value.data);
+      if (found.length) hits.push({ key: r.key, paths: found.map(f => f.path) });
+    });
+    S.secrets = hits; say(hits.length ? 'Found secret-shaped values in ' + hits.length + ' chat cop' + (hits.length === 1 ? 'y' : 'ies') + '. Values are not shown.' : 'No plaintext secret-shaped config values found.');
+  }
+
+  function rowLine(r, canDelete, rerender) {
+    const p = C.parseKey(r.key), label = p.sub || r.key;
+    const sel = S.selected === r.gmKey;
+    const bits = [label, C.fmtBytes(r.size)];
+    if (r.at) bits.push(C.fmtDate(r.at));
+    if (r.stale) bits.push('STALE (null value)');
+    if (r.parseError) bits.push('unreadable');
+    const line = E('div', { 'data-key': r.key, style: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', padding: '4px 0', fontWeight: sel ? '600' : '' } }, [
+      E('span', { text: bits.join(' · '), style: { flex: '1', minWidth: '160px', fontSize: '12px', wordBreak: 'break-all' } }),
+      btn('Inspect', () => { inspectRow(r.gmKey); rerender(); }, { 'aria-label': 'Inspect ' + r.key }),
+      btn('Download', () => { const rec = full(r.gmKey); if (rec) saveFile(C.exportRecord(rec, stamp())); rerender(); }, { 'aria-label': 'Download ' + r.key })
+    ]);
+    if (canDelete) line.appendChild(btn('Delete', () => { S.pendingDelete = r.gmKey; rerender(); }, { 'aria-label': 'Delete ' + r.key }));
+    return line;
+  }
+  function confirmBar(rerender) {
+    const row = (S.rows || []).find(r => r.gmKey === S.pendingDelete); if (!row) return null;
+    const p = C.parseKey(row.key);
+    return E('div', { role: 'alertdialog', 'aria-label': 'Confirm delete', style: { border: '1px solid #c0392b', borderRadius: '8px', padding: '10px', margin: '8px 0' } }, [
+      E('div', { text: 'Delete ' + (p.gen ? 'generator "' + p.gen + '"' : 'record') + ' key ' + row.key + '? This removes only that one key and cannot be undone.' }),
+      E('div', { style: Object.assign({ marginTop: '4px' }, small), text: 'If this is a chat copy, its generator\'s chat index is not edited. Index cleanup is the generator\'s job.' }),
+      E('div', { style: { display: 'flex', gap: '8px', marginTop: '8px' } }, [
+        btn('Confirm delete', () => runDelete(row.gmKey)),
+        btn('Cancel', () => { S.pendingDelete = null; rerender(); })
+      ])
+    ]);
+  }
+  function inspector(rerender) {
+    const i = S.inspected; if (!i) return note('Select Inspect on a record to see its details.');
+    const wrap = E('div', { 'aria-label': 'Record inspector', style: { borderTop: '1px solid var(--wc-line,#555)', marginTop: '12px', paddingTop: '10px' } });
+    wrap.appendChild(E('div', { text: 'Inspector', style: { fontWeight: '600', marginBottom: '6px' } }));
+    i.report.meta.forEach(m => wrap.appendChild(E('div', { style: { display: 'flex', gap: '8px', fontSize: '12px' } }, [E('span', { text: m[0], style: { minWidth: '110px', opacity: '.7' } }), E('span', { text: m[1], style: { wordBreak: 'break-all' } })])));
+    const chat = i.report.chat;
+    if (chat) {
+      if (chat.threads.length) { wrap.appendChild(E('div', { text: 'Threads', style: { fontWeight: '600', marginTop: '8px' } })); chat.threads.slice(0, 50).forEach(t => wrap.appendChild(E('div', { style: { fontSize: '12px' }, text: t.title + ' — ' + t.messages + ' message' + (t.messages === 1 ? '' : 's') }))); }
+      if (chat.characters.length) wrap.appendChild(E('div', { style: { fontSize: '12px', marginTop: '6px' }, text: 'Characters: ' + chat.characters.join(', ') }));
+      if (chat.configKeys.length) wrap.appendChild(E('div', { style: { fontSize: '12px', marginTop: '6px' }, text: 'Config keys (names only): ' + chat.configKeys.join(', ') }));
+    }
+    if (i.report.anomalies.length) {
+      wrap.appendChild(E('div', { text: 'Warnings (read-only, nothing is changed)', style: { fontWeight: '600', marginTop: '10px', color: '#e0a030' } }));
+      i.report.anomalies.forEach(a => wrap.appendChild(E('div', { 'data-anomaly': '1', style: { fontSize: '12px' }, text: '⚠ ' + a })));
+    } else wrap.appendChild(E('div', { style: { fontSize: '12px', marginTop: '8px' }, text: 'No anomalies found.' }));
+    return wrap;
+  }
+
+  function render(parent) {
+    host = parent; S.msg = '';
+    load();
+    if (unsub) { try { unsub(); } catch (e) {} unsub = null; }
+    const v = V();
+    if (v && typeof v.onChange === 'function') unsub = v.onChange(() => { if (host && host.isConnected !== false && !S.pendingDelete) { load(); draw(); } });
+    draw();
+  }
+  function draw() {
+    const parent = host; if (!parent) return;
+    while (parent.firstChild) parent.removeChild(parent.firstChild);
+    const rerender = () => draw();
+    const wrap = E('div', { id: 'wc-backup-body' });
+    wrap.appendChild(E('div', { text: 'Backup Manager', style: { fontWeight: '600', fontSize: '15px' } }));
+    wrap.appendChild(note('Look after the generator backup copies kept in this companion. You can inspect and download them, and delete a single key. This tab never edits, moves or repairs a record; generators own their own data.'));
+    const top = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '8px 0' } });
+    top.appendChild(btn('Refresh', () => { load(); draw(); }));
+    top.appendChild(btn('Export all', () => exportRows('all-generators', S.rows || []), { disabled: !(S.rows && S.rows.length) }));
+    top.appendChild(btn('Scan for plaintext secrets', () => { scanSecrets(); draw(); }, { disabled: !(S.rows && S.rows.length) }));
+    wrap.appendChild(top);
+    if (S.msg) wrap.appendChild(E('div', { role: 'status', 'aria-live': 'polite', style: { fontSize: '12px', margin: '4px 0', color: S.msgErr ? '#ff9e92' : '' }, text: S.msg }));
+    if (S.error) { wrap.appendChild(E('div', { role: 'alert', style: { color: '#ff9e92', margin: '8px 0' }, text: S.error })); parent.appendChild(wrap); return; }
+    const inv = S.inv, info = (V() && V().info && V().info()) || {};
+    wrap.appendChild(E('div', { 'data-summary': '1', style: Object.assign({ margin: '4px 0 10px' }, small), text:
+      (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' · ' + C.fmtBytes(inv.bytes) + ' used by backups' +
+      (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
+    if (!inv.count) wrap.appendChild(note('No generator backups are stored yet. They appear here after a generator saves a copy through Skybridge storage.'));
+    const bar = confirmBar(rerender); if (bar) wrap.appendChild(bar);
+    inv.generators.forEach(g => {
+      const d = E('details', { 'data-gen': g.gen, style: { margin: '6px 0' } });
+      if (S.selected && g.keys.some(k => k.gmKey === S.selected) || g.keys.some(k => k.gmKey === S.pendingDelete)) d.open = true;
+      d.appendChild(E('summary', { text: g.gen + ' — ' + (g.snapshot ? 'source copy ' + (g.snapshot.stale ? '(stale)' : (g.snapshot.at ? C.fmtDate(g.snapshot.at) : 'present')) : 'no source copy') + ', ' + g.chats + ' chat cop' + (g.chats === 1 ? 'y' : 'ies') + ', ' + C.fmtBytes(g.bytes) +
+        (g.newest ? ', newest ' + C.fmtDate(g.newest).slice(0, 10) : '') + (g.oldest && g.oldest !== g.newest ? ', oldest ' + C.fmtDate(g.oldest).slice(0, 10) : '') + (g.stale ? ', ' + g.stale + ' stale' : '') }));
+      d.appendChild(E('div', { style: { padding: '2px 0 4px 12px' } }, [btn('Export folder', () => exportRows(g.gen, g.keys), { 'aria-label': 'Export folder ' + g.gen })]));
+      g.keys.forEach(r => d.appendChild(E('div', { style: { paddingLeft: '12px' } }, [rowLine(r, true, rerender)])));
+      wrap.appendChild(d);
+    });
+    function plain(title, rows, canDelete, why) {
+      if (!rows.length) return;
+      const d = E('details', { 'data-section': title, style: { margin: '6px 0' } });
+      d.appendChild(E('summary', { text: title + ' (' + rows.length + ')' }));
+      d.appendChild(E('div', { style: Object.assign({ padding: '2px 0 4px 12px' }, small), text: why }));
+      rows.forEach(r => d.appendChild(E('div', { style: { paddingLeft: '12px' } }, [rowLine(r, canDelete, rerender)])));
+      wrap.appendChild(d);
+    }
+    plain('Legacy (dadchat:vault)', inv.legacy, false, 'Read-only. Generators own the migration of these keys; this tab never migrates, renames or cleans them.');
+    plain('Operational keys', inv.operational, false, 'Small link and self-test records. Display only.');
+    plain('Other vault-prefix keys', inv.other, true, 'Keys under weld:genvault: whose folder name is not a valid generator name.');
+    if (S.secrets) {
+      wrap.appendChild(E('div', { text: 'Secret scan', style: { fontWeight: '600', marginTop: '10px' } }));
+      if (!S.secrets.length) wrap.appendChild(note('No plaintext secret-shaped values found.'));
+      S.secrets.forEach(h => wrap.appendChild(E('div', { 'data-secret': '1', style: { fontSize: '12px' }, text: '⚠ ' + h.key + ': ' + h.paths.join(', ') + ' (value hidden)' })));
+    }
+    wrap.appendChild(inspector(rerender));
+    parent.appendChild(wrap);
+  }
+  window.weldBackup = { render };
+})();
+/* END GENERATED BACKUP */
