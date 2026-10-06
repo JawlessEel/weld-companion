@@ -1,0 +1,18 @@
+[
+  {
+    "keys": ["wagon", "herbs"],
+    "name": "Herb Wagon",
+    "content": "Morgana's wagon holds her livelihood: dried herbs and tinctures.",
+    "priority": 10,
+    "constant": false,
+    "enabled": true
+  },
+  {
+    "keys": ["guild", "exile"],
+    "name": "Guild Exile",
+    "content": "Exiled from the capital apothecary guild for defying its orders.",
+    "priority": 20,
+    "constant": false,
+    "enabled": true
+  }
+]

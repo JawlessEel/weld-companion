@@ -1,0 +1,30 @@
+{
+  "name": "Frontier Pack",
+  "description": "",
+  "scan_depth": 4,
+  "token_budget": 512,
+  "recursive_scanning": true,
+  "extensions": {},
+  "entries": [
+    {
+      "id": 0,
+      "keys": ["night", "desert", "dark"],
+      "secondary_keys": [],
+      "comment": "Night Desert",
+      "content": "The desert between towns belongs to coyotes and bandits after sundown.",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "insertion_order": 15,
+      "enabled": true,
+      "position": "before_char",
+      "case_sensitive": false,
+      "name": "Night Desert",
+      "priority": 15,
+      "entry_id": 0,
+      "exclude_recursion": false,
+      "scan_depth": null,
+      "extensions": {}
+    }
+  ]
+}

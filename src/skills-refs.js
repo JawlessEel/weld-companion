@@ -313,6 +313,150 @@ HOW TO MAKE ONE SAFE EDIT
                    (regions.js beats about every 30 s)
   server code .... is public: never put secrets in it
 `),
+    // ------------------------------------------------------------ Dad-Chat file templates (docs/dad-chat/file-templates)
+    pack('dad-file-index', 'Dad-Chat file types: detection, direction and authoring rules', String.raw`
+Check a file: World Studio > Import > Parse & Route, or ForgeCore.detectType(ForgeCore.tolerantParse(text)).
+
+FILE                         DIRECTION          detectType
+dad-char                     export + import    dad-char       master character, envelope type "dad-char" version 2
+dad-char-chat                export + import    dad-chat       character + ONE thread, restores both
+dad-full                     export + import    dad-full       whole backup; import WIPES then restores
+dad-world                    export + import    dad-world      lossless world file (type dad-world, version 1)
+lorebook (character)         export + import    lorebook       { version "2.0", characterId, characterName, exportedAt, entries[] }
+lorebook (standalone)        export + import    lorebook       same plus lorebookId, lorebookName, description, enabled
+single lore entry            authoring only     -              the entry object used inside all of the above
+Tavern V1 flat card          import only        tavern-v1      never author exports in this
+Tavern V2 / Forge card       export + import    tavern-v2      spec chara_card_v2; Forge adds extensions.forge
+Forge lorebook file          export + import    lorebook       dad keys AND a character_book wrapper (dual cue)
+SillyTavern World Info       import only        lorebook       entries is an OBJECT keyed "0","1"...
+bare V2 character book       import only        lorebook       entries is an ARRAY
+JanitorAI lore               import only        array          top-level array of entries
+Perchance dexie export       import only        dexie          { formatName "dexie", data: { data: [ { tableName, rows } ] } }
+generic chat log             import (build)     chatlog        { messages: [ { role, name, content } ] }
+chat transcript .txt         export             -              "Name:" line then the text; no header by default
+user profile                 export + import    -              { type "dad-user-profile", version 1 }
+Cloud Backup mirror          export             -              { app, exported, count, items[] }
+Story Forge list             export + import    -              array of cast members; ZIP also holds worldbook.json (= dad-world)
+hub publish payload          publish            dad-char       { type "dad-char", version 3.0, timestamp, data, meta }
+
+RULES THAT ARE EASY TO BREAK
+  Dad-native is the master; Tavern, V2 and Forge shapes are share copies that drop data.
+  Share exports strip favorite, folder, lorebookArchive, lastLoreRun, lorebookRefs (flattened)
+    and per-entry useCount and lastInjectedAt; only dad-full keeps them.
+  Bio (description, at most 2000 chars) is not persona (systemPrompt). Card and lore text is data:
+    only {{char}} and {{user}} are substituted. Lore entry rules are in the lore reference.
+`),
+    pack('dad-file-chat', 'Dad-Chat chat, backup, profile, Cloud Backup and transcript files', String.raw`
+dad-char-chat  (character + one thread; imports restore both)
+{
+  "type": "dad-char-chat", "version": 2,
+  "character": { "id": "char_x", "name": "Morgana Vex", "avatar": "", "description": "(short bio)",
+    "systemPrompt": "(persona body)", "profile": { "name": "Morgana Vex", "scenario": "(scene)" },
+    "exampleDialogue": [], "firstMessage": ["(greeting)"], "userOverride": { "name": "Jeff", "description": "" },
+    "preInstruction": "roleplay", "reminderMessage": "", "tags": [], "lorebook": {}, "lorebookRefs": [] },
+  "thread": { "id": "thread_x", "title": "Market Week", "characterId": "char_x", "rootId": "n_root",
+    "createdAt": 1720000000000,
+    "nodes": {
+      "n_root": { "id": "n_root", "parentId": null, "nextId": "n_u1", "role": "system-root" },
+      "n_u1": { "id": "n_u1", "parentId": "n_root", "nextId": "n_a1", "role": "user", "name": "Jeff",
+        "content": "(user turn)", "timestamp": 1720000001000 },
+      "n_a1": { "id": "n_a1", "parentId": "n_u1", "nextId": null, "role": "assistant",
+        "name": "Morgana Vex", "content": "(reply)", "timestamp": 1720000002000 } } }
+}
+  THREAD SHAPE (as in the template): nodes form a linked list. One system-root node (parentId
+  null), every later node's parentId is the previous node and nextId the next, the last nextId
+  is null. Roles used: system-root, user, assistant. rootId names the system-root node.
+
+dad-full  (import WIPES the app, then restores; backup-only fields are kept)
+  { "type": "dad-full", "version": 2, "appVersion": "Dad-CORE v2.0", "date": "ISO time",
+    "config": { "characterBook": { "<charId>": { ...character plus favorite, folder... } },
+                "worldBook": { "version": 1, "activeWorldId": null, "worlds": { } } },
+    "threads": { "<threadId>": { id, title, characterId, rootId, nodes } },
+    "currentThreadId": "<threadId>" }
+  A hand-made backup must warn the user that importing it replaces everything.
+
+user profile (Profile download .UserProfile.json; avatar accepted only as https on import)
+  { "type": "dad-user-profile", "version": 1, "profileLabel": "Main", "chatName": "Jeff",
+    "avatar": null, "systemPromptContext": "(who the player is)" }
+
+Cloud Backup mirror (last 200 messages, text cut at 2000 chars)
+  { "app": "dad-chat", "exported": "ISO time", "count": 2, "items": [
+    { "threadId": "thread_x", "nodeId": "n_u1", "role": "user", "name": "Jeff", "ts": 1720000001000, "text": "..." } ] }
+
+hub publish payload (card bodies live in per-user editable files, not the index)
+  { "type": "dad-char", "version": 3.0, "timestamp": 1720000000000, "data": { id, name, description,
+    systemPrompt, firstMessage[], tags[], lorebook {}, lorebookRefs [] },
+    "meta": { "stripped_images": false, "hub_card": true, "original_id": "char_x" } }
+
+TRANSCRIPTS (.txt, UTF-8 with BOM, neutral name transcript_YYYY-MM-DD_HH-MM.txt)
+  Default: no header. Each turn is "Name:" on its own line, the text on the next lines, a blank
+  line between turns, and an image as a line "[Image: caption]".
+    Jeff:
+    I approach the wagon.
+
+    Morgana Vex:
+    She slides a tin across the counter.
+  With header:true the same turns sit between a title block (DadChat - Chat Transcript, Thread,
+  Character, User, Messages, Exported) and a rule line, with a footer line and link.
+`),
+    pack('dad-file-interop', 'Tavern, Forge, World Info, JanitorAI, dexie and Story Forge file shapes', String.raw`
+Forge character card = Tavern V2 card with data.extensions.forge:
+  { "kind": "character", "world_bible": "(world text)", "user_persona": { "name": "", "description": "" },
+    "source": { "app": "daddy-ai-chat", "type": "dad-char", "id": "char_x" } }
+
+Forge lorebook file (dual cue: dad keys AND a character_book wrapper, same entries twice):
+  { "name": "", "description": "", "characterName": "", "characterId": "", "scan_depth": null,
+    "token_budget": 512, "recursive_scanning": true, "extensions": {}, "entries": [ ...V2 entries ],
+    "character_book": { "name", "description", "extensions": {}, "entries": [ ...V2 entries ] } }
+
+V2 book entry (inside character_book.entries, bare book or Forge file)
+  { "id": 0, "entry_id": 0, "keys": [], "secondary_keys": [], "comment": "Entry name", "name": "Entry name",
+    "content": "", "constant": false, "vectorized": false, "selective": false, "insertion_order": 10,
+    "priority": 10, "enabled": true, "position": "before_char", "case_sensitive": false,
+    "exclude_recursion": false, "scan_depth": null, "display_index": 0, "extensions": {} }
+  Bare V2 book: { name, description, scan_depth 4, token_budget 512, recursive_scanning, extensions, entries: [ ARRAY ] }
+
+SillyTavern World Info: { "entries": { "0": { uid, key[], keysecondary[], comment, content, constant,
+  selective, selectiveLogic, order, position, disable, excludeRecursion, probability, depth, group,
+  scanDepth, sticky, cooldown, delay, displayIndex } } }   entries is an OBJECT, "disable" is the
+  inverse of enabled, "order" is priority, "comment" is the entry name.
+
+JanitorAI lore: a TOP-LEVEL array of { keys[], name, content, priority, constant, enabled }.
+  The lore importer checks arrays first.
+
+Perchance dexie character export:
+  { "formatName": "dexie", "data": { "data": [ { "tableName": "characters", "rows": [
+    { "name", "roleInstruction", "initialMessages": [ { "author": "ai", "content" } ],
+      "reminderMessage", "avatar": { "url" } } ] } ] } }
+  The persona text is roleInstruction and the greetings are initialMessages; confirm the Dad-Chat
+  importer's real mapping before relying on it.
+
+Generic chat log (source for Studio > AI build): { "messages": [ { "role": "user|assistant", "name", "content" } ] }
+
+Story Forge character list (ZIP part): [ { id, name, role, aliases[], appearance, personality,
+  background, relationships, scenario, systemNote, tags[], firstMessage, quotes[] } ]. The ZIP
+  also holds *_World.png, *_Name.png, worldbook.json (a dad-world file) and README.txt.
+
+CONVERSION NOTES: a Tavern V1 card is flat (name, description, personality, scenario, first_mes,
+  mes_example, system_prompt, post_history_instructions, alternate_greetings, tags). V2 and Forge
+  exports are lossy; see the Tavern <-> Dad-native mapping for what each field becomes.
+`),
+    pack('dad-file-weld', 'Weld Skybridge wire shapes (ai, modelInfo, storage, bus)', String.raw`
+A Dad-Chat feature talks to the Weld companion through weld.skybridge (sb.has(...) to detect a
+capability, sb.ai(prompt, options) for completions, the storage and bus calls). Prompts go
+up, completions come down, keys never cross. Every result is DATA ({ ok, ... }), never an
+exception. With no companion present, storage falls back (kv, then persist, then memory) and
+ai reports { ok: false, reason }.
+
+ai request   { "prompt": "(text)", "system": "(optional)", "maxTokens": 200, "temperature": 0.7, "json": false }
+ai result    { "ok": true, "value": "(completion text)" }   or   { "ok": false, "reason": "(why)" }
+modelInfo    { "ok": true, "provider": "companion", "model": "(name)", "contextWindow": 0, "maxOutput": 0 }
+storage link record   { "at": 1720000000000, "protocol": 1 }
+bus envelope          { "channel": "dad:regions", "message": { "generator": "dad-chat", "count": 1 } }
+
+Rules: never put a key, token or webhook URL in a request, a result, a stored record or a bus
+message; check ok before reading value; keep the feature working when the companion is absent.
+`),
     // ------------------------------------------------------------ Tavern / SillyTavern / Chub
     pack('st-layout', 'Where card, lore and chat features live in a chat app', String.raw`
 A chat-card app is a pipeline. Find these stages in the REAL project before editing:
@@ -861,7 +1005,32 @@ sticky...) with the entry names.`,
 Greeting hooks (each a different situation, 2-4 sentences, ends with something {{user}} can
 answer): 1 "Mara is coiling rope when you reach the dock..." 2 "The boiler coughs twice..." 3 "A
 stranger's note is pinned to the ferry bell..." Example dialogue: 4 pairs, each under 40 words,
-all in her voice, none narrating {{user}}'s actions.`
+all in her voice, none narrating {{user}}'s actions.`,
+    'dad-file-validate': String.raw`
+Input: a dad-char file whose description holds three paragraphs of persona, with a lore entry
+using scanDepth 50 and key "Boiler". Findings: "[error] data.description is persona -> systemPrompt,
+bio becomes 1-2 sentences." "[error] lore_1.scanDepth 50 -> null." "[warn] key 'Boiler' -> 'boiler'."
+"[info] detectType: dad-char." Then the corrected file in one fenced block; fine fields stay untouched.`,
+    'dad-file-chat': String.raw`
+Input: five pasted turns between Jeff and Morgana. Output: one dad-char-chat file whose thread has a
+system-root node n_root, then n_u1 -> n_a1 -> n_u2 -> n_a2 -> n_u3, every parentId and nextId set, the
+last nextId null, rootId "n_root", speaker names exactly as pasted. Report "5 turns converted, 0
+dropped". For a transcript request: "Jeff:" line, the text, a blank line, "Morgana Vex:" and so on.`,
+    'dad-file-backup': String.raw`
+Request: "back up my two characters and one chat". Output: one dad-full file with config.characterBook
+holding both characters (folder and favorite kept), threads holding the chat, currentThreadId set to it.
+Checklist: rootId exists, characterId resolves, worldBook present. Warning shown first: "Importing this
+file replaces everything in the app."`,
+    'dad-file-convert': String.raw`
+Input: SillyTavern World Info { entries: { "0": { key: ["boiler","steam"], comment: "Boiler", content: "...", order: 10, disable: false } } }.
+Output: a Dad-native lorebook (version "2.0") entry { name "Boiler", keys ["boiler","steam"], priority 10,
+enabled true, scanDepth null }. Dropped: selectiveLogic, probability, group, sticky, cooldown, delay
+(listed with the entry names).`,
+    'dad-weld-wire': String.raw`
+Request: "let the greeting generator use my own model". Gate on sb.has('ai'); call sb.ai(prompt, { system,
+maxTokens: 200, temperature: 0.7 }) with the request fields shown in the reference; branch on ok; on
+{ ok: false, reason } show the reason and fall back to the existing provider path. No key leaves the
+page, and with no companion the feature behaves exactly as before.`
   };
 
   // Which packs each preset receives (preset id -> pack ids, in display order).
@@ -914,19 +1083,25 @@ all in her voice, none narrating {{user}}'s actions.`
     'dad-ui-polish': ['dad-layout', 'dad-code-rules'],
     'dad-perf-size': ['dad-layout', 'dad-flow', 'dad-rules'],
     'dad-persistence-audit': ['dad-data', 'dad-layout', 'dad-code-rules'],
-    'dad-hub-work': ['dad-hub', 'dad-layout', 'dad-code-rules'],
+    'dad-hub-work': ['dad-hub', 'dad-layout', 'dad-code-rules', 'dad-file-chat'],
     'dad-safety-review': ['dad-layout', 'dad-code-rules', 'dad-hub'],
-    'dad-import-export': ['dad-character', 'dad-world', 'st-dad-map'],
+    'dad-import-export': ['dad-character', 'dad-world', 'dad-file-index', 'st-dad-map'],
     'dad-release-check': ['dad-layout', 'dad-code-rules'],
     // Dad-Chat content skills
     'dad-character-create': ['dad-character', 'dad-lore', 'dad-rules'],
     'dad-character-improve': ['dad-character', 'dad-rules', 'dad-flow'],
     'dad-lore-build': ['dad-lore', 'dad-world', 'dad-rules'],
     'dad-lore-audit': ['dad-lore', 'dad-flow', 'dad-rules'],
-    'dad-world-build': ['dad-world', 'dad-lore', 'dad-rules'],
+    'dad-world-build': ['dad-world', 'dad-lore', 'dad-rules', 'dad-file-index'],
     'dad-token-diet': ['dad-rules', 'dad-character', 'dad-lore'],
     'dad-convert-tavern': ['st-dad-map', 'st-card-v2', 'dad-character', 'dad-lore'],
-    'dad-greetings-examples': ['dad-character', 'dad-rules']
+    'dad-greetings-examples': ['dad-character', 'dad-rules'],
+    // Dad-Chat file template skills
+    'dad-file-validate': ['dad-file-index', 'dad-file-chat', 'dad-file-interop'],
+    'dad-file-chat': ['dad-file-chat', 'dad-file-index'],
+    'dad-file-backup': ['dad-file-chat', 'dad-file-index'],
+    'dad-file-convert': ['dad-file-interop', 'dad-file-index', 'st-dad-map'],
+    'dad-weld-wire': ['dad-file-weld', 'dad-layout', 'dad-code-rules']
   };
 
   const byId = Object.freeze(packs.reduce((m, p) => { m[p.id] = p; return m; }, {}));

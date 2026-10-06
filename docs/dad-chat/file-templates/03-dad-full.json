@@ -1,0 +1,46 @@
+{
+  "type": "dad-full",
+  "version": 2,
+  "appVersion": "Dad-CORE v2.0",
+  "date": "2026-01-01T00:00:00.000Z",
+  "config": {
+    "characterBook": {
+      "char_example_001": {
+        "id": "char_example_001",
+        "name": "Morgana Vex",
+        "description": "A traveling apothecary.",
+        "systemPrompt": "Morgana Vex is a traveling apothecary.",
+        "firstMessage": [
+          "Well? Are you buying herbs or just gawking at my wagon?"
+        ],
+        "tags": [],
+        "lorebook": {},
+        "lorebookRefs": [],
+        "favorite": true,
+        "folder": "frontier"
+      }
+    },
+    "worldBook": {
+      "version": 1,
+      "activeWorldId": null,
+      "worlds": {}
+    }
+  },
+  "threads": {
+    "thread_example_001": {
+      "id": "thread_example_001",
+      "title": "Market Week",
+      "characterId": "char_example_001",
+      "rootId": "n_root",
+      "nodes": {
+        "n_root": {
+          "id": "n_root",
+          "parentId": null,
+          "nextId": null,
+          "role": "system-root"
+        }
+      }
+    }
+  },
+  "currentThreadId": "thread_example_001"
+}

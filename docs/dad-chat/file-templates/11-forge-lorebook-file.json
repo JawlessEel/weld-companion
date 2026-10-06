@@ -1,0 +1,61 @@
+{
+  "name": "Frontier Pack",
+  "description": "Shared frontier lore any character can link.",
+  "characterName": "Frontier Pack",
+  "characterId": "lorebook_example_001",
+  "scan_depth": null,
+  "token_budget": 512,
+  "recursive_scanning": true,
+  "extensions": {},
+  "entries": [
+    {
+      "id": 0,
+      "entry_id": 0,
+      "keys": ["night", "desert", "dark"],
+      "secondary_keys": [],
+      "comment": "Night Desert",
+      "name": "Night Desert",
+      "content": "The desert between towns belongs to coyotes and bandits after sundown.",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "insertion_order": 15,
+      "priority": 15,
+      "enabled": true,
+      "position": "before_char",
+      "case_sensitive": false,
+      "exclude_recursion": false,
+      "scan_depth": null,
+      "display_index": 0,
+      "extensions": {}
+    }
+  ],
+  "character_book": {
+    "name": "Frontier Pack",
+    "description": "Shared frontier lore any character can link.",
+    "extensions": {},
+    "entries": [
+      {
+        "id": 0,
+        "entry_id": 0,
+        "keys": ["night", "desert", "dark"],
+        "secondary_keys": [],
+        "comment": "Night Desert",
+        "name": "Night Desert",
+        "content": "The desert between towns belongs to coyotes and bandits after sundown.",
+        "constant": false,
+        "vectorized": false,
+        "selective": false,
+        "insertion_order": 15,
+        "priority": 15,
+        "enabled": true,
+        "position": "before_char",
+        "case_sensitive": false,
+        "exclude_recursion": false,
+        "scan_depth": null,
+        "display_index": 0,
+        "extensions": {}
+      }
+    ]
+  }
+}
