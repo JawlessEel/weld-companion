@@ -42,6 +42,7 @@
   function snapshotShape(r) {
     if (!isObj(r)) return 'unknown';
     if (isObj(r.bundle) && typeof r.bundle.code === 'string') return 'bundle';
+    if (r.bundle === null && isObj(r.source) && r.source.truncated === true) return 'bundle-pointer';   // over the size cap: only the re-fetch pointer was kept
     if (typeof r.modelText === 'string' || typeof r.outputTemplate === 'string') return 'model-text';
     return 'unknown';
   }
@@ -51,7 +52,7 @@
     if (!isObj(record)) return ['(not an object)'];
     let need = COMMON;
     if (kind === 'chat-copy') need = CHAT_REQUIRED;
-    else if (kind === 'snapshot') need = COMMON.concat(['title']).concat(shape === 'bundle' ? ['bundle'] : shape === 'model-text' ? [] : ['bundle|modelText']);
+    else if (kind === 'snapshot') need = COMMON.concat(['title']).concat(shape === 'bundle' ? ['bundle'] : (shape === 'model-text' || shape === 'bundle-pointer') ? [] : ['bundle|modelText']);
     return need.filter(f => record[f] === undefined || record[f] === null);
   }
 
@@ -127,6 +128,7 @@
           add('Truncated', v.source.truncated === true ? 'yes' + (v.source.reason ? ' (' + text(v.source.reason) + ')' : '') : v.source.truncated === false ? 'no' : '(not reported)');
           add('Coverage', text(v.source.coverage, 200));
         }
+        if (shape === 'bundle-pointer') add('Bundle', 'not stored (truncated); re-fetch from ' + text(isObj(v.source) ? v.source.apiUrl : '', 160));
         if (shape === 'model-text') add('Lists text', (v.modelText || '').length + ' chars');
       }
       const miss = (p.kind === 'chat-copy' || p.kind === 'snapshot') ? missingFields(v, p.kind, shape) : [];

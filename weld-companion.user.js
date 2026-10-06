@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.71.1
+// @version      1.71.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.71.1';
+  var WC_VERSION = '1.71.2';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -11082,7 +11082,7 @@
     "direction": "export + import",
     "detect": "card",
     "group": "share",
-    "text": "{\n  \"spec\": \"chara_card_v2\",\n  \"spec_version\": \"2.0\",\n  \"data\": {\n    \"name\": \"Morgana Vex\",\n    \"description\": \"Morgana Vex is a traveling apothecary crossing the frontier in her herb-laden wagon.\",\n    \"personality\": \"Blunt, practical, secretly kind.\",\n    \"scenario\": \"Her wagon is camped outside a frontier town during market week.\",\n    \"first_mes\": \"Well? Are you buying herbs or just gawking at my wagon?\",\n    \"mes_example\": \"\",\n    \"creator_notes\": \"Exported from DadChat\",\n    \"system_prompt\": \"\",\n    \"post_history_instructions\": \"\",\n    \"alternate_greetings\": [],\n    \"character_book\": {\n      \"name\": \"Morgana Vex — Lorebook\",\n      \"description\": \"\",\n      \"scan_depth\": null,\n      \"token_budget\": 512,\n      \"recursive_scanning\": true,\n      \"extensions\": {},\n      \"entries\": [\n        {\n          \"id\": 0,\n          \"entry_id\": 0,\n          \"keys\": [\"wagon\", \"herbs\", \"apothecary cart\"],\n          \"secondary_keys\": [],\n          \"comment\": \"Herb Wagon\",\n          \"name\": \"Herb Wagon\",\n          \"content\": \"Morgana's wagon holds her livelihood: dried herbs, tinctures, and a sleeping stray dog under the bench.\",\n          \"constant\": false,\n          \"vectorized\": false,\n          \"selective\": false,\n          \"insertion_order\": 10,\n          \"priority\": 10,\n          \"enabled\": true,\n          \"position\": \"before_char\",\n          \"case_sensitive\": false,\n          \"exclude_recursion\": false,\n          \"scan_depth\": null,\n          \"display_index\": 0,\n          \"extensions\": {}\n        }\n      ]\n    },\n    \"tags\": [\"apothecary\"],\n    \"creator\": \"DadChat\",\n    \"character_version\": \"2.0\",\n    \"extensions\": {}\n  }\n}\n"
+    "text": "{\n  \"spec\": \"chara_card_v2\",\n  \"spec_version\": \"2.0\",\n  \"data\": {\n    \"name\": \"Morgana Vex\",\n    \"description\": \"Morgana Vex is a traveling apothecary crossing the frontier in her herb-laden wagon.\",\n    \"personality\": \"A traveling apothecary with a sharp tongue and a soft spot for stray animals.\",\n    \"scenario\": \"Her wagon is camped outside a frontier town during market week.\",\n    \"first_mes\": \"Well? Are you buying herbs or just gawking at my wagon?\",\n    \"mes_example\": \"\",\n    \"creator_notes\": \"Exported from DadChat\",\n    \"system_prompt\": \"\",\n    \"post_history_instructions\": \"\",\n    \"alternate_greetings\": [\n      \"Back again? The good salve is under the counter — for regulars only.\"\n    ],\n    \"character_book\": {\n      \"name\": \"Morgana Vex — Lorebook\",\n      \"description\": \"\",\n      \"scan_depth\": null,\n      \"token_budget\": 512,\n      \"recursive_scanning\": true,\n      \"extensions\": {},\n      \"entries\": [\n        {\n          \"id\": 0,\n          \"entry_id\": 0,\n          \"keys\": [\"wagon\", \"herbs\", \"apothecary cart\"],\n          \"secondary_keys\": [],\n          \"comment\": \"Herb Wagon\",\n          \"name\": \"Herb Wagon\",\n          \"content\": \"Morgana's wagon holds her livelihood: dried herbs, tinctures, and a sleeping stray dog under the bench.\",\n          \"constant\": false,\n          \"vectorized\": false,\n          \"selective\": false,\n          \"insertion_order\": 10,\n          \"priority\": 10,\n          \"enabled\": true,\n          \"position\": \"before_char\",\n          \"case_sensitive\": false,\n          \"exclude_recursion\": false,\n          \"scan_depth\": null,\n          \"display_index\": 0,\n          \"extensions\": {}\n        }\n      ]\n    },\n    \"tags\": [\"apothecary\"],\n    \"creator\": \"DadChat\",\n    \"character_version\": \"2.0\",\n    \"extensions\": {}\n  }\n}\n"
   },
   {
     "file": "10-forge-character-card.json",
@@ -11090,7 +11090,7 @@
     "direction": "export + import",
     "detect": "card",
     "group": "share",
-    "text": "{\n  \"spec\": \"chara_card_v2\",\n  \"spec_version\": \"2.0\",\n  \"data\": {\n    \"name\": \"Morgana Vex\",\n    \"description\": \"Morgana Vex is a traveling apothecary crossing the frontier in her herb-laden wagon.\",\n    \"personality\": \"Blunt, practical, secretly kind.\",\n    \"scenario\": \"Her wagon is camped outside a frontier town during market week.\",\n    \"first_mes\": \"Well? Are you buying herbs or just gawking at my wagon?\",\n    \"mes_example\": \"\",\n    \"creator_notes\": \"Exported from DadChat\",\n    \"system_prompt\": \"\",\n    \"post_history_instructions\": \"\",\n    \"alternate_greetings\": [],\n    \"character_book\": {\n      \"name\": \"Morgana Vex — Lorebook\",\n      \"description\": \"\",\n      \"scan_depth\": null,\n      \"token_budget\": 512,\n      \"recursive_scanning\": true,\n      \"extensions\": {},\n      \"entries\": [\n        {\n          \"id\": 0,\n          \"entry_id\": 0,\n          \"keys\": [\"wagon\", \"herbs\", \"apothecary cart\"],\n          \"secondary_keys\": [],\n          \"comment\": \"Herb Wagon\",\n          \"name\": \"Herb Wagon\",\n          \"content\": \"Morgana's wagon holds her livelihood: dried herbs, tinctures, and a sleeping stray dog under the bench.\",\n          \"constant\": false,\n          \"vectorized\": false,\n          \"selective\": false,\n          \"insertion_order\": 10,\n          \"priority\": 10,\n          \"enabled\": true,\n          \"position\": \"before_char\",\n          \"case_sensitive\": false,\n          \"exclude_recursion\": false,\n          \"scan_depth\": null,\n          \"display_index\": 0,\n          \"extensions\": {}\n        }\n      ]\n    },\n    \"tags\": [\"apothecary\"],\n    \"creator\": \"DadChat\",\n    \"character_version\": \"2.0\",\n    \"extensions\": {\n      \"forge\": {\n        \"kind\": \"character\",\n        \"world_bible\": \"A frontier kingdom where walled market towns dot a wide desert.\",\n        \"user_persona\": {\n          \"name\": \"Jeff\",\n          \"description\": \"\"\n        },\n        \"source\": {\n          \"app\": \"daddy-ai-chat\",\n          \"type\": \"dad-char\",\n          \"id\": \"char_example_001\"\n        }\n      }\n    }\n  }\n}\n"
+    "text": "{\n  \"spec\": \"chara_card_v2\",\n  \"spec_version\": \"2.0\",\n  \"data\": {\n    \"name\": \"Morgana Vex\",\n    \"description\": \"Morgana Vex is a traveling apothecary crossing the frontier in her herb-laden wagon.\",\n    \"personality\": \"A traveling apothecary with a sharp tongue and a soft spot for stray animals.\",\n    \"scenario\": \"Her wagon is camped outside a frontier town during market week.\",\n    \"first_mes\": \"Well? Are you buying herbs or just gawking at my wagon?\",\n    \"mes_example\": \"\",\n    \"creator_notes\": \"Exported from DadChat\",\n    \"system_prompt\": \"\",\n    \"post_history_instructions\": \"\",\n    \"alternate_greetings\": [\n      \"Back again? The good salve is under the counter — for regulars only.\"\n    ],\n    \"character_book\": {\n      \"name\": \"Morgana Vex — Lorebook\",\n      \"description\": \"\",\n      \"scan_depth\": null,\n      \"token_budget\": 512,\n      \"recursive_scanning\": true,\n      \"extensions\": {},\n      \"entries\": [\n        {\n          \"id\": 0,\n          \"entry_id\": 0,\n          \"keys\": [\"wagon\", \"herbs\", \"apothecary cart\"],\n          \"secondary_keys\": [],\n          \"comment\": \"Herb Wagon\",\n          \"name\": \"Herb Wagon\",\n          \"content\": \"Morgana's wagon holds her livelihood: dried herbs, tinctures, and a sleeping stray dog under the bench.\",\n          \"constant\": false,\n          \"vectorized\": false,\n          \"selective\": false,\n          \"insertion_order\": 10,\n          \"priority\": 10,\n          \"enabled\": true,\n          \"position\": \"before_char\",\n          \"case_sensitive\": false,\n          \"exclude_recursion\": false,\n          \"scan_depth\": null,\n          \"display_index\": 0,\n          \"extensions\": {}\n        }\n      ]\n    },\n    \"tags\": [\"apothecary\"],\n    \"creator\": \"DadChat\",\n    \"character_version\": \"2.0\",\n    \"extensions\": {\n      \"forge\": {\n        \"kind\": \"character\",\n        \"world_bible\": \"A frontier kingdom where walled market towns dot a wide desert.\",\n        \"user_persona\": {\n          \"name\": \"Jeff\",\n          \"description\": \"\"\n        },\n        \"source\": {\n          \"app\": \"daddy-ai-chat\",\n          \"type\": \"dad-char\",\n          \"id\": \"char_example_001\"\n        }\n      }\n    }\n  }\n}\n"
   },
   {
     "file": "11-forge-lorebook-file.json",
@@ -11218,7 +11218,7 @@
     "direction": "wire",
     "detect": "",
     "group": "weld",
-    "text": "{\n  \"at\": 1720000000000,\n  \"protocol\": 1\n}\n"
+    "text": "{\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"backend\": \"companion\",\n  \"build\": \"sb-plugin/2026-06-25.2\"\n}\n"
   },
   {
     "file": "27-weld-bus-envelope.json",
@@ -11234,7 +11234,7 @@
     "direction": "wire",
     "detect": "",
     "group": "weld",
-    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"example-generator\",\n  \"folder\": \"weld:genvault:example-generator/\",\n  \"savedBy\": \"example-generator\",\n  \"name\": \"vault-1\",\n  \"kind\": \"dad-full\",\n  \"size\": 123456,\n  \"redacted\": 1,\n  \"data\": {\n    \"threads\": {},\n    \"currentThreadId\": null,\n    \"config\": {\n      \"characterBook\": {},\n      \"pollinationsApiKey\": \"[redacted]\"\n    }\n  }\n}\n"
+    "text": "{\n  \"chatCopy\": {\n    \"key\": \"weld:genvault:<generator>/chat/snap-<at>-<rand6>\",\n    \"index\": \"weld:genvault:<generator>/chat/index\",\n    \"record\": {\n      \"v\": 1,\n      \"at\": 1720000000000,\n      \"protocol\": 1,\n      \"generator\": \"dad-chat-sync\",\n      \"folder\": \"weld:genvault:dad-chat-sync/\",\n      \"savedBy\": \"dad-chat-sync\",\n      \"name\": \"vault-1\",\n      \"kind\": \"dad-full\",\n      \"size\": 123456,\n      \"redacted\": 1,\n      \"data\": {\n        \"threads\": {},\n        \"currentThreadId\": null,\n        \"config\": {\n          \"characterBook\": {},\n          \"pollinationsApiKey\": \"[redacted]\"\n        }\n      }\n    }\n  },\n  \"generatorCopy\": {\n    \"key\": \"weld:genvault:<generator>/snapshot\",\n    \"note\": \"Download-only, never restored. Covers main.pjs + imports list ONLY.\",\n    \"record\": {\n      \"v\": 1,\n      \"at\": 1720000000000,\n      \"protocol\": 1,\n      \"generator\": \"dad-chat-sync\",\n      \"folder\": \"weld:genvault:dad-chat-sync/\",\n      \"savedBy\": \"dad-chat-sync\",\n      \"title\": \"DadChat | Unrestricted AI Chat\",\n      \"bundle\": {\n        \"name\": \"dad-chat-sync\",\n        \"imports\": [\"kv-plugin\", \"ai-text-plugin\", \"text-to-image-plugin\"],\n        \"code\": \"<main.pjs source, abbreviated here>\"\n      },\n      \"source\": {\n        \"apiUrl\": \"https://perchance.org/api/getGeneratorsAndDependencies?generatorNames=dad-chat-sync\",\n        \"fetchedAt\": 1720000000000,\n        \"bytes\": 15949,\n        \"truncated\": false,\n        \"reason\": \"\",\n        \"coverage\": \"main.pjs code + imports list; index.html and src/ files are not exposed by this endpoint and are NOT included\"\n      }\n    },\n    \"truncatedVariant\": \"When the bundle exceeds ~1.5M chars: same shape with bundle:null, source.truncated:true, and source.reason naming the cap. The pointer (apiUrl) is kept so the copy can be re-fetched.\"\n  },\n  \"_siblingNote\": \"Sibling generators use the same keys but may omit the chat copy's redacted count and store generator copies as {title, modelText, outputTemplate, srcManifest} (no bundle/source). Key shape + generator stamping is the contract, not field identity.\"\n}\n"
   },
   {
     "file": "29-vault-generator-copy-bundle.json",
@@ -15396,45 +15396,45 @@ rate-limited, no-own-model, timeout, network-error. Branch on ok and show the re
 
 Purpose: let any dad-chat-family generator keep persistent off-origin backup
 copies through companion storage, surviving browser cache resets. (Sender
-reference: dad-chat-sync \`src/gen-vault.js\`, skybridge protocol 1. Replaces
+reference: dad-chat-sync ${'`'}src/gen-vault.js${'`'}, skybridge protocol 1. Replaces
 the older vault skill text — that one documented a sibling-only shape.)
 
-Key namespaces (all values JSON, up to ~2MB; \`get\` is null-safe on miss):
-- \`weld:genvault:<gen>/snapshot\` — generator-source copy, ONE key per
-  generator. \`<gen>\` matches \`^[a-z0-9-]{1,64}$\`.
-- \`weld:genvault:<gen>/chat/index\` — chat-copy index (array of
-  \`{name, key, takenAt, threadCount, charCount}\`).
-- \`weld:genvault:<gen>/chat/snap-<at>-<rand6>\` — chat copies (max 10/gen):
-  \`{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full",
-  size, redacted, data:{threads, currentThreadId, config}}\`. \`redacted\` is
+Key namespaces (all values JSON, up to ~2MB; ${'`'}get${'`'} is null-safe on miss):
+- ${'`'}weld:genvault:<gen>/snapshot${'`'} — generator-source copy, ONE key per
+  generator. ${'`'}<gen>${'`'} matches ${'`'}^[a-z0-9-]{1,64}$${'`'}.
+- ${'`'}weld:genvault:<gen>/chat/index${'`'} — chat-copy index (array of
+  ${'`'}{name, key, takenAt, threadCount, charCount}${'`'}).
+- ${'`'}weld:genvault:<gen>/chat/snap-<at>-<rand6>${'`'} — chat copies (max 10/gen):
+  ${'`'}{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full",
+  size, redacted, data:{threads, currentThreadId, config}}${'`'}. ${'`'}redacted${'`'} is
   OPTIONAL (sibling senders omit it) — never require it.
 - Generator-copy records come in TWO shapes — support both, never assume one:
-  (a) \`{v, at, protocol, generator, folder, savedBy, title,
+  (a) ${'`'}{v, at, protocol, generator, folder, savedBy, title,
   bundle:{name,imports,code}, source:{apiUrl,fetchedAt,bytes,truncated,
-  reason,coverage}}\` (note: covers main.pjs + imports only — index.html and
-  src/ files are NOT in it); (b) \`{v, at, protocol, generator, folder,
-  savedBy, title, modelText, outputTemplate, srcManifest}\`.
-- Legacy \`dadchat:vault:index\` + \`dadchat:vault:*\`: read-only visibility.
+  reason,coverage}}${'`'} (note: covers main.pjs + imports only — index.html and
+  src/ files are NOT in it); (b) ${'`'}{v, at, protocol, generator, folder,
+  savedBy, title, modelText, outputTemplate, srcManifest}${'`'}.
+- Legacy ${'`'}dadchat:vault:index${'`'} + ${'`'}dadchat:vault:*${'`'}: read-only visibility.
   Generators own migration; the app never migrates, renames, or deletes these.
 
-Ops: \`set\` (write/overwrite), \`get\` (null-safe), \`list\` (prefix match on
-\`weld:genvault:\`). Resolve result objects (\`{ok:true,…}\` / \`{ok:false,
-reason}\`) — never throw across the bridge.
-Bus: relay \`dad:genvault\` envelopes \`{v:1, type:"vault-updated", generator,
-at, from}\` (~2KB cap, drop malformed) so member views refresh. Never publish
+Ops: ${'`'}set${'`'} (write/overwrite), ${'`'}get${'`'} (null-safe), ${'`'}list${'`'} (prefix match on
+${'`'}weld:genvault:${'`'}). Resolve result objects (${'`'}{ok:true,…}${'`'} / ${'`'}{ok:false,
+reason}${'`'}) — never throw across the bridge.
+Bus: relay ${'`'}dad:genvault${'`'} envelopes ${'`'}{v:1, type:"vault-updated", generator,
+at, from}${'`'} (~2KB cap, drop malformed) so member views refresh. Never publish
 on member channels yourself.
 Consent: vault reads/writes ride the standard per-capability storage consent.
-Denial resolves \`{ok:false, reason:'denied by the user'}\` — senders fall back
+Denial resolves ${'`'}{ok:false, reason:'denied by the user'}${'`'} — senders fall back
 to kv, then memory, on their own.
 Privacy: never log or persist storage values, prompts, keys, or tokens
 outside the storage tier itself. Records arrive secret-redacted
-(\`[redacted]\`); sibling records may carry a \`redacted\` count or not. Never
+(${'`'}[redacted]${'`'}); sibling records may carry a ${'`'}redacted${'`'} count or not. Never
 un-redact, and flag (never transmit) any plaintext secret-shaped value found.
-Custodian rule: never rewrite \`generator\`/\`folder\`, never move keys across
+Custodian rule: never rewrite ${'`'}generator${'`'}/${'`'}folder${'`'}, never move keys across
 owners, never "repair" records, exact-key deletes only with user confirm.
 
-Health check: generator \`dad-chat-sync\` round-trips (set → get → list shows
-\`weld:genvault:dad-chat-sync/snapshot\`); a mismatched-\`generator\` record is
+Health check: generator ${'`'}dad-chat-sync${'`'} round-trips (set → get → list shows
+${'`'}weld:genvault:dad-chat-sync/snapshot${'`'}); a mismatched-${'`'}generator${'`'} record is
 refused everywhere except byte-identical passthrough reads.
 `),
     pack('dad-skill-session-slots', 'Skill: dadchat-session-slots (local save slots, file compatibility)', String.raw`
@@ -15442,20 +15442,20 @@ refused everywhere except byte-identical passthrough reads.
 
 Purpose: the named-restore-point system of dad-chat-family generators, for
 reimplementation or file-level compatibility elsewhere. (Reference: dad-chat-sync
-\`SaveSlots\`, \`src/app.js\`, \`window.SaveSlots\` + \`window.openSaveSlots()\`.)
+${'`'}SaveSlots${'`'}, ${'`'}src/app.js${'`'}, ${'`'}window.SaveSlots${'`'} + ${'`'}window.openSaveSlots()${'`'}.)
 
 Scope note: slots live in each generator's LOCAL kv store — the companion
 app never sees them live and MUST NOT try to sync, mirror, or manage them.
 This skill exists so files exported from slots stay readable/writable by
 other tools, and so the slot system can be rebuilt faithfully elsewhere.
 
-Keys (local kv folder, e.g. \`kv.chatApp\`): index \`save_slots\` (object
-id → \`{name, takenAt, threadCount, charCount, currentTitle}\`) + one record
-per slot at \`saveslot:<id>\`, id = \`slot_<base36time>_<rand6>\`
-(\`/^slot_[a-z0-9]+_[a-z0-9]+$/\`). Existing session keys (\`threads\`,
-\`current_thread_id\`, \`config\`) are never touched by slot writes.
-Record: \`{version:1, name, takenAt,
-data:{threads, currentThreadId, config}}\` — a full live snapshot (threads =
+Keys (local kv folder, e.g. ${'`'}kv.chatApp${'`'}): index ${'`'}save_slots${'`'} (object
+id → ${'`'}{name, takenAt, threadCount, charCount, currentTitle}${'`'}) + one record
+per slot at ${'`'}saveslot:<id>${'`'}, id = ${'`'}slot_<base36time>_<rand6>${'`'}
+(${'`'}/^slot_[a-z0-9]+_[a-z0-9]+$/${'`'}). Existing session keys (${'`'}threads${'`'},
+${'`'}current_thread_id${'`'}, ${'`'}config${'`'}) are never touched by slot writes.
+Record: ${'`'}{version:1, name, takenAt,
+data:{threads, currentThreadId, config}}${'`'} — a full live snapshot (threads =
 branch-tree map, config = whole config incl. characterBook). Max 8 slots;
 names 1–40 printable chars, no control chars, unique case-insensitively,
 confirm before replace. Validate on list AND restore (version, name,
@@ -15464,16 +15464,16 @@ for deletion, never applied.
 Flows: save clones the LIVE objects; restore always confirms (stronger
 wording while generation/pending-save runs), stops live generation, then
 assign → per-thread image migration → persist → reload. Quota failure toasts
-a recovery path (download slot as \`dad-full\` file, delete old slots) and
+a recovery path (download slot as ${'`'}dad-full${'`'} file, delete old slots) and
 never half-writes. Delete offers download-first. Slots survive factory reset
 — they are the recovery path.
 NOT snapshotted: image blobs + per-thread VFS workspaces (shared live by
 uuid; restores are instant, placeholders only if the image store was wiped).
-File shape: slot downloads are \`dad-full\` JSON — see skill
-\`dadchat-dad-full\`. Slot keys can never collide with \`weld:genvault:*\` or
-\`dadchat:vault:*\` (disjoint namespaces by construction, local-kv only).
+File shape: slot downloads are ${'`'}dad-full${'`'} JSON — see skill
+${'`'}dadchat-dad-full${'`'}. Slot keys can never collide with ${'`'}weld:genvault:*${'`'} or
+${'`'}dadchat:vault:*${'`'} (disjoint namespaces by construction, local-kv only).
 
-Health check: save → index + \`saveslot:*\` exist, session keys untouched;
+Health check: save → index + ${'`'}saveslot:*${'`'} exist, session keys untouched;
 restore round-trips counts; reset keeps slots restorable.
 `),
     pack('dad-skill-presence-bus', 'Skill: dadchat-presence-bus (presence and dad:genvault channels)', String.raw`
@@ -15481,99 +15481,99 @@ restore round-trips counts; reset keeps slots restorable.
 
 Purpose: the two skybridge-bus channels dad-chat-family generators use, and
 what the companion app relays vs owns. (Reference: dad-chat-sync
-\`src/weld-bridge.js\`; bus used only when the companion advertises \`bus\`.)
+${'`'}src/weld-bridge.js${'`'}; bus used only when the companion advertises ${'`'}bus${'`'}.)
 
-\`dad-chat:presence\` — per-tab liveness. Envelopes
-\`{v:1, type, id, from, gen, at}\` where type is \`presence\` or \`presence-bye\`,
-\`id\` = \`<tabId>:<seq>\`, \`from\` = tab id (8–64 chars \`[A-Za-z0-9_-]\`), \`gen\` =
-generator tag (≤64), \`at\` = epoch ms. Validation (relay AND display): object,
-≤2048 serialized chars, \`v:1\`, known type, non-empty \`from\` (≤64), \`at\` sane
-and within ±5 min, \`id\` present (≤96), \`gen\` string (≤64). Beats every ~20s;
-peers expire after ~60s silence; \`presence-bye\` on tab hide. Own-tab echoes
+${'`'}dad-chat:presence${'`'} — per-tab liveness. Envelopes
+${'`'}{v:1, type, id, from, gen, at}${'`'} where type is ${'`'}presence${'`'} or ${'`'}presence-bye${'`'},
+${'`'}id${'`'} = ${'`'}<tabId>:<seq>${'`'}, ${'`'}from${'`'} = tab id (8–64 chars ${'`'}[A-Za-z0-9_-]${'`'}), ${'`'}gen${'`'} =
+generator tag (≤64), ${'`'}at${'`'} = epoch ms. Validation (relay AND display): object,
+≤2048 serialized chars, ${'`'}v:1${'`'}, known type, non-empty ${'`'}from${'`'} (≤64), ${'`'}at${'`'} sane
+and within ±5 min, ${'`'}id${'`'} present (≤96), ${'`'}gen${'`'} string (≤64). Beats every ~20s;
+peers expire after ~60s silence; ${'`'}presence-bye${'`'} on tab hide. Own-tab echoes
 and duplicate ids are ignored; malformed messages count as ignored, never
 error. The app's role: relay + count peers per tab. It never synthesizes
 presence for a generator.
-\`dad:genvault\` — vault change notices. Envelopes \`{v:1,
-type:"vault-updated", generator, at, from}\`, ~2KB cap. Purpose: refresh open
+${'`'}dad:genvault${'`'} — vault change notices. Envelopes ${'`'}{v:1,
+type:"vault-updated", generator, at, from}${'`'}, ~2KB cap. Purpose: refresh open
 vault views cross-tab. The app relays and may refresh its own family-section
 view; it NEVER publishes these (generators announce their own saves/deletes).
-\`dad:regions\` is server-side pubsub (hub live-region counts), NOT companion
+${'`'}dad:regions${'`'} is server-side pubsub (hub live-region counts), NOT companion
 bus — the family section does not subscribe to it; per-country presence is
 the hub server's job.
 General bus rules: small envelopes only; validate shape + size, drop
-malformed silently with a counter; \`{ok:false, reason}\` on denial/failure,
+malformed silently with a counter; ${'`'}{ok:false, reason}${'`'} on denial/failure,
 never throw; no routing of chats and no channel subscriptions on a member's
 behalf — AI and bus stay opt-in helpers.
 
-Health check: two tabs beating show "1 other tab" each; a \`vault-updated\`
+Health check: two tabs beating show "1 other tab" each; a ${'`'}vault-updated${'`'}
 envelope refreshes the family view within seconds; malformed envelopes
 increment the ignored counter and nothing else.
 `),
     pack('dad-skill-dad-full', 'Skill: dadchat-dad-full (dad-full JSON envelope)', String.raw`
 ## dadchat-dad-full
 
-Purpose: the \`dad-full\` JSON envelope — the interchange format for full
+Purpose: the ${'`'}dad-full${'`'} JSON envelope — the interchange format for full
 session payloads across the dad-chat family. Download it, read it, write it
-compatibly. (Reference: dad-chat-sync template \`src/file-templates/
-03-dad-full.json\`; producers: slot download, vault chat-copy download, full
+compatibly. (Reference: dad-chat-sync template ${'`'}src/file-templates/
+03-dad-full.json${'`'}; producers: slot download, vault chat-copy download, full
 backup.)
 
-Envelope: \`{type:"dad-full", version:2, appVersion:"Dad-CORE v2.0",
-date:<ISO>, config, threads, currentThreadId}\` plus provenance (\`slotName\`
-for slot files, \`vaultName\` for vault files — either, never both required).
-- \`config\`: whole config object — \`characterBook\` (Dad-native character
-  objects per \`src/dad-native-format.md\` §1: id/name/avatar/description/
+Envelope: ${'`'}{type:"dad-full", version:2, appVersion:"Dad-CORE v2.0",
+date:<ISO>, config, threads, currentThreadId}${'`'} plus provenance (${'`'}slotName${'`'}
+for slot files, ${'`'}vaultName${'`'} for vault files — either, never both required).
+- ${'`'}config${'`'}: whole config object — ${'`'}characterBook${'`'} (Dad-native character
+  objects per ${'`'}src/dad-native-format.md${'`'} §1: id/name/avatar/description/
   systemPrompt/profile/exampleDialogue/firstMessage/tags/lorebook/
-  lorebookRefs…), \`worldBook\` (\`{version, activeWorldId, worlds}\`), settings.
-  Local-only fields may be present (\`lorebookArchive\`, \`lastLoreRun\`,
-  per-entry \`useCount/lastInjectedAt\`) — a compatible reader MUST ignore and
-  MUST NOT author them. Secret-shaped values should arrive as \`[redacted]\`;
+  lorebookRefs…), ${'`'}worldBook${'`'} (${'`'}{version, activeWorldId, worlds}${'`'}), settings.
+  Local-only fields may be present (${'`'}lorebookArchive${'`'}, ${'`'}lastLoreRun${'`'},
+  per-entry ${'`'}useCount/lastInjectedAt${'`'}) — a compatible reader MUST ignore and
+  MUST NOT author them. Secret-shaped values should arrive as ${'`'}[redacted]${'`'};
   treat any plaintext secret-shaped value as untrusted (flag, never forward).
-- \`threads\`: map id → \`{id, title, characterId, rootId, nodes:{id →
-  {id, parentId, nextId, role, content…}}}\` — a branch tree; the active
-  branch is what renders. \`currentThreadId\` may be null (empty session).
-- Filenames: \`dad-save-<safe-name>-<epoch>.json\` (slots),
-  \`genvault_<gen>_chat_<safe-name>-<epoch>.json\` (vault copies).
-- Writers: Dad-native shapes only, never Tavern; \`{{char}}\`/\`{{user}}\` are
+- ${'`'}threads${'`'}: map id → ${'`'}{id, title, characterId, rootId, nodes:{id →
+  {id, parentId, nextId, role, content…}}}${'`'} — a branch tree; the active
+  branch is what renders. ${'`'}currentThreadId${'`'} may be null (empty session).
+- Filenames: ${'`'}dad-save-<safe-name>-<epoch>.json${'`'} (slots),
+  ${'`'}genvault_<gen>_chat_<safe-name>-<epoch>.json${'`'} (vault copies).
+- Writers: Dad-native shapes only, never Tavern; ${'`'}{{char}}${'`'}/${'`'}{{user}}${'`'} are
   the only placeholders (literal replace at prompt time — never evaluate
-  text on import). Readers: validate \`type\`/\`version\`/threads/config before
+  text on import). Readers: validate ${'`'}type${'`'}/${'`'}version${'`'}/threads/config before
   applying anything; damaged payloads are refused with the reason named,
   never partially applied.
 
 Health check: a slot-downloaded file re-imports with identical thread and
-character counts; a tampered \`type\` field is refused with a named reason.
+character counts; a tampered ${'`'}type${'`'} field is refused with a named reason.
 `),
     pack('dad-skill-wire-envelopes', 'Skill: dadchat-wire-envelopes (ai, model, storage, bus shapes)', String.raw`
 ## dadchat-wire-envelopes
 
 Purpose: compact reference for every small wire shape between
 dad-chat-family generators and the companion app. (References: dad-chat-sync
-\`src/file-templates/23–27\`, \`src/weld-bridge.js\`.)
+${'`'}src/file-templates/23–27${'`'}, ${'`'}src/weld-bridge.js${'`'}.)
 
-- AI request (generator → app): \`{prompt, system?, maxTokens?, temperature?,
-  json?}\` (template 23). Prompts are opaque text — never log or persist them.
-  Cap \`maxTokens\` to the model's \`maxOutput\` when known.
-- AI result (app → generator): \`{ok:true, value}\` or \`{ok:false, reason}\`
-  (template 24). Reasons are short machine strings (\`unsupported\`,
-  \`disconnected\`, \`denied…\`, \`error\`) — never stack traces, never key
+- AI request (generator → app): ${'`'}{prompt, system?, maxTokens?, temperature?,
+  json?}${'`'} (template 23). Prompts are opaque text — never log or persist them.
+  Cap ${'`'}maxTokens${'`'} to the model's ${'`'}maxOutput${'`'} when known.
+- AI result (app → generator): ${'`'}{ok:true, value}${'`'} or ${'`'}{ok:false, reason}${'`'}
+  (template 24). Reasons are short machine strings (${'`'}unsupported${'`'},
+  ${'`'}disconnected${'`'}, ${'`'}denied…${'`'}, ${'`'}error${'`'}) — never stack traces, never key
   material.
-- Model info (app → generator): \`{ok:true, provider, model, contextWindow,
-  maxOutput}\` (template 25). Absent companion model → \`{ok:false,
-  reason:"no-own-model"}\` — healthy bridge, not a fault; display honestly.
+- Model info (app → generator): ${'`'}{ok:true, provider, model, contextWindow,
+  maxOutput}${'`'} (template 25). Absent companion model → ${'`'}{ok:false,
+  reason:"no-own-model"}${'`'} — healthy bridge, not a fault; display honestly.
 - Storage record (either direction): any JSON value up to ~2MB; the minimal
-  shape is \`{at, protocol}\` (template 26, the link-record shape
-  \`weld:link-record\` \`{at, protocol, backend, build}\`). \`get\` on missing keys
-  resolves null inside \`{ok:true}\`; \`list(prefix)\` returns matching keys
+  shape is ${'`'}{at, protocol}${'`'} (template 26, the link-record shape
+  ${'`'}weld:link-record${'`'} ${'`'}{at, protocol, backend, build}${'`'}). ${'`'}get${'`'} on missing keys
+  resolves null inside ${'`'}{ok:true}${'`'}; ${'`'}list(prefix)${'`'} returns matching keys
   (may include tombstoned keys — surface as stale, never purge).
-- Bus envelope (either direction): \`{v:1, type, …fields}\` ≤ ~2KB (template
-  27 shows the shape class). Known types: \`presence\` / \`presence-bye\` (channel
-  \`dad-chat:presence\`), \`vault-updated\` (channel \`dad:genvault\`). Validate
-  \`v\` + \`type\` + size; drop malformed with a counter.
-- Universal: every cross-bridge call resolves a result object — \`{ok:true,…}\`
-  or \`{ok:false, reason}\` — and NEVER throws across the bridge.
+- Bus envelope (either direction): ${'`'}{v:1, type, …fields}${'`'} ≤ ~2KB (template
+  27 shows the shape class). Known types: ${'`'}presence${'`'} / ${'`'}presence-bye${'`'} (channel
+  ${'`'}dad-chat:presence${'`'}), ${'`'}vault-updated${'`'} (channel ${'`'}dad:genvault${'`'}). Validate
+  ${'`'}v${'`'} + ${'`'}type${'`'} + size; drop malformed with a counter.
+- Universal: every cross-bridge call resolves a result object — ${'`'}{ok:true,…}${'`'}
+  or ${'`'}{ok:false, reason}${'`'} — and NEVER throws across the bridge.
 
-Health check: \`modelInfo\` → ok-shape or honest \`no-own-model\`; storage
-self-test \`set=true get=true list=true\`; an over-size bus message is dropped
+Health check: ${'`'}modelInfo${'`'} → ok-shape or honest ${'`'}no-own-model${'`'}; storage
+self-test ${'`'}set=true get=true list=true${'`'}; an over-size bus message is dropped
 and counted.
 `),
     // ------------------------------------------------------------ Tavern / SillyTavern / Chub
@@ -17072,6 +17072,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
   function snapshotShape(r) {
     if (!isObj(r)) return 'unknown';
     if (isObj(r.bundle) && typeof r.bundle.code === 'string') return 'bundle';
+    if (r.bundle === null && isObj(r.source) && r.source.truncated === true) return 'bundle-pointer';   // over the size cap: only the re-fetch pointer was kept
     if (typeof r.modelText === 'string' || typeof r.outputTemplate === 'string') return 'model-text';
     return 'unknown';
   }
@@ -17081,7 +17082,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     if (!isObj(record)) return ['(not an object)'];
     let need = COMMON;
     if (kind === 'chat-copy') need = CHAT_REQUIRED;
-    else if (kind === 'snapshot') need = COMMON.concat(['title']).concat(shape === 'bundle' ? ['bundle'] : shape === 'model-text' ? [] : ['bundle|modelText']);
+    else if (kind === 'snapshot') need = COMMON.concat(['title']).concat(shape === 'bundle' ? ['bundle'] : (shape === 'model-text' || shape === 'bundle-pointer') ? [] : ['bundle|modelText']);
     return need.filter(f => record[f] === undefined || record[f] === null);
   }
 
@@ -17157,6 +17158,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
           add('Truncated', v.source.truncated === true ? 'yes' + (v.source.reason ? ' (' + text(v.source.reason) + ')' : '') : v.source.truncated === false ? 'no' : '(not reported)');
           add('Coverage', text(v.source.coverage, 200));
         }
+        if (shape === 'bundle-pointer') add('Bundle', 'not stored (truncated); re-fetch from ' + text(isObj(v.source) ? v.source.apiUrl : '', 160));
         if (shape === 'model-text') add('Lists text', (v.modelText || '').length + ' chars');
       }
       const miss = (p.kind === 'chat-copy' || p.kind === 'snapshot') ? missingFields(v, p.kind, shape) : [];

@@ -21,7 +21,7 @@ correctly. Files are prefixed in intake/output groups:
 | 06 | `lorebook-standalone.json` | Standalone ⬇ Export + IMPORT | `lorebook` | Linked-book export. Has `lorebookId`. |
 | 07 | `lore-entry.json` | AUTHORING fragment | — (one entry) | Single entry schema used in 01/04/05/06. |
 | 08 | `tavern-v1.json` | IMPORT only (flat card) | `tavern-v1` | Legacy flat shape. Never author exports in this. |
-| 09 | `tavern-v2.json` | EXPORT PNG-card payload + IMPORT | `tavern-v2` | `chara_card_v2`. PNG `chara` chunk holds this (base64). |
+| 09 | `tavern-v2.json` | EXPORT PNG-card payload + IMPORT | `tavern-v2` | `chara_card_v2`. PNG `chara` chunk holds this (base64). Export mapping: persona→`description`, short bio→`personality`, `firstMessage[]`→`first_mes`+`alternate_greetings`, reminder→`post_history_instructions`; `mes_example` always empty. |
 | 10 | `forge-character-card.json` | EXPORT Forge & Lore + IMPORT | `tavern-v2` + forge | CCV2 + `extensions.forge` (kind/world_bible/user_persona). |
 | 11 | `forge-lorebook-file.json` | EXPORT ⬇ Lorebook + IMPORT | `lorebook` | Dual-cue file: dad keys + `character_book` wrapper. |
 | 12 | `st-world-info.json` | IMPORT (lore tab + Studio) | `lorebook` | SillyTavern World Info: `entries` is an OBJECT. |
@@ -33,10 +33,10 @@ correctly. Files are prefixed in intake/output groups:
 | 18 | `chat-transcript-header.txt` | EXPORT variant (`header:true`) | — (text) | Same turns + title block + footer link. |
 | 19 | `dad-user-profile.json` | Profile ⬇/⬆ `.UserProfile.json` | — | `{type:"dad-user-profile"}`. Avatar https-only on import. |
 | 20 | `cloud-backup.json` | Cloud Backup mirror file | — | `{app,exported,count,items[]}` ≤200 msgs, text ≤2000 chars. |
-| 21 | `storyforge-characters.json` | Story Forge ZIP part | — | ZIP also holds `*_World.png`, `*_Name.png`, `worldbook.json` (= 04), `README.txt`. |
+| 21 | `storyforge-characters.json` | Story Forge ZIP part (`characters.json`) | — | ZIP also holds `<base>_World.png`, per-character `<base>_<Name>.png` cards, `worldbook.json` (= 04), `README.txt`. Array of extraction sheets (id/name/role/aliases/appearance/personality/background/relationships/scenario/systemNote/tags/firstMessage/quotes). |
 | 22 | `dad-char-hub.json` | Hub publish payload | `dad-char` | `{type:"dad-char",version:3.0,timestamp,data,meta}`. Card bodies live in per-user editable files. |
 | 23–27 | `weld-*.json` | Weld Skybridge wire shapes | — | `ai` request/result, `modelInfo` result, storage link record, bus envelope. |
-| 28 | `vault-snapshot.json` | Vault chat copy (Weld storage) | — | `{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full", size, redacted, data:{…}}` at `weld:genvault:<generator>/chat/snap-<at>-<rand6>`. `redacted` (a count of redacted secret values) is OPTIONAL: some generators omit it. The tag in the example is a placeholder; every generator stamps its own. |
+| 28 | `vault-snapshot.json` | Vault save (Weld storage) | — | Two examples. Chat copy at `weld:genvault:<generator>/chat/snap-…` (index at `…/chat/index`): `{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full", size, redacted, data:{threads,currentThreadId,config}}`. Generator copy at `weld:genvault:<generator>/snapshot` (download-only): `{v, at, protocol, generator, folder, savedBy, title, bundle:{name,imports,code}, source:{apiUrl,fetchedAt,bytes,truncated,reason,coverage}}` — main.pjs + imports only; `bundle:null` + `truncated:true` pointer when over ~1.5M chars. |
 | 29 | `vault-generator-copy-bundle.json` | Vault generator copy, bundle shape | — | `{v, at, protocol, generator, folder, savedBy, title, bundle:{name,imports,code}, source:{apiUrl,fetchedAt,bytes,truncated,reason,coverage}}` at `weld:genvault:<generator>/snapshot`. Covers the lists panel and imports only. |
 | 30 | `vault-generator-copy-modeltext.json` | Vault generator copy, modelText shape | — | `{v, at, protocol, generator, folder, savedBy, title, modelText, outputTemplate, srcManifest}` at the same key. A different generator may write this shape instead of 29; readers must accept both. |
 | 31 | `vault-chat-index.json` | Vault chat index | — | Array of `{name, key, takenAt, threadCount, charCount}` at `weld:genvault:<generator>/chat/index`. |

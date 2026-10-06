@@ -118,6 +118,7 @@ for (const [id, list] of Object.entries(Refs.links)) {
 }
 for (const id of Object.keys(Refs.examples)) assert.ok(C.get(id), 'example for unknown preset ' + id);
 assert.equal(new Set(Refs.packs.map(p => p.id)).size, Refs.packs.length);
+assert.ok(Refs.packs.filter(p => /^dad-skill-/.test(p.id)).every(p => !p.text.includes('\\`') && p.text.includes('`')), 'family skill packs keep their backticks verbatim');
 assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000')));
 // Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');

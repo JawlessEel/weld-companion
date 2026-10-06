@@ -82,12 +82,19 @@ assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkS
 {
   const T = require('../src/dad-templates.js'), tpl = f => JSON.parse(T.byFile[f].text);
   const g = (key, value) => C.inspect({ key, caller: 'example-generator', size: 10, value }, { keys: [key] });
+  const gt = (key, value) => C.inspect({ key, caller: 'dad-chat-sync', size: 10, value }, { keys: [key] });
+  // the generator's own combined template: its chat copy and generator copy validate under ITS tag, and the truncated pointer is a known shape
+  const own = tpl('28-vault-snapshot.json');
+  assert.deepEqual(gt('weld:genvault:dad-chat-sync/snapshot', own.generatorCopy.record).anomalies, []);
+  assert.deepEqual(gt('weld:genvault:dad-chat-sync/chat/snap-1720000000000-abc123', own.chatCopy.record).anomalies, []);
+  const ptr = Object.assign({}, own.generatorCopy.record, { bundle: null, source: Object.assign({}, own.generatorCopy.record.source, { truncated: true, reason: 'over cap' }) });
+  assert.deepEqual([gt('weld:genvault:dad-chat-sync/snapshot', ptr).shape, gt('weld:genvault:dad-chat-sync/snapshot', ptr).anomalies], ['bundle-pointer', []]);
   assert.deepEqual(g('weld:genvault:example-generator/snapshot', tpl('29-vault-generator-copy-bundle.json')).anomalies, []);
   assert.deepEqual(g('weld:genvault:example-generator/snapshot', tpl('30-vault-generator-copy-modeltext.json')).anomalies, []);
   assert.equal(g('weld:genvault:example-generator/snapshot', tpl('29-vault-generator-copy-bundle.json')).shape, 'bundle');
   assert.equal(g('weld:genvault:example-generator/snapshot', tpl('30-vault-generator-copy-modeltext.json')).shape, 'model-text');
-  const chatTpl = tpl('28-vault-snapshot.json'), noCount = Object.assign({}, chatTpl); delete noCount.redacted;
-  for (const v of [chatTpl, noCount]) assert.deepEqual(g('weld:genvault:example-generator/chat/snap-1720000000000-abc123', v).anomalies, []);
+  const t28 = tpl('28-vault-snapshot.json'), chatTpl = t28.chatCopy.record, noCount = Object.assign({}, chatTpl); delete noCount.redacted;
+  for (const v of [chatTpl, noCount]) assert.deepEqual(gt('weld:genvault:dad-chat-sync/chat/snap-1720000000000-abc123', v).anomalies, []);   // redacted is optional
   assert.deepEqual(C.indexRefs(tpl('31-vault-chat-index.json')), ['weld:genvault:example-generator/chat/snap-1720000000000-abc123']);
 }
 

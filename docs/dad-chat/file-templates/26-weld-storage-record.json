@@ -1,4 +1,6 @@
 {
   "at": 1720000000000,
-  "protocol": 1
+  "protocol": 1,
+  "backend": "companion",
+  "build": "sb-plugin/2026-06-25.2"
 }
