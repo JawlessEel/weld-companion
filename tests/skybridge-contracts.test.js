@@ -36,6 +36,32 @@ for (const url of [
 }
 assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
 
+// Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
+{
+  const store = new Map();
+  const NS = 'weldCompanion';
+  const GM_setValue = (k, v) => store.set(k, v), GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+  const gget = (k, d) => { const v = GM_getValue(NS + ':' + k, undefined); return v === undefined ? d : JSON.parse(v); };
+  const gset = (k, v) => { GM_setValue(NS + ':' + k, JSON.stringify(v)); return true; };
+  const GM_listValues = () => Array.from(store.keys());
+  const anchorStorage = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS, gget, gset, GM_listValues, Promise });
+  const call = (gen, payload) => anchorStorage.sbServiceStorage(gen, payload);
+  call('gen-a', { op: 'set', key: 'slot1', value: { n: 1 } })
+    .then(() => call('gen-a', { op: 'set', key: 'slot2', value: 2 }))
+    .then(() => call('gen-b', { op: 'set', key: 'other', value: 3 }))
+    .then(() => call('gen-a', { op: 'list' }))
+    .then((r) => {
+      assert.deepEqual(Array.from(r.value).sort(), ['slot1', 'slot2']);
+      return call('gen-a', { op: 'list', prefix: 'slot2' });
+    })
+    .then((r) => {
+      assert.deepEqual(Array.from(r.value), ['slot2']);
+      return call('gen-a', { op: 'get', key: 'slot1' });
+    })
+    .then((r) => { assert.deepEqual(r.value, { n: 1 }); console.log('Skybridge anchor storage set/get/list tests passed'); })
+    .catch((e) => { console.error(e); process.exit(1); });
+}
+
 const providerOptions = load(
   ['sbApplyMaxTokens', 'sbApplyTemperature'],
   between('function sbApplyMaxTokens(', 'function classifyAIError('),

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.65.2
+// @version      1.65.3
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.65.2';
+  var WC_VERSION = '1.65.3';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2978,7 +2978,7 @@
   var SB_WIN = (function () {
     try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { return window; }
   })();
-  var SB_BUILD = 'sb-anchor/2026-10-05.1';   // bump on every change; printed at mount so a stale userscript is obvious
+  var SB_BUILD = 'sb-anchor/2026-10-05.2';   // bump on every change; printed at mount so a stale userscript is obvious
   // verbose-logging toggle: ?sbdebug in the URL, or window.WELD_SKYBRIDGE_DEBUG = true
   var SB_DEBUG = false;
   try {
@@ -3041,13 +3041,15 @@
       } else if (op === 'set') {
         gset(sbStoreKey(gen, payload.key), payload.value); resolve({ ok: true });
       } else if (op === 'list') {
-        var prefix = 'sbk:' + gen + ':' + (payload.prefix || '');
+        // gset() stores every key under the NS prefix (NS + ':' + key), so match the real stored name.
+        var base = NS + ':' + sbStoreKey(gen, '');
+        var prefix = base + (payload.prefix || '');
         var out = [];
         try {
           var all = (typeof GM_listValues === 'function') ? GM_listValues() : [];
           for (var i = 0; i < all.length; i++) {
             var k = all[i];
-            if (typeof k === 'string' && k.indexOf(prefix) === 0) out.push(k.slice(('sbk:' + gen + ':').length));
+            if (typeof k === 'string' && k.indexOf(prefix) === 0) out.push(k.slice(base.length));
           }
         } catch (e) {}
         resolve({ ok: true, value: out });
