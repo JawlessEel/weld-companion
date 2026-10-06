@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.65.5
+// @version      1.65.6
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.65.5';
+  var WC_VERSION = '1.65.6';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2782,9 +2782,24 @@
       if (!quiet) toast('AI settings saved');
       return true;
     }
+    // The test result is written into the Model reply box (updated in place, so the open settings panel is not re-rendered) and shown under the buttons, not only as a short toast.
+    var testStatus = el('div', { class: 'wc-section-note', role: 'status', 'aria-live': 'polite', style: { marginTop: '8px' } });
     var test = el('button', { class: 'wc-btn', text: 'Test provider', onclick: function () {
       if (!save(true)) return; if (cfg.provider === 'builtin') return toast('Perchance built-in is tested through its native AI Agent');
-      callOwnAI(cfg, 'Reply with only the word ok.', 'ping', function (err, txt) { toast(err ? ('\u2717 ' + err).slice(0, 110) : ('\u2713 ' + (txt || '').trim().slice(0, 50)), err ? 6000 : 3000); }, false, cfg.maxTokens, 0);
+      var label = ((PROVIDERS[cfg.provider] || {}).label || cfg.provider) + ' / ' + (cfg.models[cfg.provider] || (PROVIDERS[cfg.provider] || {}).defaultModel || '');
+      testStatus.textContent = 'Testing ' + label + '\u2026';
+      callOwnAI(cfg, 'Reply with only the word ok.', 'ping', function (err, txt) {
+        var shown = err ? ('\u2717 ' + err) : ('\u2713 ' + (txt || '').trim());
+        var block = 'Provider test \u00b7 ' + label + '\n' + shown;
+        // Keep any reply the user is reviewing; a new test replaces an earlier test block at the end instead of stacking up.
+        var prev = String(AI_WORKSPACE.response || '').replace(/(?:\n\n\u2014\u2014\u2014\n)?Provider test \u00b7[^\n]*\n[^\n]*$/, '');
+        AI_WORKSPACE.response = prev ? (prev + '\n\n\u2014\u2014\u2014\n' + block) : block;
+        var box = $('#wc-model-chat-reply');
+        if (box) { box.value = AI_WORKSPACE.response; try { box.scrollIntoView({ block: 'nearest' }); } catch (e) {} }
+        testStatus.textContent = err ? shown.slice(0, 200) : '\u2713 Reply received. The full text is in the Model reply box above.';
+        testStatus.style.color = err ? '#ff9e92' : '';
+        toast(err ? ('\u2717 ' + err).slice(0, 110) : ('\u2713 ' + (txt || '').trim().slice(0, 50)), err ? 6000 : 3000);
+      }, false, cfg.maxTokens, 0);
     } });
     var aicols = el('div', { class: 'wc-cols' });
     var cardP = el('div', { class: 'wc-card wc-col' }, [el('label', { class: 'wc-label', text: 'Provider' }), provider, keyWrap, modelWrap]);
@@ -2799,6 +2814,7 @@
     settings.appendChild(el('summary', { class: 'wc-label', text: 'Model connection and AI settings', style: { cursor: 'pointer', marginBottom: '10px' } }));
     aicols.appendChild(cardP); aicols.appendChild(cardI); settings.appendChild(aicols);
     settings.appendChild(el('div', { class: 'wc-row', style: { marginTop: '10px' } }, [el('button', { class: 'wc-btn wc-btn-accent', text: 'Save settings', onclick: function () { save(false); } }), test]));
+    settings.appendChild(testStatus);
 
     var workspace = el('div', { class: 'wc-card', style: { marginTop: '14px' } });
     workspace.appendChild(el('label', { class: 'wc-label', text: 'Conversation with selected model' }));
