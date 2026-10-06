@@ -8,6 +8,7 @@ const bundles = [
   { marker: 'STUDIO', sources: ['studio-core.js', 'studio-dad.js', 'dad-templates.js', 'studio-ui.js'] },
   { marker: 'PROJECT', sources: ['project-core.js', 'project-ui.js'] },
   { marker: 'DEV', sources: ['dev-core.js', 'dev-ui.js'] },
+  { marker: 'EXTRAS', sources: ['bridge-extras.js'] },
   { marker: 'BACKUP', sources: ['backup-core.js', 'backup-ui.js'] },
   { marker: 'SKILLS', sources: ['skills-refs.js', 'skills-dad.js', 'skills-core.js', 'skills-ui.js'] }
 ];

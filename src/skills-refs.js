@@ -457,6 +457,44 @@ bus envelope          { "channel": "dad:regions", "message": { "generator": "dad
 Rules: never put a key, token or webhook URL in a request, a result, a stored record or a bus
 message; check ok before reading value; keep the feature working when the companion is absent.
 `),
+    // Weld pathways for ANY generator (not only Dad-Chat)
+    pack('weld-caps', 'Weld Skybridge capabilities and request shapes', String.raw`
+Every call is sb.request(capability, payload) on window.weld.skybridge. It resolves DATA, never throws:
+{ ok: true, value } or { ok: false, reason, code? }. Gate each call on sb.has('<capability>'). With no
+companion every capability is absent, so the generator must keep working without it.
+
+storage    { op:'get', key } / { op:'set', key, value } / { op:'list', prefix }   (sb.storage.* wraps these and falls back)
+ai         { prompt, system?, maxTokens?, temperature?, json? }  -> { ok, value }   (the key never crosses)
+model      {}  -> { ok, provider, model, contextWindow, maxOutput }  or { ok:false, reason:'no-own-model' }
+fetch      { url, method?, headers?, body? }  -> { ok, status, url, body, truncated }  (public http(s) only, 200 KB cap)
+search     { query, max? (1-10) }  -> { ok, results:[{ title, url, snippet }] }
+bus        { op:'publish'|'subscribe'|'unsubscribe', channel, message? }   (small validated envelopes)
+download   { filename, text, mime? }  -> { ok, value:{ filename, bytes } }
+           text up to 5 MB; types: txt md json csv html xml css js; executables are refused
+clipboard  { text }  -> { ok, value:{ chars } }   (up to 1 MB; may fail with reason 'clipboard-blocked')
+notify     { text, ms? }  -> { ok }   (one line, 200 chars, shown on the host page; rate limited)
+tokens     { text }  -> { ok, value:{ tokens, chars, words, method } }   (local estimate, no model or network)
+
+Reasons seen: denied, unsupported, bad-request, text-required, too-large, blocked-type, unsupported-type,
+rate-limited, no-own-model, timeout, network-error. Branch on ok and show the reason; never expect an exception.
+`),
+    pack('weld-family', 'Rules for a generator that joins the Weld family', String.raw`
+- Tag: lowercase generator name, characters outside a-z 0-9 - become -, trim dashes, max 64. Key every stored
+  record and every status display by this tag, never by the display title.
+- Own keys only: write under weld:genvault:<tag>/ (snapshot, chat/index, chat/snap-<at>-<rand6>). Stamp
+  generator and folder with YOUR tag. Never read, copy or rewrite another generator's keys.
+- Custodian rule: the companion stores and displays; the generator owns, migrates and cleans its own data.
+  Legacy dadchat:vault:* keys are read-only to everything but their owner.
+- Both generator-copy shapes are valid ({ bundle, source } or { modelText, outputTemplate, srcManifest }); optional
+  fields (redacted count) may be missing; unknown fields must not break parsing.
+- Secrets: store secret-shaped config values (key, secret, token, webhook) as [redacted]; never log, store or
+  send keys, prompts or tokens outside the storage tier.
+- Fallback ladder: companion storage -> kv -> memory. A denied or absent companion is a normal state, shown
+  honestly (a small status line: linked or not, protocol, storage backend), never an error screen.
+- Bus: dad:genvault announces { v:1, type:'vault-updated', generator, at, from }; dad-chat:presence beats
+  { v:1, type:'presence'|'presence-bye', id, from, gen, at }. Keep them under 2 KB, validate every inbound one.
+- Load order: the bridge file after the plugin import, the vault file last; call root.weldSkybridge() once.
+`),
     // Dad-Chat family Weld-app skills (from the generator's prompts/weld-app; the generator source wins on any disagreement)
     pack('dad-skill-vault-bridge', 'Skill: generator-vault-bridge (vault storage and bus contract)', String.raw`
 ## generator-vault-bridge
@@ -1299,6 +1337,15 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     'dad-file-backup': ['dad-file-chat', 'dad-file-index'],
     'dad-file-convert': ['dad-file-interop', 'dad-file-index', 'st-dad-map'],
     'dad-weld-wire': ['dad-file-weld', 'dad-layout', 'dad-code-rules'],
+    'skybridge-download': ['weld-caps'],
+    'skybridge-clipboard': ['weld-caps'],
+    'skybridge-notify': ['weld-caps'],
+    'skybridge-token-meter': ['weld-caps'],
+    'skybridge-fetch-search': ['weld-caps'],
+    'skybridge-vault-backup': ['weld-family', 'dad-skill-vault-bridge', 'weld-caps'],
+    'skybridge-presence': ['weld-family', 'dad-skill-presence-bus'],
+    'skybridge-family-adapt': ['weld-family', 'weld-caps'],
+    'skybridge-health-check': ['weld-caps', 'weld-family'],
     'dad-vault-bridge': ['dad-skill-vault-bridge', 'dad-skill-presence-bus', 'dad-skill-wire-envelopes', 'dad-skill-dad-full'],
     'dad-session-slots': ['dad-skill-session-slots', 'dad-skill-dad-full', 'dad-data']
   };

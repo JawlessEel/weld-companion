@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.69.0
+// @version      1.70.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.69.0';
+  var WC_VERSION = '1.70.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -3004,10 +3004,10 @@
   // call here and post only the completion back down.
   var SB = 'weld.skybridge';
   var SB_PROTO_MIN = 1, SB_PROTO_MAX = 1;
-  var SB_CAPS = ['storage', 'ai', 'fetch', 'search', 'model', 'bus'];  // what this companion offers
-  var SB_FEATURES = ['ping', 'describe', 'codes', 'bus', 'stream'];     // protocol extras a client can feature-detect (Rook v2 parity; additive, no proto bump)
+  var SB_CAPS = ['storage', 'ai', 'fetch', 'search', 'model', 'bus', 'download', 'clipboard', 'notify', 'tokens'];  // what this companion offers
+  var SB_FEATURES = ['ping', 'describe', 'codes', 'bus', 'stream', 'extras'];     // protocol extras a client can feature-detect (Rook v2 parity; additive, no proto bump)
   var SB_AGENT = 'weld-companion';   // identity reported in here/describe so a plugin knows which anchor answered
-  var SB_VERSION = '1.1.0';          // anchor protocol-impl version (distinct from the userscript @version)
+  var SB_VERSION = '1.2.0';          // anchor protocol-impl version (distinct from the userscript @version)
 
   // The userscript manager runs us in a sandbox where `window` is a wrapper:
   // a 'message' listener placed on it may NOT receive the page's real
@@ -3018,7 +3018,7 @@
   var SB_WIN = (function () {
     try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { return window; }
   })();
-  var SB_BUILD = 'sb-anchor/2026-10-05.4';   // bump on every change; printed at mount so a stale userscript is obvious
+  var SB_BUILD = 'sb-anchor/2026-10-06.1';   // bump on every change; printed at mount so a stale userscript is obvious
   // verbose-logging toggle: ?sbdebug in the URL, or window.WELD_SKYBRIDGE_DEBUG = true
   var SB_DEBUG = false;
   try {
@@ -3053,7 +3053,7 @@
       var prior = sbPermFor(gen, cap);
       if (prior === true) return resolve(true);
       if (prior === false) return resolve(false);   // remembered "no"
-      var labels = { storage: 'save data that persists across generators', ai: 'use your own AI model', fetch: 'fetch pages from the web on its behalf', search: 'search the web on its behalf', model: 'read which AI model you have configured (name only -- never your API key)', bus: 'relay messages between your open generators (cross-tab pub/sub)' };
+      var labels = { storage: 'save data that persists across generators', ai: 'use your own AI model', fetch: 'fetch pages from the web on its behalf', search: 'search the web on its behalf', model: 'read which AI model you have configured (name only -- never your API key)', bus: 'relay messages between your open generators (cross-tab pub/sub)', download: 'save a text file to your computer', clipboard: 'copy text to your clipboard', notify: 'show a short notice on the page', tokens: 'estimate token counts locally' };
       var what = labels[cap] || ('use the "' + cap + '" capability');
       var msg = 'This generator (' + (gen || 'unknown') + ') wants to ' + what + ' via Weld Companion.\n\nAllow it? (remembered for this generator)';
       var ok = false, shownAt = Date.now();
@@ -3716,6 +3716,39 @@
     });
   }
 
+  // Extra capabilities (download, clipboard, notify, tokens). Validation and limits live in WeldBridgeExtras; this
+  // function only performs the side effect. Every call resolves a result object and never throws across the bridge.
+  var sbExtraLimit = null;
+  function sbServiceExtra(cap, gen, payload) {
+    return new Promise(function (resolve) {
+      var X = window.WeldBridgeExtras;
+      if (!X) return resolve({ ok: false, code: 'unsupported', reason: 'extras-unavailable' });
+      if (!sbExtraLimit) sbExtraLimit = { download: X.rateLimiter(5, 10000), notify: X.rateLimiter(3, 10000), clipboard: X.rateLimiter(10, 10000) };
+      if (sbExtraLimit[cap] && !sbExtraLimit[cap].allow(gen + ':' + cap)) return resolve({ ok: false, code: 'rate-limited', reason: 'rate-limited' });
+      try {
+        if (cap === 'tokens') return resolve(X.estimateTokens(payload));
+        if (cap === 'download') {
+          var d = X.checkDownload(payload); if (!d.ok) return resolve(d);
+          var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([d.text], { type: d.mime + ';charset=utf-8' })); a.download = d.filename;
+          document.body.appendChild(a); a.click();
+          setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 1500);
+          try { toast('Saved ' + d.filename + ' for ' + gen); } catch (e) {}
+          return resolve({ ok: true, value: { filename: d.filename, bytes: d.text.length } });
+        }
+        if (cap === 'clipboard') {
+          var c = X.checkClipboard(payload); if (!c.ok) return resolve(c);
+          return copyText(c.text).then(function (done) { resolve(done ? { ok: true, value: { chars: c.text.length } } : { ok: false, code: 'blocked', reason: 'clipboard-blocked' }); }, function () { resolve({ ok: false, code: 'blocked', reason: 'clipboard-blocked' }); });
+        }
+        if (cap === 'notify') {
+          var n = X.checkNotify(payload); if (!n.ok) return resolve(n);
+          toast(gen + ': ' + n.text, n.ms);
+          return resolve({ ok: true });
+        }
+      } catch (e) { return resolve({ ok: false, code: 'error', reason: 'extra-failed' }); }
+      resolve({ ok: false, code: 'unsupported', reason: 'unsupported' });
+    });
+  }
+
   function sbHandleMessage(ev) {
       var d = ev && ev.data;
       var isSb = d && typeof d === 'object' && d.channel === SB;
@@ -3754,6 +3787,7 @@
                    : (cap === 'search')  ? sbServiceSearch(d.payload || {})
                    : (cap === 'model')   ? sbServiceModel()
                    : (cap === 'bus')     ? sbServiceBus(d.payload || {}, source, ev.origin)
+                   : (cap === 'download' || cap === 'clipboard' || cap === 'notify' || cap === 'tokens') ? sbServiceExtra(cap, gen, d.payload || {})
                    : Promise.resolve({ ok: false, code: 'unsupported', reason: 'unsupported' });
           work.then(function (result) { sbReply(source, ev.origin, nonce, result || { ok: false, code: 'error', reason: 'service error' }); });
         });
@@ -15294,6 +15328,44 @@ bus envelope          { "channel": "dad:regions", "message": { "generator": "dad
 Rules: never put a key, token or webhook URL in a request, a result, a stored record or a bus
 message; check ok before reading value; keep the feature working when the companion is absent.
 `),
+    // Weld pathways for ANY generator (not only Dad-Chat)
+    pack('weld-caps', 'Weld Skybridge capabilities and request shapes', String.raw`
+Every call is sb.request(capability, payload) on window.weld.skybridge. It resolves DATA, never throws:
+{ ok: true, value } or { ok: false, reason, code? }. Gate each call on sb.has('<capability>'). With no
+companion every capability is absent, so the generator must keep working without it.
+
+storage    { op:'get', key } / { op:'set', key, value } / { op:'list', prefix }   (sb.storage.* wraps these and falls back)
+ai         { prompt, system?, maxTokens?, temperature?, json? }  -> { ok, value }   (the key never crosses)
+model      {}  -> { ok, provider, model, contextWindow, maxOutput }  or { ok:false, reason:'no-own-model' }
+fetch      { url, method?, headers?, body? }  -> { ok, status, url, body, truncated }  (public http(s) only, 200 KB cap)
+search     { query, max? (1-10) }  -> { ok, results:[{ title, url, snippet }] }
+bus        { op:'publish'|'subscribe'|'unsubscribe', channel, message? }   (small validated envelopes)
+download   { filename, text, mime? }  -> { ok, value:{ filename, bytes } }
+           text up to 5 MB; types: txt md json csv html xml css js; executables are refused
+clipboard  { text }  -> { ok, value:{ chars } }   (up to 1 MB; may fail with reason 'clipboard-blocked')
+notify     { text, ms? }  -> { ok }   (one line, 200 chars, shown on the host page; rate limited)
+tokens     { text }  -> { ok, value:{ tokens, chars, words, method } }   (local estimate, no model or network)
+
+Reasons seen: denied, unsupported, bad-request, text-required, too-large, blocked-type, unsupported-type,
+rate-limited, no-own-model, timeout, network-error. Branch on ok and show the reason; never expect an exception.
+`),
+    pack('weld-family', 'Rules for a generator that joins the Weld family', String.raw`
+- Tag: lowercase generator name, characters outside a-z 0-9 - become -, trim dashes, max 64. Key every stored
+  record and every status display by this tag, never by the display title.
+- Own keys only: write under weld:genvault:<tag>/ (snapshot, chat/index, chat/snap-<at>-<rand6>). Stamp
+  generator and folder with YOUR tag. Never read, copy or rewrite another generator's keys.
+- Custodian rule: the companion stores and displays; the generator owns, migrates and cleans its own data.
+  Legacy dadchat:vault:* keys are read-only to everything but their owner.
+- Both generator-copy shapes are valid ({ bundle, source } or { modelText, outputTemplate, srcManifest }); optional
+  fields (redacted count) may be missing; unknown fields must not break parsing.
+- Secrets: store secret-shaped config values (key, secret, token, webhook) as [redacted]; never log, store or
+  send keys, prompts or tokens outside the storage tier.
+- Fallback ladder: companion storage -> kv -> memory. A denied or absent companion is a normal state, shown
+  honestly (a small status line: linked or not, protocol, storage backend), never an error screen.
+- Bus: dad:genvault announces { v:1, type:'vault-updated', generator, at, from }; dad-chat:presence beats
+  { v:1, type:'presence'|'presence-bye', id, from, gen, at }. Keep them under 2 KB, validate every inbound one.
+- Load order: the bridge file after the plugin import, the vault file last; call root.weldSkybridge() once.
+`),
     // Dad-Chat family Weld-app skills (from the generator's prompts/weld-app; the generator source wins on any disagreement)
     pack('dad-skill-vault-bridge', 'Skill: generator-vault-bridge (vault storage and bus contract)', String.raw`
 ## generator-vault-bridge
@@ -16136,6 +16208,15 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     'dad-file-backup': ['dad-file-chat', 'dad-file-index'],
     'dad-file-convert': ['dad-file-interop', 'dad-file-index', 'st-dad-map'],
     'dad-weld-wire': ['dad-file-weld', 'dad-layout', 'dad-code-rules'],
+    'skybridge-download': ['weld-caps'],
+    'skybridge-clipboard': ['weld-caps'],
+    'skybridge-notify': ['weld-caps'],
+    'skybridge-token-meter': ['weld-caps'],
+    'skybridge-fetch-search': ['weld-caps'],
+    'skybridge-vault-backup': ['weld-family', 'dad-skill-vault-bridge', 'weld-caps'],
+    'skybridge-presence': ['weld-family', 'dad-skill-presence-bus'],
+    'skybridge-family-adapt': ['weld-family', 'weld-caps'],
+    'skybridge-health-check': ['weld-caps', 'weld-family'],
     'dad-vault-bridge': ['dad-skill-vault-bridge', 'dad-skill-presence-bus', 'dad-skill-wire-envelopes', 'dad-skill-dad-full'],
     'dad-session-slots': ['dad-skill-session-slots', 'dad-skill-dad-full', 'dad-data']
   };
@@ -16546,6 +16627,24 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
       'Add an option to run this generator AI requests through the model configured in Weld Companion. Gate on sb.has(ai); otherwise keep the existing provider path unchanged. Call sb.ai(prompt, options) with only the supported options (system, maxTokens, temperature, json, onChunk for streaming), handle { ok, value } or { ok:false, reason } without throwing, and keep one request in flight with cancellation or stale-response protection. Use sb.modelInfo to size context budgets and treat missing values as unknown. Do not replace the default provider, hide which model answered, or send keys anywhere. Show clearly when the own-model route is active. Verify companion absent, denied consent, failure, streaming and normal completion.', [], []],
     ['agents', 'skybridge-bus', 'Sync tabs or generators over the Skybridge bus', 'Publish and subscribe on named channels with validated messages.', 'change',
       'Add cross-tab or cross-generator messaging with sb.bus.publish and sb.bus.subscribe, only when sb.has(bus). Define named channels, a small versioned message schema and a sender identifier. Treat every inbound message as untrusted: validate shape, size and type before touching state or the DOM, ignore your own echoes, and never evaluate message content. Keep the unsubscribe function and call it on teardown. Degrade to single-tab behavior when the bus is unavailable and say so in the interface. Verify two tabs, a malformed message, a repeated message and the companion absent.', [], []],
+    ['agents', 'skybridge-download', 'Save files through Weld (Download button)', 'Let a sandboxed generator hand the user a real file download.', 'change',
+      'Add a download action that uses sb.request(download, { filename, text, mime }) when sb.has(download), and falls back to the generator existing method (for example a Blob link) when it is not available. Build the text from existing state only, choose a safe filename with the generator tag and a date, pick a supported type (txt, md, json, csv, html), keep it under 5 MB, and branch on ok and reason (too-large, blocked-type, unsupported-type, rate-limited, denied). Show a short success or failure message in the interface, never assume the file was saved, and never include keys or tokens in the file. Verify companion present, absent, denied and an oversized payload.', [], []],
+    ['agents', 'skybridge-clipboard', 'Copy to clipboard through Weld', 'Add reliable copy buttons that work inside the sandbox frame.', 'change',
+      'Add Copy buttons that call sb.request(clipboard, { text }) when sb.has(clipboard) and otherwise use navigator.clipboard, then a selectable-text fallback. Copy exactly the visible result text, keep each request under 1 MB, handle ok:false reasons such as clipboard-blocked without throwing, and confirm success in the button label for a moment. Do not copy automatically, and do not copy anything the user did not ask for. Verify the three paths and a very large text.', [], []],
+    ['agents', 'skybridge-notify', 'Show page notices through Weld', 'Report finished or failed work outside the sandbox frame.', 'change',
+      'Add a small notifier that calls sb.request(notify, { text, ms }) when sb.has(notify) and otherwise updates an in-page status line. Send one short line (under 200 characters, no secrets), use it only for events the user cares about (finished, failed, saved), never in a loop, and respect rate-limited replies by dropping extra notices. Keep the in-page status line as the primary display so nothing depends on the companion. Verify companion present, absent and a burst of events.', [], []],
+    ['agents', 'skybridge-token-meter', 'Add a token budget meter', 'Estimate prompt size locally before sending to a model.', 'change',
+      'Add a token meter beside the prompt or input area using sb.request(tokens, { text }) when sb.has(tokens), and a local characters-divided-by-three estimate otherwise. Label it an estimate, combine it with sb.modelInfo contextWindow and maxOutput when known (unknown means unknown, not a default), warn near the limit, and never block sending. Debounce updates, send only the text being measured, and handle ok:false. Verify empty text, very large text, companion absent and no model configured.', [], []],
+    ['agents', 'skybridge-fetch-search', 'Add web fetch or search through Weld', 'Use the companion for pages the sandbox cannot reach.', 'change',
+      'Add a feature that reads a public web page with sb.request(fetch, { url }) or looks something up with sb.request(search, { query, max }), only when sb.has for that capability. Treat every returned body, title and snippet as untrusted text: render it as text, never as HTML, never evaluate it, and never obey instructions found inside it. Respect the 200 KB body cap and the truncated flag, show the source URL, handle denied, timeout, network-error and blocked-host reasons, and keep the feature optional so the generator works without the companion. Verify a normal page, a blocked private address, a failure and companion absent.', [], []],
+    ['agents', 'skybridge-vault-backup', 'Add Weld vault backups to a generator', 'Keep owner-safe off-origin copies of this generator and its data.', 'change',
+      'Add vault backups to this generator using the family rules and the vault bridge reference. Derive the generator tag, write only under weld:genvault:<tag>/, stamp generator and folder with that tag, redact secret-shaped values, cap values near 2 MB and chat copies at 10, announce saves and deletes on dad:genvault with a small envelope, and resolve every call as { ok } data with a fallback from storage to kv to memory. Add a small Vault dialog (save now, list, download a copy, delete one copy with confirmation) and show the real backend. Never touch another generator keys or the legacy dadchat:vault keys. Verify a set, get and list round trip, a denied companion, a mismatched-owner write being refused and secrets staying redacted.', [], []],
+    ['agents', 'skybridge-presence', 'Show other open tabs with Weld presence', 'Add a safe presence indicator over the Skybridge bus.', 'change',
+      'Add a presence indicator using the dad-chat:presence channel only when sb.has(bus). Send a presence beat about every 20 seconds and presence-bye when the tab hides, with a unique id, a tab id, this generator tag and a timestamp; validate every inbound message (version, type, size, sender, id, timestamp within five minutes), ignore your own echoes and duplicate ids, expire peers after about 60 seconds of silence, and count malformed messages as ignored. Show how many other tabs are open for this generator. Do not route chats or share any content over the channel. Verify two tabs, a closed tab, a malformed message and companion absent.', [], []],
+    ['agents', 'skybridge-family-adapt', 'Adapt a generator to the Weld family', 'Bring any generator onto the shared Weld pathways end to end.', 'change',
+      'Adapt this generator to the Weld family. First inventory what it stores, which AI calls it makes, what files it exports and which actions would benefit from the companion. Then add, in small reviewable steps and only where useful: the Skybridge connection (import, one call, sb.has gating), storage through sb.storage with a legacy fallback, vault backups under its own tag, the extra capabilities (download, clipboard, notify, tokens) where they replace fragile browser code, and a small status line (linked, protocol, storage backend). Follow the family rules: own keys only, redacted secrets, honest fallbacks, validated bus messages, nothing breaking when the companion is absent. Report each step, what you changed, and what you could not test.', [], []],
+    ['agents', 'skybridge-health-check', 'Run a Weld health check on a generator', 'Verify every Weld pathway the generator uses actually works.', 'review',
+      'Check every Weld pathway this generator uses, without changing anything. For each of storage, ai, model, fetch, search, bus, download, clipboard, notify and tokens: say whether the code uses it, whether it is gated by sb.has, whether results are checked for ok and reason, and what happens when it is absent or denied. For storage verify a set, get and list round trip under the generator own keys and that records carry the right generator tag. Check for secrets in requests or stored records and for unvalidated inbound bus messages. Report each check as confirmed, failed or not testable with evidence, the single most likely problem first, and a minimal fix for each failure.', [], []],
     // --- AI input helpers: rewrite / fill buttons and toolkit ---
     ['assist', 'ai-input-assist', 'Add Rewrite & Fill buttons to prompt inputs', 'One button per input: rewrite filled text, or generate an empty field from the others.', 'change',
       'Add a small helper button next to each prompt or text input. When the field has text, the button rewrites it: clearer, richer or shorter as the user chooses, keeping the original intent and facts. When the field is empty, it writes a suitable value using the other inputs plus a generator context brief derived from the actual title, description, labels and purpose. Use only the text or AI plugin this generator already uses (or sb.ai when has(ai) and the user opted in). Keep the previous value so one click undoes any change, show loading, cancel and error states, allow one request per field, never auto-run on load, and never overwrite text the user is typing. Treat model output as plain text, trim code fences and preambles, and respect each input length limit. Verify empty, filled, failing, cancelled and repeated use.', [], []],
@@ -17384,3 +17483,75 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
   window.weldBackup = { render };
 })();
 /* END GENERATED BACKUP */
+
+/* BEGIN GENERATED EXTRAS */
+/* Skybridge extra capabilities (download, clipboard, notify, tokens): pure validation and sizing.
+   The anchor does the side effects; nothing here touches the page, network or storage. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldBridgeExtras = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  const LIMITS = Object.freeze({ downloadChars: 5 * 1024 * 1024, clipboardChars: 1024 * 1024, notifyChars: 200, tokenInputChars: 2 * 1024 * 1024, filename: 120 });
+  const MIMES = Object.freeze({ txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv', html: 'text/html', htm: 'text/html', xml: 'text/xml', css: 'text/css', js: 'text/javascript', pjs: 'text/plain', log: 'text/plain' });
+  const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|jar|app|dmg|sh|pkg|apk|lnk|reg|dll)$/i;
+  const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+  // Strip paths, control characters and trailing dots; keep it short. Always returns a usable name.
+  function sanitizeFilename(name) {
+    let n = String(name == null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, '').replace(/[\\/]+/g, '-').replace(/[<>:"|?*]/g, '-').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').replace(/[. ]+$/, '');
+    if (n.length > LIMITS.filename) { const dot = n.lastIndexOf('.'), ext = dot > 0 ? n.slice(dot).slice(0, 12) : ''; n = n.slice(0, LIMITS.filename - ext.length) + ext; }
+    return n || 'download.txt';
+  }
+  // { filename, text, mime? } -> { ok, filename, mime, text } | { ok:false, reason }
+  function checkDownload(p) {
+    if (!isObj(p)) return { ok: false, reason: 'bad-request' };
+    if (typeof p.text !== 'string') return { ok: false, reason: 'text-required' };
+    if (p.text.length > LIMITS.downloadChars) return { ok: false, reason: 'too-large' };
+    const filename = sanitizeFilename(p.filename);
+    if (BLOCKED_EXT.test(filename)) return { ok: false, reason: 'blocked-type' };
+    const ext = (filename.match(/\.([a-z0-9]+)$/i) || [])[1];
+    const byExt = ext ? MIMES[ext.toLowerCase()] : null;
+    if (ext && !byExt) return { ok: false, reason: 'unsupported-type' };
+    let mime = byExt || 'text/plain';
+    if (typeof p.mime === 'string' && p.mime) {
+      const want = p.mime.split(';')[0].trim().toLowerCase();
+      if (Object.keys(MIMES).every(k => MIMES[k] !== want)) return { ok: false, reason: 'unsupported-type' };
+      mime = want;
+    }
+    return { ok: true, filename: ext ? filename : filename + '.txt', mime, text: p.text };
+  }
+  function checkClipboard(p) {
+    if (!isObj(p) || typeof p.text !== 'string' || !p.text) return { ok: false, reason: 'text-required' };
+    if (p.text.length > LIMITS.clipboardChars) return { ok: false, reason: 'too-large' };
+    return { ok: true, text: p.text };
+  }
+  // One short line for the host page toast.
+  function checkNotify(p) {
+    if (!isObj(p) || typeof p.text !== 'string') return { ok: false, reason: 'text-required' };
+    const text = p.text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, LIMITS.notifyChars);
+    if (!text) return { ok: false, reason: 'text-required' };
+    const ms = Math.max(1500, Math.min(8000, Number(p.ms) || 3000));
+    return { ok: true, text, ms };
+  }
+  // Fixed-window limiter per key, so a looping generator cannot flood the page with toasts or downloads.
+  function rateLimiter(max, windowMs) {
+    const hits = new Map();
+    return { allow(key, now) {
+      now = now == null ? Date.now() : now;
+      const list = (hits.get(key) || []).filter(t => now - t < windowMs);
+      if (list.length >= max) { hits.set(key, list); return false; }
+      list.push(now); hits.set(key, list); return true;
+    } };
+  }
+  // Rough, local estimate (characters / 3, deliberately conservative). No model or network involved.
+  function estimateTokens(p) {
+    const text = isObj(p) ? p.text : p;
+    if (typeof text !== 'string') return { ok: false, reason: 'text-required' };
+    if (text.length > LIMITS.tokenInputChars) return { ok: false, reason: 'too-large' };
+    const words = (text.trim().match(/\S+/g) || []).length;
+    return { ok: true, value: { tokens: Math.ceil(text.length / 3), chars: text.length, words, method: 'estimate-chars-div-3' } };
+  }
+  return { LIMITS, MIMES, sanitizeFilename, checkDownload, checkClipboard, checkNotify, rateLimiter, estimateTokens };
+});
+/* END GENERATED EXTRAS */

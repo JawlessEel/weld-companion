@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.69.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.70.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -61,7 +61,7 @@ Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled lik
 
 | Tab | What's in it |
 | :-- | :----------- |
-| **Skills** | 195 presets in 18 grouped sections for dashboards, chat/story systems, SillyTavern/Chub card and lore features, Dad-Chat projects (code and Dad-native content), Skybridge setup, rebranding, AI input helpers, prompt studios, plugins, debugging and more, with type/mode filters and native AI handoff. |
+| **Skills** | 206 presets in 18 grouped sections for dashboards, chat/story systems, SillyTavern/Chub card and lore features, Dad-Chat projects (code and Dad-native content), Skybridge setup, rebranding, AI input helpers, prompt studios, plugins, debugging and more, with type/mode filters and native AI handoff. |
 | ★ **Generators** | Your whole generator directory grouped by your real Perchance folders, plus favorites & recents — with search, sort (incl. **Edited** / **Views**), per-row open/edit, and a **Stats** button that pulls real **view counts + last-edited times** from Perchance's public API. A **This Generator** panel shows the open generator's status and an **About this page** card (public stats — views, last edited, title, imports — for *any* generator, even ones you don't own), plus owner actions. |
 | 📒 **Library** | The reader's home, grouped by task. **📚 Collect**: a permanent **Scrapbook** of saved results (searchable, taggable, exportable), **Chat stories** (read or export any AICC thread as styled HTML, Markdown, or text), **clipboard history**, and your **👍/👎 ratings**. **🛡 Care**: a **backup guardian**, a **time tracker** (per-generator minutes, CSV export), a **time capsule**, **output rules** (post-processing on save), and **Move everything** (full state export/import). Plus **search everything**, **session replay**, and a **spaced-repetition review queue** in Collect; **My Perchance** stats, **tab snapshots**, **My boundaries**, and a **Ctrl/Cmd+Shift+S** quick-save hotkey; a **keepsake HTML archive** and **recommendation bundles** to share generators; **lore link health** (catches removed/quarantined uploads before they break a character), **generator watch** (update notifications for favorites), and a one-click **platform speed check**; night light gains an **ambient mode** that follows hour and season. A sticky header keeps save / read-aloud / rate / random-favorite in reach. |
 | 🗃 **Data** | A launcher for the **Data Manager**: browse, edit, back up, export and import the IndexedDB databases of every generator you've visited — full CRUD, deep-scan search, sweep backup, undo for destructive actions. When an AI Character Chat database is open, the **AICC pack** panels appear automatically. |
@@ -405,6 +405,12 @@ Weld Companion is the **anchor end** of `weld.skybridge`. A generator that impor
 - **Web fetch** — fetch a URL on the generator's behalf (cookie-free, `http`/`https` only, never local or private-network addresses, size-capped).
 - **Web search** — a keyless DuckDuckGo Instant-Answer lookup (title / url / snippet) for lightweight grounding.
 - **Model info** — the name and approximate context size of the model you configured (never the key, no network call).
+- **Save a file (`download`)** — hand the user a real file download from inside the sandbox: `request('download', { filename, text, mime? })`. Text only, up to 5 MB, types `txt md json csv html xml css js`; executables are refused and filenames are sanitized.
+- **Copy to clipboard (`clipboard`)** — `request('clipboard', { text })`, up to 1 MB; a blocked clipboard comes back as `{ ok:false, reason:'clipboard-blocked' }`.
+- **Page notice (`notify`)** — `request('notify', { text, ms? })` shows one short line on the host page; limited to 3 notices per 10 seconds per generator.
+- **Token estimate (`tokens`)** — `request('tokens', { text })` returns a local, conservative estimate (characters / 3). No model or network is involved.
+
+These four ship with anchor 1.2.0 and need no plugin update (`sb.request` is generic); a generator should still gate on `sb.has('download')` etc. The Skills tab has matching presets (download, clipboard, notify, token meter, fetch/search, vault backups, presence, family adaptation and a health check) that write AI-helper prompts for adding each pathway to a generator.
 
 Under the hood it's a two-way `postMessage` handshake between the Companion (top frame) and the plugin (the generator's `*.perchance.org` child iframe), with a negotiated protocol, per-message nonce, and origin checks. The Companion identifies itself in the handshake (`agent: "weld-companion"`) so a plugin knows which anchor answered. Since 1.65.2 there are **no consent prompts by default**: you installed and run the Companion, so a generator's Skybridge requests simply work (an old remembered "no" is ignored). If you would rather be asked, turn on **Ask before a generator uses Skybridge** in the GitHub tab; the answer is then remembered per capability and per generator, a suppressed browser dialog is never saved as a "no", and **Reset permissions** clears the saved answers. Note that with prompts off, any generator you open on perchance.org can use your configured AI model and the fetch/search capabilities. Both ends log the handshake to the console (`[WeldCompanion]` / `[skybridge]`) so a misconnection is diagnosable rather than silent.
 
