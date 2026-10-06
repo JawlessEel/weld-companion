@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.67.0
+// @version      1.67.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -83,8 +83,21 @@
       else if (k.slice(0, 2) === 'on' && typeof attrs[k] === 'function') n.addEventListener(k.slice(2), attrs[k]);
       else n.setAttribute(k, attrs[k]);
     }
+    if (tag === 'input' || tag === 'textarea') noCredentialFill(n);
     (children || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
+  }
+  // Password managers (Chrome, 1Password, Bitwarden, LastPass, Dashlane) mistake the
+  // Weld panel's owner/repo/branch/path fields for a login form next to the token box and
+  // autofill an email into them. Opt every Weld input out; token/key boxes are marked as
+  // "new-password" so nothing saved is offered for them either.
+  function noCredentialFill(n) {
+    var t = (n.getAttribute('type') || 'text').toLowerCase();
+    n.setAttribute('autocomplete', t === 'password' ? 'new-password' : 'off');
+    n.setAttribute('data-1p-ignore', 'true');
+    n.setAttribute('data-bwignore', 'true');
+    n.setAttribute('data-lpignore', 'true');
+    n.setAttribute('data-form-type', 'other');
   }
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
@@ -4773,6 +4786,7 @@
       else if (k.slice(0, 2) === 'on' && typeof attrs[k] === 'function') n.addEventListener(k.slice(2), attrs[k]);
       else n.setAttribute(k, attrs[k]);
     }
+    if (tag === 'input' || tag === 'textarea') { var _t = (n.getAttribute('type') || 'text').toLowerCase(); n.setAttribute('autocomplete', _t === 'password' ? 'new-password' : 'off'); n.setAttribute('data-1p-ignore', 'true'); n.setAttribute('data-bwignore', 'true'); n.setAttribute('data-lpignore', 'true'); n.setAttribute('data-form-type', 'other'); }   // keep password managers out (see noCredentialFill)
     (kids || []).forEach(function (c) { if (c != null) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
   }
@@ -7438,6 +7452,7 @@
       else if (/^on/.test(k)) node.addEventListener(k.slice(2), attrs[k]);
       else node.setAttribute(k, attrs[k]);
     }
+    if (tag === 'input' || tag === 'textarea') { var _t = (n.getAttribute('type') || 'text').toLowerCase(); n.setAttribute('autocomplete', _t === 'password' ? 'new-password' : 'off'); n.setAttribute('data-1p-ignore', 'true'); n.setAttribute('data-bwignore', 'true'); n.setAttribute('data-lpignore', 'true'); n.setAttribute('data-form-type', 'other'); }   // keep password managers out (see noCredentialFill)
     (kids || []).forEach(function (c) { if (c) node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return node;
   }
@@ -8485,6 +8500,7 @@
       else if (/^on/.test(k)) n.addEventListener(k.slice(2), attrs[k]);
       else n.setAttribute(k, attrs[k]);
     }
+    if (tag === 'input' || tag === 'textarea') { var _t = (n.getAttribute('type') || 'text').toLowerCase(); n.setAttribute('autocomplete', _t === 'password' ? 'new-password' : 'off'); n.setAttribute('data-1p-ignore', 'true'); n.setAttribute('data-bwignore', 'true'); n.setAttribute('data-lpignore', 'true'); n.setAttribute('data-form-type', 'other'); }   // keep password managers out (see noCredentialFill)
     (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
   }
@@ -9385,6 +9401,7 @@
       else if (/^on/.test(k)) n.addEventListener(k.slice(2), attrs[k]);
       else n.setAttribute(k, attrs[k]);
     }
+    if (tag === 'input' || tag === 'textarea') { var _t = (n.getAttribute('type') || 'text').toLowerCase(); n.setAttribute('autocomplete', _t === 'password' ? 'new-password' : 'off'); n.setAttribute('data-1p-ignore', 'true'); n.setAttribute('data-bwignore', 'true'); n.setAttribute('data-lpignore', 'true'); n.setAttribute('data-form-type', 'other'); }   // keep password managers out (see noCredentialFill)
     (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
   }
