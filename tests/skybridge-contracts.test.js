@@ -58,6 +58,34 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     assert.ok(x.hint && x.code === 'no-own-model');
   }).catch((e) => { console.error(e); process.exit(1); });
 }
+// A streamed reply with no answer text (reasoning model out of budget) must fail with a reason, never succeed with ''.
+{
+  const sse = (...objs) => objs.map((o) => 'data: ' + JSON.stringify(o) + '\n\n').join('') + 'data: [DONE]\n\n';
+  const run = (text) => new Promise((resolve) => {
+    const env = {
+      PROVIDERS: { localai: { noKey: true, defaultEndpoint: 'http://localhost:1234', defaultModel: 'm', headers: () => ({}), body: () => '{"stream":false}' } },
+      sbApplyMaxTokens() {}, sbApplyTemperature() {}, aiUserForProvider: (p, u) => u, aiErr: (s) => 'http ' + s, JSON, String, Array, Object,
+      GM_xmlhttpRequest: (o) => { setTimeout(() => { o.onprogress({ status: 200, responseText: text }); o.onload({ status: 200, responseText: text }); }, 0); },
+    };
+    const f = load(['callOwnAIStream'], between('var STREAM = {', 'var AI_WORKSPACE'), env);
+    const chunks = [];
+    f.callOwnAIStream({ provider: 'localai', keys: {}, models: {}, endpoints: {} }, 's', 'u', false, 0, null, (c) => chunks.push(c), (err, val) => resolve({ err, val, chunks }));
+  });
+  const delta = (d, finish) => ({ choices: [{ index: 0, delta: d, finish_reason: finish || null }] });
+  Promise.all([
+    run(sse(delta({ reasoning_content: 'thinking' }), delta({}, 'length'))),
+    run(sse(delta({ reasoning_content: 'thinking' }), delta({ content: 'ok' }), delta({}, 'stop'))),
+    run(sse(delta({}, 'stop'))),
+  ]).then(([budget, good, empty]) => {
+    assert.match(budget.err, /token budget for reasoning/);
+    assert.equal(budget.val, null);
+    assert.equal(good.err, null);
+    assert.equal(good.val, 'ok');
+    assert.deepEqual(Array.from(good.chunks), ['ok']);
+    assert.match(empty.err, /no final text/);
+    console.log('Skybridge streamed reasoning-model replies tests passed');
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
 // Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
 {
   const store = new Map();

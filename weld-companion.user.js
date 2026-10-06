@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.65.4
+// @version      1.65.5
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.65.4';
+  var WC_VERSION = '1.65.5';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2524,7 +2524,7 @@
     var model = (cfg.models || {})[prov] || p.defaultModel;
     var bodyStr = st.body(model, sys, aiUserForProvider(prov, user), json);
     if (maxTokens || temperature != null) { try { var bo = JSON.parse(bodyStr); sbApplyMaxTokens(prov, bo, maxTokens); if (temperature != null) sbApplyTemperature(prov, bo, temperature); bodyStr = JSON.stringify(bo); } catch (e) {} }
-    var acc = '', buf = '', lastLen = 0, done = false;
+    var acc = '', buf = '', lastLen = 0, done = false, sawReasoning = false, hitLength = false;
     function pump(text) {
       text = text || '';
       if (text.length <= lastLen) return;
@@ -2534,11 +2534,17 @@
         var obj = null; try { obj = JSON.parse(r.data[i]); } catch (e) { continue; }
         var delta = sbStreamDelta(prov, obj);
         if (delta) { acc += delta; try { emit(delta); } catch (e) {} }
+        // Reasoning models stream their thinking separately; note it so an empty answer can be explained.
+        var ch0 = obj && obj.choices && obj.choices[0];
+        if (ch0 && ch0.delta && (ch0.delta.reasoning_content || ch0.delta.reasoning)) sawReasoning = true;
+        if (ch0 && ch0.finish_reason === 'length') hitLength = true;
       }
     }
     function finish(err) {
       if (done) return; done = true;
       if (err) return cb(err, null);
+      // A stream that ends with no answer text is a failure, not an empty success (reasoning models can spend the whole budget thinking).
+      if (!acc) return cb((sawReasoning || hitLength) ? 'The model used its token budget for reasoning and returned no final answer. Increase the output-token limit or turn off thinking/reasoning for this model in LM Studio.' : 'The provider returned no final text. Check the model settings and server logs.', null);
       var val = (json && prov === 'anthropic') ? ('{' + acc) : acc;   // mirror the D2 prefill: chunks are the continuation
       cb(null, val);
     }
@@ -2978,7 +2984,7 @@
   var SB_WIN = (function () {
     try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { return window; }
   })();
-  var SB_BUILD = 'sb-anchor/2026-10-05.3';   // bump on every change; printed at mount so a stale userscript is obvious
+  var SB_BUILD = 'sb-anchor/2026-10-05.4';   // bump on every change; printed at mount so a stale userscript is obvious
   // verbose-logging toggle: ?sbdebug in the URL, or window.WELD_SKYBRIDGE_DEBUG = true
   var SB_DEBUG = false;
   try {
