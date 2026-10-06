@@ -78,6 +78,19 @@ assert.equal(C.checkStoreWrite('weld:genvault:alpha/snapshot', { generator: 'alp
 assert.equal(C.checkStoreWrite('weld:genvault:alpha/chat/snap-1-a', null).ok, true, 'tombstones pass');
 assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkStoreWrite('free:form', { generator: 'x' }).ok, true);
 
+// ---- the shipped vault templates validate with the inspector (both generator-copy shapes, redacted optional)
+{
+  const T = require('../src/dad-templates.js'), tpl = f => JSON.parse(T.byFile[f].text);
+  const g = (key, value) => C.inspect({ key, caller: 'example-generator', size: 10, value }, { keys: [key] });
+  assert.deepEqual(g('weld:genvault:example-generator/snapshot', tpl('29-vault-generator-copy-bundle.json')).anomalies, []);
+  assert.deepEqual(g('weld:genvault:example-generator/snapshot', tpl('30-vault-generator-copy-modeltext.json')).anomalies, []);
+  assert.equal(g('weld:genvault:example-generator/snapshot', tpl('29-vault-generator-copy-bundle.json')).shape, 'bundle');
+  assert.equal(g('weld:genvault:example-generator/snapshot', tpl('30-vault-generator-copy-modeltext.json')).shape, 'model-text');
+  const chatTpl = tpl('28-vault-snapshot.json'), noCount = Object.assign({}, chatTpl); delete noCount.redacted;
+  for (const v of [chatTpl, noCount]) assert.deepEqual(g('weld:genvault:example-generator/chat/snap-1720000000000-abc123', v).anomalies, []);
+  assert.deepEqual(C.indexRefs(tpl('31-vault-chat-index.json')), ['weld:genvault:example-generator/chat/snap-1720000000000-abc123']);
+}
+
 // ---- backup-folder layout (pure)
 {
   const snap = { key: 'weld:genvault:alpha/snapshot', value: { at: Date.UTC(2026, 9, 6, 12, 30, 5), generator: 'alpha' } };

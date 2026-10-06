@@ -224,11 +224,35 @@
   },
   {
     "file": "28-vault-snapshot.json",
-    "label": "Vault save (Weld storage)",
+    "label": "Vault chat copy (Weld storage)",
     "direction": "wire",
     "detect": "",
     "group": "weld",
-    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"dad-chat-sync\",\n  \"folder\": \"weld:genvault:dad-chat-sync/\",\n  \"savedBy\": \"dad-chat-sync\",\n  \"name\": \"vault-1\",\n  \"kind\": \"dad-full\",\n  \"size\": 123456,\n  \"redacted\": 1,\n  \"data\": {\n    \"threads\": {},\n    \"currentThreadId\": null,\n    \"config\": {\n      \"characterBook\": {},\n      \"pollinationsApiKey\": \"[redacted]\"\n    }\n  }\n}\n"
+    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"example-generator\",\n  \"folder\": \"weld:genvault:example-generator/\",\n  \"savedBy\": \"example-generator\",\n  \"name\": \"vault-1\",\n  \"kind\": \"dad-full\",\n  \"size\": 123456,\n  \"redacted\": 1,\n  \"data\": {\n    \"threads\": {},\n    \"currentThreadId\": null,\n    \"config\": {\n      \"characterBook\": {},\n      \"pollinationsApiKey\": \"[redacted]\"\n    }\n  }\n}\n"
+  },
+  {
+    "file": "29-vault-generator-copy-bundle.json",
+    "label": "Vault generator copy (bundle shape)",
+    "direction": "wire",
+    "detect": "",
+    "group": "weld",
+    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"example-generator\",\n  \"folder\": \"weld:genvault:example-generator/\",\n  \"savedBy\": \"example-generator\",\n  \"title\": \"Example Generator\",\n  \"bundle\": {\n    \"name\": \"example-generator\",\n    \"imports\": [\n      \"kv\",\n      \"generateText\"\n    ],\n    \"code\": \"(the generator's lists panel text)\"\n  },\n  \"source\": {\n    \"apiUrl\": \"https://perchance.org/api/downloadGenerator?generatorName=example-generator\",\n    \"fetchedAt\": 1720000000000,\n    \"bytes\": 1234,\n    \"truncated\": false,\n    \"reason\": \"\",\n    \"coverage\": \"lists panel and imports only; HTML panel and src files are not included\"\n  }\n}\n"
+  },
+  {
+    "file": "30-vault-generator-copy-modeltext.json",
+    "label": "Vault generator copy (modelText shape)",
+    "direction": "wire",
+    "detect": "",
+    "group": "weld",
+    "text": "{\n  \"v\": 1,\n  \"at\": 1720000000000,\n  \"protocol\": 1,\n  \"generator\": \"example-generator\",\n  \"folder\": \"weld:genvault:example-generator/\",\n  \"savedBy\": \"example-generator\",\n  \"title\": \"Example Generator\",\n  \"modelText\": \"(the generator's lists panel text)\",\n  \"outputTemplate\": \"(the generator's HTML panel text)\",\n  \"srcManifest\": {}\n}\n"
+  },
+  {
+    "file": "31-vault-chat-index.json",
+    "label": "Vault chat index",
+    "direction": "wire",
+    "detect": "",
+    "group": "weld",
+    "text": "[\n  {\n    \"name\": \"vault-1\",\n    \"key\": \"weld:genvault:example-generator/chat/snap-1720000000000-abc123\",\n    \"takenAt\": 1720000000000,\n    \"threadCount\": 1,\n    \"charCount\": 2\n  }\n]\n"
   }
 ];
   return Object.freeze({ rows: Object.freeze(rows.map(r => Object.freeze(r))), byFile: Object.freeze(rows.reduce((m, r) => { m[r.file] = r; return m; }, {})) });

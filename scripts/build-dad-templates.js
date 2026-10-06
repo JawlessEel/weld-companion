@@ -34,7 +34,10 @@ const meta = {
   '25': ['Weld model info result', 'wire', '', 'weld'],
   '26': ['Weld storage link record', 'wire', '', 'weld'],
   '27': ['Weld bus envelope', 'wire', '', 'weld'],
-  '28': ['Vault save (Weld storage)', 'wire', '', 'weld']
+  '28': ['Vault chat copy (Weld storage)', 'wire', '', 'weld'],
+  '29': ['Vault generator copy (bundle shape)', 'wire', '', 'weld'],
+  '30': ['Vault generator copy (modelText shape)', 'wire', '', 'weld'],
+  '31': ['Vault chat index', 'wire', '', 'weld']
 };
 const files = fs.readdirSync(dir).filter(f => /^\d\d-/.test(f)).sort();
 const rows = files.map(f => {

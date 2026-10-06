@@ -1,0 +1,9 @@
+[
+  {
+    "name": "vault-1",
+    "key": "weld:genvault:example-generator/chat/snap-1720000000000-abc123",
+    "takenAt": 1720000000000,
+    "threadCount": 1,
+    "charCount": 2
+  }
+]

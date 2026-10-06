@@ -36,7 +36,10 @@ correctly. Files are prefixed in intake/output groups:
 | 21 | `storyforge-characters.json` | Story Forge ZIP part | — | ZIP also holds `*_World.png`, `*_Name.png`, `worldbook.json` (= 04), `README.txt`. |
 | 22 | `dad-char-hub.json` | Hub publish payload | `dad-char` | `{type:"dad-char",version:3.0,timestamp,data,meta}`. Card bodies live in per-user editable files. |
 | 23–27 | `weld-*.json` | Weld Skybridge wire shapes | — | `ai` request/result, `modelInfo` result, storage link record, bus envelope. |
-| 28 | `vault-snapshot.json` | Vault save (Weld storage) | — | Chat copy: `{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full", size, redacted, data:{…}}` at `weld:genvault:<generator>/chat/snap-…`, index at `…/chat/index`. Generator copy: same envelope, `kind:"generator-source"`, at `weld:genvault:<generator>/snapshot`. |
+| 28 | `vault-snapshot.json` | Vault chat copy (Weld storage) | — | `{v:1, at, protocol, generator, folder, savedBy, name, kind:"dad-full", size, redacted, data:{…}}` at `weld:genvault:<generator>/chat/snap-<at>-<rand6>`. `redacted` (a count of redacted secret values) is OPTIONAL: some generators omit it. The tag in the example is a placeholder; every generator stamps its own. |
+| 29 | `vault-generator-copy-bundle.json` | Vault generator copy, bundle shape | — | `{v, at, protocol, generator, folder, savedBy, title, bundle:{name,imports,code}, source:{apiUrl,fetchedAt,bytes,truncated,reason,coverage}}` at `weld:genvault:<generator>/snapshot`. Covers the lists panel and imports only. |
+| 30 | `vault-generator-copy-modeltext.json` | Vault generator copy, modelText shape | — | `{v, at, protocol, generator, folder, savedBy, title, modelText, outputTemplate, srcManifest}` at the same key. A different generator may write this shape instead of 29; readers must accept both. |
+| 31 | `vault-chat-index.json` | Vault chat index | — | Array of `{name, key, takenAt, threadCount, charCount}` at `weld:genvault:<generator>/chat/index`. |
 
 ## Rules for anything you build (human or AI)
 

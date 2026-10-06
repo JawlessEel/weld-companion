@@ -9,7 +9,7 @@ const C = require('../src/skills-core.js');
 
 const dir = path.join(__dirname, '..', 'docs', 'dad-chat', 'file-templates');
 const onDisk = fs.readdirSync(dir).filter(f => /^\d\d-/.test(f)).sort();
-assert.equal(T.rows.length, 28);
+assert.equal(T.rows.length, 31);
 assert.deepEqual(T.rows.map(r => r.file), onDisk, 'module and docs folder list the same files');
 for (const r of T.rows) {
   assert.equal(r.text, fs.readFileSync(path.join(dir, r.file), 'utf8').replace(/\r\n/g, '\n'), r.file + ' matches the docs copy');
