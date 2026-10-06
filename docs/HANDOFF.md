@@ -7,7 +7,8 @@ Last updated: 2026-10-06. Read `AGENTS.md` first; it is the rulebook. This file 
 - Fork `JawlessEel/weld-companion`, branch `main` at `8730527` ("pair the token automatically and add a hidden login autostart (1.67.0)"), VERIFIED on 2026-10-06.
 - `origin` and `upstream` (`therealwestninja/weld-companion`) are both configured as of 2026-10-06. `main` is 56 commits ahead of and 1 behind `upstream/main`.
 - Trial merge of `upstream/main` into `main` (aborted, nothing committed) hit 18 conflicts, mostly add/add. The one upstream-only commit (`aa68ab5`, PR #7, a squash of an earlier snapshot of this fork's own Dev/Skills/Studio work) differs from the fork mostly by lines the fork added later. Do not plain-merge it; decide between recording it with `git merge -s ours upstream/main` or leaving it.
-- Not run yet by the person writing this: `npm install`, `npm run build`, the tests.
+- 2026-10-06: `npm run check` passed on Node v22.23.2 (no dependencies, so no `npm install`): generated bundles match source, `node --check weld-companion.user.js` OK, all 19 test files report passed, working tree stayed clean. The live LM Studio smoke test (`node tests/studio-lm-smoke.js`) was NOT run: it needs a running local server the sandbox can't reach.
+- LM Studio is already supported: provider "Local - OpenAI-compatible", default endpoint `http://localhost:1234`, requests via `GM_xmlhttpRequest` (`@connect localhost`, `127.0.0.1`, `*`), so browser CORS is not the blocker.
 - Many feature branches exist on origin (`codex/*`, `feat/*`, `fix/*`, `pr/*`). Which are merged or stale is unchecked.
 
 ## How the generator side connects (VERIFIED from the plugin's source, v1.4.1)
