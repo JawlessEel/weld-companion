@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.64.0
+// @version      1.65.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.64.0';
+  var WC_VERSION = '1.65.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -14426,12 +14426,1019 @@
 /* END GENERATED DEV */
 
 /* BEGIN GENERATED SKILLS */
+/* Structure references for Skills prompts: layout diagrams, file shapes and worked examples.
+   Plain text only (String.raw, so JSON escapes stay literal). No network or editor access.
+   Dad-Chat packs are distilled from docs/dad-chat/architecture.md and dad-native-format.md. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldSkillsRefs = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  const pack = (id, title, text) => Object.freeze({ id, title, text: text.trim() });
+  const packs = [
+    // ------------------------------------------------------------------ Dad-Chat
+    pack('dad-layout', 'Dad-Chat project layout and load order', String.raw`
+Dad-Chat (Dad Chat v2) is one Perchance generator made of these files. Names below come
+from the project documentation; confirm each against the real source before relying on it.
+
+  main.pjs ......... plugin imports + tuning knobs + $meta. NO app logic.
+  |                  imports: kv, generateText, image, uploadPlugin, superFetchPlugin,
+  |                           createServerSocket, weldSkybridge, comments forum
+  |                  knobs:   chatToCardMaxMessages = 40, chatToCardMaxCast = 6
+  |                  helpers: themeStyle, forumSubmitStyle, galleryEmbedHtml, $meta, commentOptions
+  v
+  index.html ....... (a) hub SERVER: the first <script type="text/x-server-plugin"> block
+  |                      (card index, ratings, authors, regions presence; code is public)
+  |                  (b) app shell: DOM layout + first-paint CSS + the script tags below
+  v
+  src/
+    styling.css .... ALL app CSS. The loading-screen block is duplicated inline in
+    |                index.html for first paint: keep both copies in sync.
+    manifest.json .. PWA manifest (display only)
+
+  SCRIPT LOAD ORDER (later files reach earlier ones only through window.*):
+    1  pjs-globals.js ....... root.* imports -> window.* (kv, generateText, image,
+    |                         uploadPlugin, superFetchPlugin); ensureLib/ensureCss;
+    |                         escHtml; pjsLiteral (wrap EVERY root.image({prompt}) call)
+    2  weld-skybridge.js ..... optional Weld Companion link, fully additive
+    3  agent-core.js ........ VFS tool definitions + argument sanitizers (window.DadAgentCore)
+    4  code-viewer.js, providers.js ... provider/model catalog (window.Dad_PROVIDER_GROUPS)
+    5  on-device-webgpu.js ... WebGPU model download manager (Profile modal)
+    6  small UI modules ...... diag.js, theme-customizer.js, i18n.js, secret-vendor.js,
+    |                         reminder-presets.js, prefix-styles.js, persona-dropdown.js,
+    |                         avatar-generator.js, tokenizer.js, regions.js, image-link.js,
+    |                         forge-core.js (Dad-native normalize/repair),
+    |                         forge-bridge.js (Dad-native <-> Tavern/Forge conversion + download)
+    7  henry-tucker.js ....... built-in soft preset (persona, greetings, lore, world bible);
+    |                         seeded on demand, never force-injected
+    8  image-forge.js ........ window.ImageForge: world/style prompt prepend, negative, CFG;
+    |                         wraps every image call
+    9  app.js (about 2.4 MB) . THE APP: state, chat engine, prompt assembly, render,
+    |                         persistence, import/export, hub client, all modals
+    10 studios (need app.js globals): forge-studio.js (window.WS, World Studio),
+                              story-forge.js (window.StoryForge), scene-cast.js
+                              (window.SceneCast), immersive.js (voice/SFX/scene image)
+
+  WHERE NEW CODE BELONGS
+    helper many files need ........ pjs-globals.js (loads first)
+    provider or model ............. providers.js (a group in Dad_PROVIDER_GROUPS)
+    UI widget with no chat state .. small module, loaded before app.js
+    chat state or prompt change ... app.js, a narrow edit beside the related function
+    world / lore / cast tooling ... a studio file (loads after app.js)
+    styling ....................... styling.css (plus the inline first-paint copy if relevant)
+    new Perchance import .......... main.pjs, then bridge it to window.* in pjs-globals.js
+
+  DEBUG HANDLES: window.ProseEngine, ImageForge, WS, StoryForge, SceneCast,
+  DadAgentCore, OnDeviceWebGPU.
+`),
+    pack('dad-flow', 'Dad-Chat chat-turn flow and prompt assembly', String.raw`
+  INPUT              handleSend() in app.js: composer text + attachments + @Name guest
+  |                  summons (resolveTurnSummonId; narration/impersonation use the GUEST
+  |                  persona and lorebook, not the host's)
+  v
+  PROMPT ASSEMBLY    MemoryEngine.buildHistory (the diagnostics viewer runs the SAME
+  |                  builders, so preview == real prompt)
+  |   1 pre-instructions (preset/custom + tone) ......... FIXED, always sent, sent first
+  |   2 character persona (+ player userDesc) ............ FIXED, always sent
+  |        every persona character is paid on every turn: cost control lives here
+  |   3 dynamic context, in this order:
+  |        world block -> matched lore ([WORLD/LORE DATABASE], <= 6,656 chars,
+  |        world description <= 50% of that) -> manual memory -> summaries ->
+  |        retrieved memories -> pinned
+  |   4 recent chat turns, then steering: reminder, density, ledger, author's note,
+  |        prose director, scene state
+  |   Lore ranking: keyword gate (threshold 0.9, typo tolerant) -> +0.1 per extra key
+  |   match (max 0.3) -> priority bonus (up to +0.5) -> constant entries first -> fill the
+  |   budget in rank order (injected / partial for priority > 80 / budget_cut).
+  |   Ledger and prose blocks skip non-roleplay presets (Dad, Schnell Studio).
+  v
+  GENERATION         provider route from providers.js (cloud / local runtime / on-device)
+  |                  mid-turn tools: web_search (DDG via superFetch, SearXNG fallback),
+  |                  image_gen (through ImageForge), VFS file tools (agent-core.js)
+  v
+  RENDER             nodes -> DOM (createNodeDOM); markdown via marked + DOMPurify;
+  |                  speaker-label stripping (stripKnownSpeakerLabels via
+  |                  getCleanNodeContent); streaming renderer; action bars
+  |                  (Illustrate, Send-to-Image-Gen, TTS, rating)
+  v
+  POST-TURN          Immersive.onTurnComplete (scene state/beat/preference), continuity
+                     ledger updater (roleplay only), _persistThreads -> debounced Cloud
+                     Backup, embedding warm-start for vectorized lore
+
+  BUDGETS: lore block 6,656 chars; global scan depth 4; per-entry scanDepth 1-20;
+  chat-to-card window 40 messages; free-tier total 8,000 (oldest chat trimmed first,
+  curated content never trimmed).
+`),
+    pack('dad-data', 'Dad-Chat data stores (where state lives)', String.raw`
+  config.characterBook[id] ............ character objects (authority store for cards)
+  config.worldBook.worlds[id] ......... worlds; config.worldBook.activeWorldId = live one
+  standalone lorebooks + lorebookRefs[] linked books, merged AFTER embedded lore
+  threads -> nodes (threads, currentThreadId)  chat history as a branch TREE;
+                                       the renderer walks the active branch only
+                                       (getRenderPath)
+  thread.* settings (authorNote, proseDirector, detachFromOrigin, userDescOverride,
+  per-thread toggles) override app and character defaults
+
+  PERSISTENCE
+    live session ............. localStorage
+    slots / index metadata ... kv.chatApp
+    image blobs .............. ImageDB; per-thread VFS workspaces live outside slots
+    optional Cloud Backup .... mirrors the last 200 messages to a public editable upload file
+
+  GOTCHA: config is a top-level const (a global lexical), NOT window.config. A guard like
+  window.config || {} is always empty.
+`),
+    pack('dad-character', 'Dad-native character file (dad-char) with example', String.raw`
+Envelope: { "type": "dad-char", "version": 2, "data": { ...character... } }
+
+FIELDS (config.characterBook[id])
+  id ................ unique string (char_..., char_preset_..., char_imported_...); never reuse
+  name .............. display name and the {{char}} value
+  avatar ............ portrait only (URL or data); never reaches the model
+  description ....... SHORT BIO, 1-3 sentences (import caps at 2000). Never paste the persona here
+  systemPrompt ...... PERSONA BODY sent every turn (FIXED context). Canon + voice only
+  profile ........... optional editor fields that compile into systemPrompt: name, age, gender,
+                      appearance, personality, background, scenario, systemNote,
+                      customSections[{header, content}]. If you emit profile, keep systemPrompt
+                      consistent with it
+  exampleDialogue ... [{name1, content1, name2, content2}] few-shot voice pairs (< ~40 words each)
+  firstMessage ...... string[]: [0] = opening greeting, [1...] = alternates (hooks live here)
+  userOverride ...... {name, description} player persona
+  preInstruction .... preset key (default, roleplay, roleplay_v2, dad_roleplay, author_mode...) or "custom"
+  preInstructionCustom  only used when preInstruction is "custom"
+  reminderMessage ... ONE focused end-of-prompt directive
+  authorNote, tags, lorebook {entryId: entry}, lorebookRefs [{id, enabled}]
+  NEVER author: lorebookArchive, lastLoreRun, useCount, lastInjectedAt (runtime only)
+
+EXAMPLE
+{
+  "type": "dad-char",
+  "version": 2,
+  "data": {
+    "id": "char_mara_quill",
+    "name": "Mara Quill",
+    "description": "Dry-witted ferry pilot who knows every sandbar on the Sable River.",
+    "systemPrompt": "# Character Profile: {{char}}\n## Appearance\nLean, sunburnt, braid tied with fishing line.\n## Personality\nBlunt, patient with strangers, hates wasted words.\n## Background\nInherited the ferry from her father; still owes the bank for the new boiler.\n## Scenario\n{{user}} needs passage upriver before storm season closes the channel.\n[SYSTEM NOTE: Short plain sentences. Never narrate {{user}}'s actions.]",
+    "exampleDialogue": [
+      { "name1": "{{user}}", "content1": "Can you get me to Harrow Bend by dark?",
+        "name2": "{{char}}", "content2": "Maybe. Depends what you're carrying and whether you plan to complain about it." }
+    ],
+    "firstMessage": [
+      "Mara is coiling rope when you reach the dock. \"Ferry leaves when the fog does. Pay now or swim later.\"",
+      "The boiler coughs twice. Mara slaps it and looks you over. \"You the one asking about Harrow Bend?\""
+    ],
+    "preInstruction": "dad_roleplay",
+    "reminderMessage": "Keep Mara guarded and practical; let trust be earned over several scenes.",
+    "tags": ["river", "slice-of-life"],
+    "lorebook": {
+      "lore_boiler": { "id": "lore_boiler", "name": "The Boiler", "keys": ["boiler", "engine", "steam"],
+        "content": "The Wren's boiler is new, patched and mortgaged. {{char}} talks to it like a stubborn mule.",
+        "priority": 10, "constant": false, "vectorized": false, "enabled": true,
+        "excludeRecursion": false, "scanDepth": null }
+    }
+  }
+}
+`),
+    pack('dad-lore', 'Dad-native lore entry schema, ranking and example', String.raw`
+ONE entry schema is used everywhere: character lorebook, standalone lorebook and world.
+
+{
+  "id": "lore_abc123",
+  "name": "Bad Luck",
+  "keys": ["bad luck", "bay gelding", "horse"],
+  "content": "Bad Luck is {{char}}'s swaybacked bay gelding. Patient, stubborn, smarter than he looks.",
+  "priority": 10,
+  "constant": false,
+  "vectorized": false,
+  "enabled": true,
+  "excludeRecursion": false,
+  "scanDepth": null
+}
+
+  id ............ stable per entry
+  name .......... real human name shown as [Entry: name]; never "Entry 3"
+  keys .......... 3-6 lowercase trigger words, DISTINCT across entries. Overlap (the same
+                  key in 3 entries) co-fires entries and burns the 6,656-char budget
+  content ....... "Name - role. Fact 1. Fact 2. Voice cue. Constraint." Target <= 45 words
+                  (authoring cap 70). {{char}} and {{user}} are the only placeholders
+  priority ...... 1-100, default 10; higher wins ties and budget order (bonus up to +0.5)
+  constant ...... always inject, bypasses keys. Reserve for <= 2 entries per book
+  vectorized .... opt-in semantic matching (needs embeddings; otherwise keyword gate)
+  enabled ....... false = skipped entirely but preserved across import/export
+  excludeRecursion  true = hidden from recursive discovery
+  scanDepth ..... number 1-20 or null. null = global window of 4 = the correct default;
+                  never author 50 (import clamps to 20)
+
+BAD ENTRY                                   GOOD ENTRY
+  name: "Entry 3"                             name: "Settlements"
+  keys: ["nevada","desert","frontier",        keys: ["town","settlement","outpost","saloon"]
+         "west","town"]   (overlaps others)   content: 40 words, one pass per topic
+  content: 200 words, tells the same          priority: 10   constant: false
+           thing three ways                   scanDepth: null
+  scanDepth: 50   constant: true (not needed)
+
+Ranking: keyword gate (0.9, typo tolerant) -> +0.1 per extra key match (max 0.3) ->
++ priority bonus -> constants first -> budget fill in rank order.
+`),
+    pack('dad-world', 'Dad-native worlds, lorebooks and file envelopes', String.raw`
+FILE ENVELOPES (what the app writes and imports)
+  character ........ { "type": "dad-char", "version": 2, "data": { ...character... } }
+  character lore ... { "version": "2.0", "characterId", "characterName", "exportedAt", "entries": [ ... ] }
+  standalone book .. { "version": "2.0", "lorebookId", "lorebookName", "characterName",
+                       "description", "enabled", "exportedAt", "entries": [ ... ] }
+  world ............ { "type": "dad-world", "version": 1, "exportedAt": "...", "world": { ... } }
+  chat + character . { "type": "dad-char-chat", "version": 2, "character": { }, "thread": { } }
+
+WORLD (config.worldBook.worlds[id], live one chosen by activeWorldId)
+{
+  "type": "dad-world",
+  "version": 1,
+  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "world": {
+    "id": "world_sable_river",
+    "name": "The Sable River",
+    "description": "A slow brown river cutting through dust country. Ferries are the only roads. Everyone knows everyone's debts. Magic does not exist; rumor does.",
+    "entries": {
+      "lore_ferries": { "id": "lore_ferries", "name": "Ferries", "keys": ["ferry", "crossing", "dock"],
+        "content": "Three ferries work the Sable. Prices rise at dusk. Pilots trade news for free passage.",
+        "priority": 20, "constant": false, "vectorized": false, "enabled": true,
+        "excludeRecursion": false, "scanDepth": null }
+    }
+  }
+}
+
+World rules: the description is ALWAYS injected (before entries, capped at 50% of the lore
+budget); state in it what every character knows. Entries carry the rest and are ranked like
+character lore. A bible with no entries still injects.
+
+MERGE ORDER into the prompt: (1) active world description + world entries, (2) the
+character's embedded lorebook, (3) attached standalone books in attach order (first source
+wins on duplicates). A book contributes only if the book is enabled AND its link in
+lorebookRefs is enabled AND the entry is enabled.
+`),
+    pack('dad-rules', 'Dad-native authoring rules and cost control', String.raw`
+MASTER FORMAT: Dad-native is the master. Tavern V2/V3 shapes are share-only exports and lose data
+(mes_example slot empty, lorebookRefs flattened, scanDepth clamped). Imports may accept Tavern
+shapes; new content and default exports must be Dad-native.
+
+RULES
+  - Persona (systemPrompt): canon + voice + speech patterns only. Never repeat the
+    pre-instruction (agency, no puppeting {{user}}, consequences, proactive driving) or the
+    lorebook (living world, reputation spreads). Those are already sent.
+  - One fact once: a nickname origin, a scar story or a signature object lives in ONE field.
+  - description (bio) is NOT systemPrompt (persona). Never leave description empty.
+  - Greetings are hooks, not lore: keep verbatim, do not compress plot out of them.
+  - Example dialogue is voice data: keep exchanges intact, short and in voice.
+  - Lore: real names, 3-6 unique keys, scanDepth null, constant <= 2 per book, one spectrum
+    pass per topic (no small/large/regardless-of-size triple telling).
+  - Only {{char}} and {{user}} are substituted. Text is data: no code, no other placeholders,
+    no instructions addressed to the reader.
+
+COST CONTROL (worked reference: Henry Tucker, 18,896-char persona, about 25k FIXED chars/turn)
+  cut order by saving: [SYSTEM INSTRUCTION] block (~8k -> ~2.5k, dedupe against pre-instruction
+  and lore) -> towns entry (5,397 -> ~1,800) -> merge frontier entries (4,481 -> ~1,500) ->
+  body/clothing/backstory (~42%) -> weather/horses/stagecoach (~50%) -> scenario (752 -> ~450).
+  Keep greetings and example exchanges verbatim. Dedupe keys (nevada/desert/frontier in ONE
+  entry). scanDepth 50 -> null. Rename "Entry N" to real names.
+
+BEFORE / AFTER (persona line)
+  before: "{{char}} always lets {{user}} decide, never acts for {{user}}, reacts to consequences,
+           and drives the plot." (duplicates the pre-instruction, about 25 words wasted per turn)
+  after:  delete it. The pre-instruction already sends it.
+`),
+    pack('dad-code-rules', 'Dad-Chat editing conventions and live verification', String.raw`
+CONVENTIONS
+  - window.* is the cross-file API. Later files call earlier ones through window.*.
+  - config is a top-level const, not window.config.
+  - Text is data. Escape untrusted strings with escHtml for HTML and pjsLiteral for image
+    prompts (the image plugin evaluates prompts as Perchance templates, so wrap every
+    root.image({prompt}) call). Card and lore text is never evaluated.
+  - Storage keys, IndexedDB names and kv.chatApp slot shapes are a compatibility contract with
+    saved data. Add fields; never rename or remove without a migration.
+  - app.js is about 2.4 MB: find code by function name, edit narrowly beside it, never rewrite
+    or reformat the whole file. Do not remove existing functions, commands or code paths;
+    report dead-looking code instead.
+  - Keep the inline first-paint CSS in index.html and the loading block in styling.css in sync.
+  - Never hardcode or log keys, tokens or webhook URLs.
+
+HOW TO MAKE ONE SAFE EDIT
+  1 Find the function and every caller (search the name across src/ and index.html).
+  2 State the file, the function and the load-order position you will touch.
+  3 Change the smallest amount of code that works; keep public window.* names.
+  4 Re-read the edited region and check the neighbors it calls and is called by.
+  5 Verify: reload the page, exercise the changed path (open and close the modal, run the
+    flow), confirm zero console errors and an empty perchanceErrors list. If you cannot run
+    the page, say so plainly instead of claiming it works.
+`),
+    pack('dad-hub', 'Dad-Chat hub (sharing) flow', String.raw`
+  client (app.js hub section) <--createServerSocket() RPC--> server (first script in index.html)
+
+  RPCs: hubSearch, hubGetCard, hubGetAuthor, hubRegisterAuthor, hubBeginUpload, hubRegisterCard,
+        hubUpdateCard, hubMyCards, hubRate, hubReport, hubDownloaded, hubStats (+ admin/backup)
+  card bodies .... live in per-user editable upload files (bodyUrl)
+  server index ... holds ONLY metadata + ratings + owner keys; owner keys are never returned
+  presence ....... live region counts ride the ephemeral dad:regions pubsub channel
+                   (regions.js beats about every 30 s)
+  server code .... is public: never put secrets in it
+`),
+    // ------------------------------------------------------------ Tavern / SillyTavern / Chub
+    pack('st-layout', 'Where card, lore and chat features live in a chat app', String.raw`
+A chat-card app is a pipeline. Find these stages in the REAL project before editing:
+
+  FILES IN -----> PARSE -----> NORMALIZE -----> APP MODEL ----> PROMPT BUILD ----> MODEL ----> RENDER
+  .png (tEXt)    detect spec   fill defaults    character{}      ordered sections   reply     markdown
+  .json card     + version     KEEP unknown     lorebook[]       + budget trim                swipes
+  World Info     validate      extensions{}     chats[]/messages
+  .jsonl chat    size limits   (never drop)     personas, notes
+        ^                                              |
+        '----- EXPORT (reverse): app model -> spec JSON -> optional PNG embed
+
+  FEATURE -> STAGE IT TOUCHES
+    card import/export ................ PARSE, NORMALIZE, EXPORT
+    lorebook / World Info ............. NORMALIZE, PROMPT BUILD (activation + budget)
+    macros ({{char}}, {{user}}) ....... PROMPT BUILD and RENDER (one shared expander)
+    Author's Note, depth prompts ...... PROMPT BUILD
+    example dialogue, system prompt ... PROMPT BUILD
+    swipes, Continue, Regenerate ...... APP MODEL (message variants) and RENDER
+    regex rules ....................... PROMPT BUILD and/or RENDER (per rule)
+    expressions, themes, library ...... RENDER only
+    prompt inspector .................. reads PROMPT BUILD output (same function as real requests)
+
+  LOCATE FIRST: the parser, the normalizer, the exporter, the prompt builder, the renderer
+  and the storage layer. Name each file and function in your reply before changing anything.
+  Rule for every stage: unknown fields pass through untouched; card text is data and is
+  never executed.
+`),
+    pack('st-card-v2', 'Character Card V2 structure (annotated example)', String.raw`
+JSON card, spec "chara_card_v2". Every value in data is a string unless noted.
+
+{
+  "spec": "chara_card_v2",
+  "spec_version": "2.0",
+  "data": {
+    "name": "Mara Quill",
+    "description": "Who the character is: appearance, history, traits (main persona text).",
+    "personality": "Short trait summary.",
+    "scenario": "Where and why the chat starts.",
+    "first_mes": "Opening message. {{char}} and {{user}} macros allowed.",
+    "mes_example": "<START>\n{{user}}: Hello.\n{{char}}: Hmph. Mind the rope.\n<START>\n{{user}}: ...",
+    "creator_notes": "Notes for people, NOT sent to the model.",
+    "system_prompt": "Optional replacement or supplement for the main system prompt.",
+    "post_history_instructions": "Instruction placed after the chat history.",
+    "alternate_greetings": ["Another opening message.", "A third one."],
+    "character_book": { "name": "Harbor lore", "scan_depth": 4, "token_budget": 512,
+                        "recursive_scanning": false, "extensions": {}, "entries": [] },
+    "tags": ["river", "slice-of-life"],
+    "creator": "name of author",
+    "character_version": "1.0",
+    "extensions": {}
+  }
+}
+
+RULES THAT BREAK IMPORTS
+  - "spec" and "spec_version" are required. data holds the fields (not the top level).
+  - Missing fields are empty strings or empty arrays, never invented text.
+  - Keep UNKNOWN keys inside extensions (and any other unknown keys) when round-tripping.
+  - Legacy V1 cards have the same fields at the TOP level with no spec; accept and upgrade them.
+  - Unicode must survive: read and write UTF-8, never Latin-1.
+  - mes_example blocks are separated by <START>; each starts on its own line.
+
+COMMON EXTENSIONS (keep, do not require): talkativeness, fav, world, depth_prompt
+{ prompt, depth, role }.
+`),
+    pack('st-card-v3', 'Character Card V3 differences from V2', String.raw`
+JSON card, spec "chara_card_v3", spec_version "3.0". Same data fields as V2 PLUS:
+
+{
+  "spec": "chara_card_v3",
+  "spec_version": "3.0",
+  "data": {
+    "name": "...", "description": "...", "personality": "...", "scenario": "...",
+    "first_mes": "...", "mes_example": "...", "creator_notes": "...",
+    "system_prompt": "...", "post_history_instructions": "...",
+    "alternate_greetings": [], "tags": [], "creator": "", "character_version": "",
+    "extensions": {},
+    "nickname": "Short name used for {{char}} when set",
+    "group_only_greetings": ["Greetings used only in group chats"],
+    "creator_notes_multilingual": { "en": "...", "ja": "..." },
+    "source": ["https://example.com/original"],
+    "creation_date": 1700000000,
+    "modification_date": 1700000500,
+    "assets": [
+      { "type": "icon", "uri": "ccdefault:", "name": "main", "ext": "png" },
+      { "type": "background", "uri": "embeded://assets/bg/0.png", "name": "bg", "ext": "png" }
+    ],
+    "character_book": { "entries": [] }
+  }
+}
+
+  - V3 PNG cards use the tEXt keyword "ccv3"; V2 uses "chara". If both exist, prefer ccv3.
+  - Asset uri forms: "ccdefault:" (use the default), "embeded://path" (inside a CHARX zip;
+    note the spelling is the spec's own), http(s) URL, or a data: URI.
+  - CHARX is a zip: card.json at the root plus the assets folder.
+  - V3 lorebook entries add use_regex (bool) and position values "before_char" | "after_char".
+  - Strategy: READ V3 and V2, WRITE the version the user chose, keep unknown fields, and say
+    which V3-only fields (assets, nickname, group_only_greetings) have no home in the app.
+  - These field lists summarize the public spec; verify against the linked V3 specification
+    and a real V3 card before relying on a detail.
+`),
+    pack('st-card-png', 'PNG card layout (where the JSON hides)', String.raw`
+  PNG FILE
+   |- 8-byte signature ........ 89 50 4E 47 0D 0A 1A 0A      (reject anything else)
+   |- IHDR chunk ............... image header
+   |- ... other chunks ......... may include tEXt "chara" (V2) and/or tEXt "ccv3" (V3)
+   |- IDAT chunk(s) ............ the pixels: NEVER recompress or redraw to add metadata
+   '- IEND chunk
+
+  CHUNK = [4-byte big-endian data length][4-byte type][data][4-byte CRC32 of type + data]
+
+  tEXt data = keyword + 0x00 + text
+              keyword "chara"  text = base64( UTF-8 bytes of the V2 JSON )
+              keyword "ccv3"   text = base64( UTF-8 bytes of the V3 JSON )
+
+  READ
+    1 verify signature; walk chunks by length (stop at IEND; cap total size)
+    2 collect tEXt chunks, split at the first 0x00, match keyword (ccv3 first, then chara)
+    3 base64 decode -> UTF-8 decode -> JSON.parse inside try/catch -> validate spec
+
+  WRITE
+    1 walk the chunks of the ORIGINAL image; copy every chunk byte-for-byte
+    2 drop any existing tEXt chunk with keyword chara or ccv3
+    3 build the new tEXt chunk (correct length, CRC32 over type + data)
+    4 insert it before IEND; leave IHDR and IDAT untouched
+    5 if the image is not a PNG, convert it to PNG on a canvas ONCE and say so; never
+      silently swap in a placeholder image
+
+  VERIFY: re-read the file you wrote with the real importer and compare every field
+  (including Unicode and long text); check the pixels still match the source image.
+`),
+    pack('st-lore', 'Lorebook shapes: card character_book and World Info JSON', String.raw`
+A) EMBEDDED IN A CARD (V2/V3 character_book)
+{
+  "name": "Harbor lore", "description": "", "scan_depth": 4, "token_budget": 512,
+  "recursive_scanning": false, "extensions": {},
+  "entries": [
+    { "id": 0, "name": "The Boiler", "comment": "memo for humans",
+      "keys": ["boiler", "engine"], "secondary_keys": ["steam"], "selective": false,
+      "content": "The Wren's boiler is new, patched and mortgaged.",
+      "enabled": true, "constant": false, "case_sensitive": false,
+      "insertion_order": 100, "priority": 10, "position": "before_char", "extensions": {} }
+  ]
+}
+
+B) STANDALONE SILLYTAVERN WORLD INFO FILE (entries keyed by id; common fields)
+{
+  "entries": {
+    "0": {
+      "uid": 0, "key": ["boiler", "engine"], "keysecondary": ["steam"],
+      "comment": "The Boiler", "content": "The Wren's boiler is new, patched and mortgaged.",
+      "constant": false, "selective": true, "selectiveLogic": 0,
+      "order": 100, "position": 0, "disable": false,
+      "excludeRecursion": false, "preventRecursion": false, "delayUntilRecursion": false,
+      "probability": 100, "useProbability": true, "depth": 4,
+      "group": "", "groupOverride": false, "groupWeight": 100,
+      "scanDepth": null, "caseSensitive": null, "matchWholeWords": null,
+      "sticky": null, "cooldown": null, "delay": null, "displayIndex": 0
+    }
+  }
+}
+
+FIELD MAP (card book  <->  World Info file)
+  keys ................ key                 | secondary_keys ... keysecondary
+  content ............. content             | name / comment ... comment
+  enabled ............. NOT disable         | constant ......... constant
+  insertion_order ..... order               | priority ......... (no direct field; keep in extensions)
+  selective ........... selective           | position ......... position (string vs number)
+  case_sensitive ...... caseSensitive       | scan_depth ....... scanDepth (per entry in WI)
+  World Info position numbers: 0 before char, 1 after char, 2 and 3 around the Author's
+  Note, 4 at depth (uses depth and role). Treat numbers beyond this as unknown and keep them.
+  selectiveLogic: 0 AND ANY, 1 NOT ALL, 2 NOT ANY, 3 AND ALL (verify with a real export).
+
+Rules: inspect a real exported file first; convert keys between string and array carefully;
+keep unknown fields; show a preview with warnings; merge, never overwrite silently.
+`),
+    pack('st-chatlog', 'Chat log JSONL structure', String.raw`
+One JSON object per line. Line 1 is metadata; every later line is one message.
+
+{"user_name":"You","character_name":"Mara Quill","create_date":"2026-10-05 @09h 30m 00s","chat_metadata":{}}
+{"name":"Mara Quill","is_user":false,"is_system":false,"send_date":"2026-10-05 @09h 30m 05s","mes":"Mara is coiling rope when you reach the dock.","swipe_id":0,"swipes":["Mara is coiling rope when you reach the dock.","The boiler coughs twice."],"extra":{}}
+{"name":"You","is_user":true,"is_system":false,"send_date":"2026-10-05 @09h 30m 40s","mes":"Can you get me to Harrow Bend?","extra":{}}
+
+  mes ............ the active text; swipes[swipe_id] should equal mes
+  swipe_id ....... index of the active variant; swipes is the list of all variants
+  is_system ...... narrator/system lines (hidden from the model in some flows)
+  extra .......... keep unknown keys; send_date formats vary, so preserve the original string
+  Import: parse line by line (skip blank lines, report bad lines by number), validate before
+  mutating, import into a NEW chat, never overwrite. Export: one object per line, UTF-8.
+`),
+    pack('st-prompt-order', 'Prompt assembly order with depth injection', String.raw`
+Typical Tavern-style order (the project's own order wins; locate its prompt builder):
+
+  [ system prompt ]                  main prompt, or the card's system_prompt if allowed
+  [ world info: before character ]   entries with position "before"
+  [ character description ]
+  [ personality ]
+  [ scenario ]
+  [ world info: after character ]
+  [ user persona description ]       position is configurable
+  [ example dialogue ]               each <START> block, dropped FIRST when over budget
+  [ chat history, oldest -> newest ]
+        |-- Author's Note injected at depth N from the END (depth 0 = after the last message)
+        |-- world info entries set to "at depth"
+        '-- depth prompt from the card (extensions.depth_prompt: prompt, depth, role)
+  [ post_history_instructions ]      last, strongest position
+
+  BUDGET: when the context is full drop in this order: example dialogue, oldest history,
+  low-priority lore. Never drop the system prompt or the newest user message.
+  Show an approximate token count per section and label it an estimate.
+  Anything that reaches the model must be visible in a preview the user can read.
+`),
+    pack('st-macros', 'Macro list and safe expansion rules', String.raw`
+  ALWAYS     {{user}}  {{char}}  (legacy forms <USER> and <BOT>)
+  COMMON     {{random:a,b,c}} one random item        {{pick:a,b,c}} stable per chat
+             {{roll:1d20}} dice                      {{time}}  {{date}}  {{weekday}}
+             {{newline}}  {{trim}}                   {{// comment}} removed from output
+  RULES      expand once, no recursion; unknown macros stay UNCHANGED; never evaluate code;
+             one shared expander used by display and prompt; implement only the macros the
+             user lists. Names with braces or Unicode must expand verbatim.
+
+  EXAMPLE    "{{char}} nods at {{user}}. {{random:Rain,Fog}} again."
+          -> "Mara nods at Ben. Fog again."      "{{unknown_thing}}" stays "{{unknown_thing}}"
+`),
+    pack('st-dad-map', 'Tavern V2/V3 <-> Dad-native field mapping', String.raw`
+IMPORT (Tavern -> Dad-native)             EXPORT (Dad-native -> Tavern, lossy)
+  description -> systemPrompt               systemPrompt -> description
+    (+ [Scenario] + [Examples] if absent)     bio description -> personality
+  personality -> bio description            profile.scenario -> scenario
+  scenario -> profile.scenario              firstMessage[0] -> first_mes
+  first_mes + alternate_greetings           firstMessage[1...] -> alternate_greetings
+     -> firstMessage[]                      custom pre-instruction -> system_prompt
+  system_prompt -> custom pre-instruction   reminderMessage -> post_history_instructions
+  post_history_instructions                 lorebook -> character_book
+     -> reminderMessage
+  character_book -> lorebook (keys,         DROPPED OR LOSSY ON EXPORT
+     priority, scanDepth clamped to 20)       mes_example slot is always empty (the text
+  extensions.forge -> persona, world            survives inside description)
+     bible, kind                              lorebookRefs flattened; scanDepth > 20 clamped
+  creator_notes -> bio if personality          empty personality becomes a creator-notes bio
+     is empty
+  NO DAD SLOT (dropped on import): selective, probability, group*, sticky, cooldown, delay,
+  role, book-level scan_depth, non-forge extensions.*
+`)
+  ];
+
+  // Concrete worked examples shown to the AI helper (preset id -> text). Adapt, do not copy values.
+  const examples = {
+    'card-spec-export': String.raw`
+Request: "Export Mara Quill as a V2 card PNG."
+Good result: the app has {name:'Mara Quill', persona:'...', greeting:'...', altGreetings:['...']}.
+The exporter builds {spec:'chara_card_v2', spec_version:'2.0', data:{name:'Mara Quill',
+description:<persona>, first_mes:<greeting>, alternate_greetings:[...], personality:'',
+mes_example:'', character_book:null-or-book, extensions:<kept unknown fields>}}, base64-encodes
+the UTF-8 JSON into a tEXt chunk "chara" inserted before IEND, and re-reads the finished PNG
+with the importer to confirm every field matches. Empty fields stay '' (never invented).
+Bad result: redrawing the image on a canvas (changes pixels), dropping extensions, or
+writing description text into personality "to fill the gap".`,
+    'card-spec-import': String.raw`
+Request: "Import this PNG card."
+Good result: signature ok -> tEXt chunks found: ccv3 AND chara -> prefer ccv3 -> base64 -> UTF-8
+-> JSON ok -> spec 'chara_card_v3' -> preview "Mara Quill: 2 alternate greetings, 14 lore
+entries, warning: 3 assets not used" -> user confirms -> saved as a NEW character, unknown
+extensions kept in a retained blob.
+Bad result: executing HTML in description, overwriting an existing "Mara Quill" silently, or
+failing the whole import because one lore entry has an unknown field.`,
+    'card-field-map': String.raw`
+Good result is a table like:
+  app field        | card field            | status  | note
+  persona          | description           | exact   |
+  greeting         | first_mes             | exact   |
+  greetings[1..]   | alternate_greetings   | exact   |
+  authorNote       | extensions.depth_prompt | lossy | role and depth must be added
+  mood sprites     | (none in V2)          | missing | V3 assets could carry them
+Every row is based on code you read (cite the function) or a sample card; unverified rows are
+labeled "unverified".`,
+    'card-validator': String.raw`
+Good finding: "[warn] first_mes is empty -> the chat opens with no greeting. Fix: write a
+greeting or set alternate_greetings[0]." "[warn] lore 'Settlements' has key 'town' which is
+also a key in 'Saloon' -> both fire together; keep 'town' in one." "[error] description
+contains <script>: strip on display, keep as data."
+Bad finding: "Description could be better." (no field, no fix).`,
+    'token-diet': String.raw`
+Before (31 words): "Mara is a ferry pilot. She is a ferry pilot who works on the river. She
+always speaks bluntly and never wastes words, because she does not like to waste words."
+After (15 words): "Ferry pilot on the Sable River. Blunt; hates wasted words." Saved about 16
+words. Every fact survived (job, place, voice). Mark guesses as "check with author".`,
+    'card-creator-editor': String.raw`
+Good result: one form with a labeled input for each V2 field (name, description, personality,
+scenario, first message, example messages, system prompt, post-history, alternate greetings,
+creator notes, tags, creator, version, lorebook), an approximate token count under each long
+field, a live preview of the assembled prompt section, autosave of drafts, and Export/Import
+buttons that call the existing card code. Existing saved characters open unchanged.`,
+    'alt-greetings-swipes': String.raw`
+Stored message: {id:'m7', role:'ai', variants:['Mara nods.','Mara shrugs.'], active:1}.
+The visible text is variants[active]; the model receives ONLY the active variant. Regenerate
+appends a variant (never deletes). Arrow buttons change active. Old messages without
+variants load as variants:[text], active:0.`,
+    'macros-support': String.raw`
+Test box: input "{{char}} greets {{user}}. {{random:red,blue}} sky. {{nope}}" with
+char=Mara, user=Ben shows "Mara greets Ben. blue sky. {{nope}}" (unknown macro unchanged,
+no recursion, no code evaluated). The same expander is used for display and for the prompt.`,
+    'example-dialogue': String.raw`
+mes_example text "<START>\n{{user}}: Hi.\n{{char}}: Mind the rope.\n<START>\n{{user}}: Bye.\n{{char}}: Hmph."
+parses into 2 blocks of 2 lines each. Under budget pressure the blocks are dropped before any
+history is trimmed. A per-character switch disables them. Export writes them back unchanged.`,
+    'author-note-depth': String.raw`
+History = 10 messages, note depth 2, role system: the note is inserted before the last 2
+messages (position 8 of 10). Depth 0 = after the final message. Depth 50 with 10 messages
+goes at the very top of history. Repeat interval 3 = inserted on every 3rd turn. The preview
+shows the exact landing position and the note never appears in the visible transcript.`,
+    'system-post-history': String.raw`
+Card has system_prompt "Stay in first person." and post_history_instructions "Keep replies
+under 120 words." With "use card instructions" ON both are sent, system prompt first and the
+post-history text after the last message, and the inspector shows both with their positions.
+With the switch OFF neither is sent. A card with neither field changes nothing.`,
+    'prompt-inspector': String.raw`
+Good output (read-only, built from the same function as the real request):
+  SYSTEM ............ ~120 tokens (est.)
+  CHARACTER ......... ~410 tokens (est.)
+  LORE .............. ~300 tokens (est.)  triggered: "The Boiler" (key: boiler), "Ferries" (key: dock)
+  HISTORY ........... ~2,100 tokens (est.)  truncated: oldest 6 messages
+  NOTES ............. ~40 tokens (est.)
+Keys and tokens never appear in it.`,
+    'continue-impersonate': String.raw`
+Continue: last AI message "Mara looks at the river" becomes "Mara looks at the river and
+sighs." in the SAME message (no new bubble). Regenerate: replaces or adds a variant of the
+last reply. Impersonate: puts a drafted user message in the input box for review; nothing is
+sent automatically. One request at a time; Stop keeps what has arrived.`,
+    'message-actions': String.raw`
+Message 4 of 9 is edited: its text changes in place, its id stays 'm4', any summary built from
+messages 1-6 is marked stale, and the change is saved in the old format plus an edited flag.
+Hide-from-model keeps the message visible but skips it in the prompt. Delete asks first.`,
+    'personas': String.raw`
+Personas: [{id:'p1', name:'Ben', description:'A tired courier.', avatar:''}]. {{user}} becomes
+"Ben" and the description is inserted at the chosen prompt position. Deleting a persona that
+chats still use falls those chats back to the previous user name instead of breaking them.`,
+    'quick-replies': String.raw`
+Set "River": [{label:'Pay', text:'*hands over coins*'}, {label:'Ask about the storm', text:'What do you know about the storm?'}].
+Clicking inserts the text into the input (or sends it when "send immediately" is on).
+Sets can be global or per character, are reorderable and are saved in the existing format.`,
+    'regex-scripts': String.raw`
+Rule: find "\*(.+?)\*" replace "<em>$1</em>", applies to: display only, enabled. The stored
+message keeps its asterisks; only the rendered text changes. A rule with an invalid pattern
+shows "Invalid pattern" in the test box and is skipped, never thrown. Rule count and input
+length are capped.`,
+    'expressions': String.raw`
+Character "Mara" has images: neutral (default), angry, happy. A reply containing "grins" maps
+to "happy" by the editable keyword table; a missing image falls back to neutral. The lookup
+never blocks sending and a toggle turns it off.`,
+    'rolling-summary': String.raw`
+Chat reaches 40 messages with a threshold of 30: messages 1-20 are replaced in the PROMPT by
+the summary "Ben boarded the ferry at dusk..." (shown and editable). Messages 1-20 stay in the
+transcript. Lock stops auto-refresh; Regenerate rebuilds it; a failed request keeps the old one.`,
+    'chat-log-import-export': String.raw`
+Export writes the metadata line then one message per line (see the structure reference). A
+message with 3 swipes exports swipes:[a,b,c] and swipe_id:1. Import into a NEW chat, report
+"line 14: invalid JSON, skipped", and keep unknown extra keys.`,
+    'group-chat': String.raw`
+Members: Mara (talkativeness 0.8), Doc (0.3), muted: Ox. After a user message the engine picks
+one speaker (mention by name first, else weighted draw excluding muted and the last speaker).
+Each member's card and lore are separate prompt sections; nobody speaks for the user.`,
+    'sampler-presets': String.raw`
+Plugin accepts only {maxTokens, temperature}: presets "Short" {maxTokens:150, temperature:0.7}
+and "Wild" {maxTokens:400, temperature:1.1}. Controls the plugin does not support (e.g.
+repetition penalty) are not shown, and the UI says so.`,
+    'instruct-formats': String.raw`
+Plain: "Mara: Hello." ChatML-style: "<|im_start|>assistant\nHello.<|im_end|>". Custom template:
+prefix "### Response:\n", suffix "\n". One formatter function serves every request, the default
+stays identical to today's output, and a preview shows the formatted text.`,
+    'world-info-advanced': String.raw`
+Entry {keys:['boiler'], secondary_keys:['steam'], selective:true, probability:100,
+constant:false, position:'before_char', order:100} fires only when "boiler" AND "steam" both
+appear in the scan window. Old entries with only keys and content keep working with defaults.
+When over budget, drop low-order entries first and list what was dropped.`,
+    'world-info-timed': String.raw`
+sticky 3: entry stays active for 3 messages after it triggers. cooldown 5: cannot retrigger
+for 5 messages after firing. delay 4: not active until the chat has 4 messages. Counters are
+stored per chat and reset safely on delete, edit and branch. Entries without timing behave as before.`,
+    'lore-editor-ui': String.raw`
+Test box: paste "We tied up at the dock near the boiler house." and it lists "The Boiler"
+(keys: boiler) and "Ferries" (keys: dock) as triggered, with the matching key highlighted.
+Duplicate keys across entries show a warning; an entry over about 200 words shows a size warning.`,
+    'lore-import-export': String.raw`
+World Info file entry {uid:0, key:['boiler'], keysecondary:[], content:'...', comment:'The Boiler',
+disable:false, order:100} imports as {id:'0', keys:['boiler'], name:'The Boiler', enabled:true,
+insertion_order:100}. Export reverses it. Unknown fields are retained, a preview lists
+warnings, and import MERGES into the chosen lorebook.`,
+    'card-library-page': String.raw`
+Grid card: avatar, "Mara Quill", tagline (first sentence of description), tags "river,
+slice-of-life". Detail page: sanitized creator notes, greetings, linked lorebooks, buttons
+Chat, Edit, Export, Delete (confirms). Everything comes from characters stored on this device.`,
+    'card-metadata-tags': String.raw`
+Tags input "River, river , Slice-of-life" normalizes to ["river","slice-of-life"] (trim,
+case-insensitive duplicates removed, count and length capped). creator, character_version and
+creator_notes are written into exported cards and read back; older characters load without them.`,
+    'lorebook-attach': String.raw`
+Character "Mara" has an embedded book (5 entries) plus attached standalone book "Sable River"
+(12 entries, enabled). The active list shows 17 entries; an entry id present in both is injected
+once (first source wins). Detaching "Sable River" removes its 12 without deleting the book.`,
+    'chat-appearance': String.raw`
+Options: bubble or flat style, per-character accent color, background image with a contrast
+overlay, font size, compact mode. Every combination keeps text readable in light and dark, and
+the default look is unchanged until the user opts in.`,
+    'lorebook-builder': String.raw`
+Source: "Mara's ferry, the boiler she owes the bank for, the storm season." Output (3 entries):
+{name:'The Boiler', keys:['boiler','engine','steam'], content:'The Wren's boiler is new, patched
+and mortgaged.'} {name:'Storm Season', keys:['storm','channel','flood'], ...}
+{name:'The Bank', keys:['bank','debt','loan'], ...}. Facts from the source are tagged
+"established"; anything new is tagged "proposed".`,
+    'lore-activation-audit': String.raw`
+Fixture: scan window "We reached the dock." Entries: "Ferries" keys [dock, ferry] fires; "The
+Boiler" keys [boiler] does not; "Docks of Old" keys [dock] also fires (overlap with Ferries).
+Report: which entries reached the prompt, why, and the overlap to fix. Unsupported settings are
+labeled "not honored by this app" rather than "broken".`,
+    'character-export-fix': String.raw`
+Check list: file starts with 89 50 4E 47 0D 0A 1A 0A; one tEXt chunk with keyword "chara"; its
+CRC matches; base64 decodes to UTF-8 JSON with spec 'chara_card_v2'; the image still shows the
+original portrait; importing the exported file reproduces name, greetings and lore exactly.`,
+    'character-interop': String.raw`
+Matrix of formats (V1, V2 JSON, V2 PNG, V3 JSON, V3 PNG, CHARX, World Info) against
+operations (import, export): "exact", "lossy (fields dropped: ...)" or "unsupported", each
+backed by a real fixture you ran or labeled "not tested".`,
+    'dad-orient': String.raw`
+Good report: "index.html loads 24 scripts; order matches the diagram except theme-customizer.js
+is loaded after i18n.js (diagram lists it before). app.js is 2.31 MB. window.WS exists after
+forge-studio.js. MISSING vs documentation: scene-cast.js not found (searched src/ and index.html)."
+Every statement names a file and how you confirmed it.`,
+    'dad-diagnose': String.raw`
+Symptom: "Lore entry 'Ferries' never appears in the prompt."
+Trace: handleSend -> MemoryEngine.buildHistory -> lore ranking. Check: entry enabled? keys
+lowercase? scanDepth null (window of 4)? Is the link in lorebookRefs enabled? Is the 6,656
+char budget cut it (budget_cut)? Evidence: run the diagnostics viewer and read the
+[WORLD/LORE DATABASE] block. Root cause: "keys ['ferry'] vs message 'ferries' - typo tolerance
+too low for plurals" with the function name and line. No code changed.`,
+    'dad-fix': String.raw`
+Confirmed defect: "Alternate greeting 2 is ignored." Cause: firstMessage[1] is read as a string
+instead of an array item in the greeting picker. Fix: change the read to firstMessage[idx]; touch
+only that function; keep window.* names; verify by creating a chat with greeting 2 and checking
+the first node text. Report: file, function, before/after lines, what you ran.`,
+    'dad-add-feature': String.raw`
+Request: "Add a Pin message button."
+Plan: (1) where: render path createNodeDOM in app.js (action bar) + a pin flag on the node (tree
+node field, additive); (2) data: node.pinned = true, included by the existing pinned-context
+builder; (3) UI: button in the action bar, CSS in styling.css; (4) persistence: _persistThreads
+already saves nodes; (5) checks: pin, unpin, reload, branch switch, export. Old threads (no
+pinned field) behave as before.`,
+    'dad-improve-feature': String.raw`
+Request: "Make the author's note better."
+Observe first: note layers (config -> char -> thread), where injected (late-prompt), current
+limits. Improve in small steps: show the layer that won, add a character counter, warn when
+the note repeats the reminderMessage. Keep the thread.authorNote storage key and old values.`,
+    'dad-new-module': String.raw`
+New file src/pet-names.js. Steps: create the module exposing window.PetNames; add one script
+tag in index.html AFTER app.js if it needs app globals (before it if app.js should call it);
+no new Perchance import unless needed (then main.pjs + pjs-globals.js bridge); add CSS to
+styling.css; feature-detect window.PetNames wherever it is called so a missing file cannot break
+the app.`,
+    'dad-prompt-audit': String.raw`
+Good report lists each block with: source function, FIXED or DYNAMIC, approximate chars, and
+whether the diagnostics viewer shows it. Example finding: "persona repeats the pre-instruction
+rule 'never act for {{user}}' (about 90 chars/turn). Preview and real prompt use the same
+builder: yes (buildDiagnosticHistory)." Findings are ranked by chars saved per turn.`,
+    'dad-prompt-tune': String.raw`
+Request: "Replies repeat the same opening."
+Fix candidates ordered by cost: (1) one reminderMessage line "Vary your openings." (cost: ~40
+chars/turn); (2) a prose-director setting if present; (3) example dialogue diversity. Show the
+exact text and where it is injected; do not duplicate the existing pre-instruction.`,
+    'dad-provider-add': String.raw`
+Add provider "Acme Local" in providers.js inside the right group of window.Dad_PROVIDER_GROUPS:
+fields copied from a neighbor entry (id, label, base URL, model list, key handling through
+secret-vendor, capabilities). The key is read from the user's settings, never hardcoded. Verify
+the provider shows in the model picker and that a failed call shows an actionable error.`,
+    'dad-ui-polish': String.raw`
+Request: "Make the chat bubbles easier to read on phones."
+Edit styling.css only: font size, line height, max-width in rem; check the inline first-paint
+copy in index.html is untouched or updated to match. Test 360px, 768px and desktop widths, light
+and dark themes (theme-customizer variables), long messages and code blocks.`,
+    'dad-perf-size': String.raw`
+Good report: "Fixed chars per turn for Henry Tucker: about 25k. Top three savings: system
+instruction block (~5.5k), towns entry (~3.6k), duplicate frontier entries (~3k). app.js loads
+2.4 MB before first render: candidates to lazy-load: pdf.js (already lazy), d3 (already lazy)."
+Measured values are labeled measured; guesses are labeled estimate.`,
+    'dad-persistence-audit': String.raw`
+Table: key / store / shape / written by / read by / migration risk. Example row: "chatApp |
+kv | slots+index | _persistThreads | boot | adding a field is safe, renaming breaks old slots".
+Cloud Backup mirrors the last 200 messages only; say what a restore would lose.`,
+    'dad-hub-work': String.raw`
+Request: "Show download counts on cards."
+hubDownloaded already records downloads. Add the count to the metadata the server returns from
+hubSearch (server block in index.html), render it in the card tile, and leave owner keys out of
+every response. Verify with a card that has 0 and one that has 12 downloads.`,
+    'dad-safety-review': String.raw`
+Source -> sink report: "card.description -> createNodeDOM -> marked + DOMPurify -> innerHTML:
+sanitized (ok)". "character name -> toast text via innerHTML: NOT escaped -> use escHtml".
+"image prompt from lore text -> root.image without pjsLiteral: template injection -> wrap".`,
+    'dad-import-export': String.raw`
+Rules in practice: default export = dad-char JSON/PNG (lossless). Tavern V2/CCV2/Forge shapes
+are labeled "lossy share copy" in the dialog. Imports accept dad-char, dad-world, standalone
+lorebook and Tavern shapes, show a preview, and never overwrite silently. Exported files carry no
+lorebookArchive, lastLoreRun, useCount or lastInjectedAt.`,
+    'dad-release-check': String.raw`
+Checklist with results: load page ok; send a message ok; open and close each modal touched ok;
+import a dad-char file ok; console errors 0; perchanceErrors empty; not run: hub upload (no
+test account). Items you could not run are listed as not run.`,
+    'dad-character-create': String.raw`
+Brief: "A gruff river ferry pilot, protective of her father's ferry." Reply: one fenced JSON block
+shaped like the dad-char example (envelope type dad-char, version 2) with a fresh id, a 1-3
+sentence description, a persona in systemPrompt that does NOT repeat the pre-instruction, 2-3
+greetings, 3-5 short example exchanges, preInstruction "dad_roleplay", and a lorebook of at most
+a few real-named entries. No avatar. Then a short note listing choices to review.`,
+    'dad-character-improve': String.raw`
+Input description (too long): "Mara is a ferry pilot who is blunt and ... [900 chars of persona]".
+Output: bio "Dry-witted ferry pilot who knows every sandbar on the Sable River." moves to
+description; the 900 chars stay in systemPrompt (trimmed of pre-instruction duplicates). Show
+BEFORE / AFTER per field with the reason and the characters saved.`,
+    'dad-lore-build': String.raw`
+Source: "The Wren is a ferry. Its boiler is new but mortgaged. Storm season closes the channel."
+Entry 1: name "The Boiler", keys [boiler, engine, steam], priority 10, content "The Wren's boiler
+is new, patched and mortgaged. {{char}} talks to it like a stubborn mule." (about 20 words).
+Entry 2: name "Storm Season", keys [storm, channel, flood], content "From late autumn the channel
+floods and ferries stop. Prices double before the first storm."
+Returned as a standalone lorebook envelope (version "2.0") in one fenced JSON block.`,
+    'dad-lore-audit': String.raw`
+Good findings: "[warn] key 'nevada' appears in 3 entries: Settlements, Frontier, Weather -> keep it
+in Frontier only." "[warn] 'Entry 3' has no real name -> 'Stagecoach'." "[error] scanDepth 50 in
+'Weather' -> null." "[info] 3 constant entries; keep at most 2." Each finding names the entry
+and the fix; nothing is rewritten unless asked.`,
+    'dad-world-build': String.raw`
+Brief: "A dry river frontier where ferries replace roads." Output: one dad-world file (type
+dad-world, version 1). description = what EVERY character knows (4-6 sentences, no secrets);
+entries = Ferries, The Bank, Storm Season, Rumors, each with 3-6 unique keys and about 40 words.
+No overlap of keys across entries, scanDepth null, at most 2 constant entries.`,
+    'dad-token-diet': String.raw`
+Report per field: characters before -> after, what was removed and why ("duplicates
+pre-instruction", "same fact in 3 places", "stage-direction filler"). Greetings and example
+exchanges stay verbatim. Total fixed chars per turn before and after. Mark any cut you are
+unsure about as "author to confirm".`,
+    'dad-convert-tavern': String.raw`
+Input V2 card: {data:{name:'Mara', description:'(persona text)', personality:'Blunt.', first_mes:'Hi.', alternate_greetings:['Yo.'], mes_example:'<START>...', character_book:{entries:[{keys:['boiler'], content:'...'}]}}}.
+Output dad-char: systemPrompt = persona + "[Examples]" + mes_example if no exampleDialogue pairs can be
+made; description = 'Blunt.'; firstMessage = ['Hi.', 'Yo.']; lorebook entries get real names,
+3-6 keys, priority 10, scanDepth null. Then list what was DROPPED (selective, probability,
+sticky...) with the entry names.`,
+    'dad-greetings-examples': String.raw`
+Greeting hooks (each a different situation, 2-4 sentences, ends with something {{user}} can
+answer): 1 "Mara is coiling rope when you reach the dock..." 2 "The boiler coughs twice..." 3 "A
+stranger's note is pinned to the ferry bell..." Example dialogue: 4 pairs, each under 40 words,
+all in her voice, none narrating {{user}}'s actions.`
+  };
+
+  // Which packs each preset receives (preset id -> pack ids, in display order).
+  const links = {
+    'card-spec-export': ['st-layout', 'st-card-v2', 'st-card-png', 'st-card-v3'],
+    'card-spec-import': ['st-layout', 'st-card-v2', 'st-card-v3', 'st-card-png'],
+    'card-field-map': ['st-card-v2', 'st-card-v3', 'st-lore'],
+    'card-validator': ['st-card-v2', 'st-lore'],
+    'token-diet': ['st-prompt-order', 'st-card-v2'],
+    'card-creator-editor': ['st-layout', 'st-card-v2'],
+    'alt-greetings-swipes': ['st-card-v2', 'st-chatlog'],
+    'macros-support': ['st-macros'],
+    'example-dialogue': ['st-card-v2', 'st-prompt-order', 'st-macros'],
+    'author-note-depth': ['st-prompt-order'],
+    'system-post-history': ['st-prompt-order', 'st-card-v2'],
+    'prompt-inspector': ['st-prompt-order', 'st-layout'],
+    'continue-impersonate': ['st-prompt-order', 'st-chatlog'],
+    'message-actions': ['st-chatlog'],
+    'personas': ['st-prompt-order', 'st-macros'],
+    'quick-replies': ['st-layout'],
+    'regex-scripts': ['st-layout'],
+    'expressions': ['st-layout', 'st-card-v3'],
+    'rolling-summary': ['st-prompt-order'],
+    'chat-log-import-export': ['st-chatlog', 'st-layout'],
+    'group-chat': ['st-prompt-order', 'st-chatlog'],
+    'sampler-presets': ['st-layout'],
+    'instruct-formats': ['st-prompt-order'],
+    'world-info-advanced': ['st-lore', 'st-prompt-order'],
+    'world-info-timed': ['st-lore'],
+    'lore-editor-ui': ['st-lore', 'st-layout'],
+    'lore-import-export': ['st-lore'],
+    'card-library-page': ['st-card-v2', 'st-layout'],
+    'card-metadata-tags': ['st-card-v2', 'st-card-v3'],
+    'lorebook-attach': ['st-lore', 'st-layout'],
+    'chat-appearance': ['st-layout'],
+    'lorebook-builder': ['st-lore'],
+    'lore-activation-audit': ['st-lore', 'st-prompt-order'],
+    'character-export-fix': ['st-card-v2', 'st-card-png'],
+    'character-interop': ['st-card-v2', 'st-card-v3', 'st-lore', 'st-card-png'],
+    // Dad-Chat code skills
+    'dad-orient': ['dad-layout', 'dad-flow', 'dad-data'],
+    'dad-diagnose': ['dad-layout', 'dad-flow', 'dad-data', 'dad-code-rules'],
+    'dad-fix': ['dad-layout', 'dad-flow', 'dad-code-rules'],
+    'dad-add-feature': ['dad-layout', 'dad-data', 'dad-code-rules'],
+    'dad-improve-feature': ['dad-layout', 'dad-flow', 'dad-code-rules'],
+    'dad-new-module': ['dad-layout', 'dad-code-rules'],
+    'dad-prompt-audit': ['dad-flow', 'dad-rules', 'dad-layout'],
+    'dad-prompt-tune': ['dad-flow', 'dad-rules'],
+    'dad-provider-add': ['dad-layout', 'dad-code-rules'],
+    'dad-ui-polish': ['dad-layout', 'dad-code-rules'],
+    'dad-perf-size': ['dad-layout', 'dad-flow', 'dad-rules'],
+    'dad-persistence-audit': ['dad-data', 'dad-layout', 'dad-code-rules'],
+    'dad-hub-work': ['dad-hub', 'dad-layout', 'dad-code-rules'],
+    'dad-safety-review': ['dad-layout', 'dad-code-rules', 'dad-hub'],
+    'dad-import-export': ['dad-character', 'dad-world', 'dad-lore', 'st-dad-map', 'dad-layout'],
+    'dad-release-check': ['dad-layout', 'dad-code-rules'],
+    // Dad-Chat content skills
+    'dad-character-create': ['dad-character', 'dad-lore', 'dad-rules'],
+    'dad-character-improve': ['dad-character', 'dad-rules', 'dad-flow'],
+    'dad-lore-build': ['dad-lore', 'dad-world', 'dad-rules'],
+    'dad-lore-audit': ['dad-lore', 'dad-flow', 'dad-rules'],
+    'dad-world-build': ['dad-world', 'dad-lore', 'dad-rules'],
+    'dad-token-diet': ['dad-rules', 'dad-character', 'dad-lore', 'dad-flow'],
+    'dad-convert-tavern': ['st-dad-map', 'st-card-v2', 'st-lore', 'dad-character', 'dad-lore'],
+    'dad-greetings-examples': ['dad-character', 'dad-rules']
+  };
+
+  const byId = Object.freeze(packs.reduce((m, p) => { m[p.id] = p; return m; }, {}));
+  return Object.freeze({ packs: Object.freeze(packs), byId, links: Object.freeze(links), examples: Object.freeze(examples) });
+});
+
+/* Dad-Chat skill rows: tasks for working on a Dad Chat (dad-chat-v2) Perchance project.
+   Structure diagrams and worked examples are attached by id from skills-refs.js. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldSkillsDad = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  // The section id, title and guide text live in skills-core.js (categories, guides).
+  // [category, id, title, description, mode, task, fit, sources]
+  const fit = ['chat', 'story'], src = ['dad-arch', 'dad-format'];
+  const rows = [
+    // --- Orient, diagnose, fix ---
+    ['dad', 'dad-orient', 'Map the project against the layout', 'Confirm the real files match the diagram and report any drift.', 'review',
+      'Compare the open project with the DAD-CHAT LAYOUT diagram: list main.pjs imports and knobs, the index.html hub server block, every script tag in load order, src/styling.css and the built-in presets. For each documented file report present, missing, renamed or moved, with the exact search you ran. Locate window.* handles (DadAgentCore, Dad_PROVIDER_GROUPS, ImageForge, WS, StoryForge, SceneCast) and confirm which file defines each. Report where the documentation and code disagree so the documentation can be fixed; do not edit anything.', fit, src],
+    ['dad', 'dad-diagnose', 'Diagnose a Dad-Chat problem', 'Trace a symptom through the chat-turn flow to the exact file and function.', 'review',
+      'Diagnose the problem in USER DETAILS. Place it in the chat-turn flow (input, prompt assembly, generation, render, post-turn, persistence or hub) and name the first stage where actual behavior differs from expected. Read that stage code and its callers, list at most three competing causes and the cheapest observation that separates them, and gather those observations (diagnostics viewer for prompt problems, console and perchanceErrors for runtime problems). Report the confirmed root cause with file, function and evidence, and clearly separate confirmed facts from hypotheses. Do not change code.', fit, src],
+    ['dad', 'dad-fix', 'Fix a Dad-Chat bug', 'Make the smallest edit that fixes a confirmed cause.', 'change',
+      'Fix the bug in USER DETAILS. First reproduce or confirm the cause by reading the code path in the chat-turn flow. Edit only the function that owns the defect, keep its public window.* names, storage keys and saved-data shapes, and never rewrite or reformat app.js. Follow the HOW TO MAKE ONE SAFE EDIT steps. Re-check the neighboring paths it feeds (render, persistence, export). Report file, function, before and after, and what you actually ran; if you could not run the page, say so.', fit, src],
+    // --- Add, improve, build ---
+    ['dad', 'dad-add-feature', 'Add a feature to Dad-Chat', 'Place new behavior in the right file, with load order and storage handled.', 'change',
+      'Implement the feature in USER DETAILS. Before editing, write a short placement plan: which file (use WHERE NEW CODE BELONGS), which existing function it sits beside, the data it adds (additive fields only), the UI it needs (DOM in index.html or the app, CSS in styling.css), how it persists (existing stores), and what happens to old saved data. Then implement narrowly, feature-detect any new window.* handle where it is called, and escape untrusted text (escHtml, pjsLiteral). Verify the new path and one neighboring existing path. If the request is missing, ask one focused question.', fit, src],
+    ['dad', 'dad-improve-feature', 'Improve or enhance an existing feature', 'Observe how it works now, then improve it in small safe steps.', 'change',
+      'Improve the existing feature in USER DETAILS. First describe how it works today (file, functions, data, settings, where it appears in the prompt or UI) with evidence from the code. Then make the smallest set of improvements that serve the stated goal, ordered by value and risk, and keep every existing setting, storage key and behavior at its default unless told otherwise. Do not remove old code paths; flag dead-looking code instead. Verify before and after on the same workflow and report what changed.', fit, src],
+    ['dad', 'dad-new-module', 'Add a new module or studio file', 'Create a src file, load it in the right order and keep it fail-soft.', 'change',
+      'Create the new module described in USER DETAILS as its own src file. Decide whether it needs app.js globals (then load it after app.js like the studios) or must load before app.js. Expose one window.* handle, add the script tag to index.html at that position, add CSS to styling.css, and add a new Perchance import to main.pjs (bridged in pjs-globals.js) only if truly required. Every caller must feature-detect the handle so a missing file cannot break the app. Verify load order, the handle, the feature and a page load with the file removed.', fit, src],
+    ['dad', 'dad-prompt-tune', 'Improve prompt assembly or steering text', 'Change what reaches the model without duplicating what is already sent.', 'change',
+      'Improve the prompt behavior in USER DETAILS. Locate the block responsible in MemoryEngine.buildHistory (pre-instruction, persona, world, lore, memory, steering) and decide whether it is FIXED (paid every turn) or DYNAMIC. Prefer the cheapest layer that works (reminderMessage, author note, lore entry) over growing the persona. Do not repeat rules the pre-instruction or lorebook already send. Show the exact new text, where it is injected and its character cost per turn, keep the diagnostics preview using the same builder, and verify with the diagnostics viewer.', fit, src],
+    ['dad', 'dad-provider-add', 'Add or fix a provider or model', 'Extend the provider catalog without breaking existing routes.', 'change',
+      'Add or repair the provider or model in USER DETAILS inside providers.js (window.Dad_PROVIDER_GROUPS). Copy the shape of a neighboring entry in the right group (builtin, cloud, hubs, local runtimes), keep existing ids, route keys through the existing secret handling and never hardcode or log a key. Verify the real API contract (endpoint, auth, streaming, tool support, context limit) from official documentation before writing values and mark unknowns. Check the picker, a successful call, a failure message and that other providers still work.', fit, src],
+    ['dad', 'dad-ui-polish', 'Polish Dad-Chat styling and layout', 'Improve CSS and shell markup while keeping first paint intact.', 'change',
+      'Improve the interface described in USER DETAILS. Most changes belong in src/styling.css; touch index.html markup only when the DOM must change, and keep the duplicated loading-screen CSS in index.html and styling.css in sync. Use the existing theme variables so theme-customizer still works. Check 360px, 768px and desktop widths, light and dark, long messages, code blocks and loading and error states. Do not rename element ids that app.js or the studios query.', fit, src],
+    ['dad', 'dad-import-export', 'Add or repair import and export', 'Keep Dad-native lossless; treat Tavern shapes as share-only.', 'change',
+      'Work on the import or export in USER DETAILS. Dad-native is the master: default exports use the dad-char, dad-world and lorebook envelopes from the references, Tavern V2/V3/CCV2/Forge exports are optional and labeled as lossy share copies, and imports may still accept Tavern shapes through the mapping. Always preview before changing anything, never overwrite silently, strip runtime-only fields (lorebookArchive, lastLoreRun, useCount, lastInjectedAt) on export, clamp scanDepth to 20, and keep secrets out of every file. Verify a round trip and a malformed file.', fit, src],
+    ['dad', 'dad-hub-work', 'Work on the hub and sharing flow', 'Change client RPC calls and the public server block safely.', 'change',
+      'Make the hub change in USER DETAILS. Trace the call from the client hub section in app.js through createServerSocket to the server block in index.html. The server code is public: never put secrets in it, never return owner keys, and keep card bodies in per-user upload files with only metadata and ratings in the index. Keep existing RPC names and shapes working for older clients, validate every argument on the server, and escape displayed text. Verify the happy path and a rejected input.', fit, src],
+    // --- Reviews ---
+    ['dad', 'dad-prompt-audit', 'Audit prompt assembly and token cost', 'List every block that reaches the model and what it costs per turn.', 'review',
+      'Walk the prompt assembly in the order given in the chat-turn flow and list each block: source function, FIXED or DYNAMIC, approximate characters, and whether the diagnostics viewer shows it. Estimate fixed cost per turn for the current character and preset, find duplicated rules between pre-instruction, persona and lorebook, and rank savings by characters per turn. Confirm the preview and the real request use the same builders. Label measured values and estimates separately and do not edit anything.', fit, src],
+    ['dad', 'dad-persistence-audit', 'Audit saved data and storage keys', 'Map every store and the risk of changing it.', 'review',
+      'Map every place Dad-Chat persists data: localStorage live session, kv.chatApp slots and index, ImageDB, per-thread VFS workspaces, Cloud Backup and settings keys. For each give key or name, shape, writer, reader and how a field rename or addition would affect saved users. Identify corruption, quota and cross-tab risks and what a Cloud Backup restore would lose. Recommend additive, reversible changes only; do not migrate or delete data.', fit, src],
+    ['dad', 'dad-safety-review', 'Review rendering, escaping and secrets', 'Trace text and keys from source to sink.', 'review',
+      'Trace untrusted text (card fields, lore, chat messages, imported files, hub data) from where it enters to every place it is rendered or sent: markdown through marked and DOMPurify, escHtml for HTML, pjsLiteral for image prompts, toast and modal text, downloads and network calls. Also check for hardcoded or logged keys, tokens and webhook URLs and for secrets in exports or the public server block. Report each source-to-sink path with realistic impact and a narrow fix. Do not execute hostile payloads or change code.', fit, src],
+    ['dad', 'dad-perf-size', 'Review size and speed', 'Find what slows load, render or generation.', 'review',
+      'Assess startup weight (app.js is about 2.4 MB and loads before first render), lazy-loaded libraries, large threads, lore matching and render cost. Measure what you can (timings, sizes, DOM counts) and label everything else as an estimate. Rank bounded improvements by benefit and risk and say what each would change for saved data. Do not edit code.', fit, src],
+    ['dad', 'dad-release-check', 'Check a change before shipping', 'Run a live checklist and list what was not run.', 'review',
+      'Run a pre-release check of the touched areas: page load, sending a message, each modal or studio involved, import and export of a dad-char file, theme and narrow-width layout, console errors and perchanceErrors, and storage load of an existing save. Report observed pass or fail with reproduction steps and a separate list of checks you could not run (for example hub upload or a paid provider). Do not publish or change code.', fit, src],
+    // --- Content in the Dad-native format ---
+    ['dad', 'dad-character-create', 'Write a Dad-native character file', 'Create an importable dad-char JSON from a short brief.', 'review',
+      'Create a character from the brief in USER DETAILS and return ONE importable dad-char file (type dad-char, version 2) in a single fenced JSON block; do not edit the generator. Use a new unique id, put a 1-3 sentence bio in description and the persona body in systemPrompt (canon and voice only, never repeating the pre-instruction or lorebook), include 2-3 greetings in firstMessage, 3-5 short example exchanges, a suitable preInstruction, an optional reminderMessage and a few real-named lore entries only if useful. Use only {{char}} and {{user}}, no avatar and no runtime fields. After the JSON list the choices the author should review.', fit, src],
+    ['dad', 'dad-character-improve', 'Improve an existing character', 'Fix field placement, duplication and weak voice, with before and after.', 'review',
+      'Review the character supplied in USER DETAILS against the Dad-native rules: bio versus persona placement, one fact once, no repetition of the pre-instruction or lorebook, greetings as hooks, short in-voice example dialogue and sensible reminder text. Return a table of changes (field, before, after, reason, characters saved) and then the complete improved dad-char JSON in one fenced block. Keep greetings and example exchanges verbatim unless the user asks, do not invent canon and flag guesses. Do not edit the generator.', fit, src],
+    ['dad', 'dad-lore-build', 'Build Dad-native lore entries', 'Turn source text into well-keyed, small lore entries.', 'review',
+      'Turn the source material in USER DETAILS into lore entries and return a standalone lorebook (version 2.0 envelope) or entries for the named character in one fenced JSON block. Each entry has a real name, 3-6 lowercase keys that do not appear in any other entry, content of 45 words or fewer in the pattern Name - role. Fact. Fact. Voice cue. Constraint., an explicit priority, constant false (at most 2 true per book), scanDepth null and enabled true. Tag facts taken from the source as established and anything you add as proposed. Do not edit the generator.', fit, src],
+    ['dad', 'dad-lore-audit', 'Audit a lorebook', 'Find key overlap, oversized entries and budget waste.', 'review',
+      'Audit the lorebook or character lore supplied in USER DETAILS: keys shared between entries, entries named Entry N, content over 45 words, scanDepth other than null (especially 50), more than 2 constant entries, repeated facts, vectorized entries without embeddings and disabled entries. Estimate the characters each entry spends against the 6,656-character lore budget and which entries would be budget_cut together. Report findings by severity with the entry name and a concrete fix; do not rewrite entries unless asked and do not edit the generator.', fit, src],
+    ['dad', 'dad-world-build', 'Build a Dad-native world', 'Write the world bible and linked entries as a dad-world file.', 'review',
+      'Create the world described in USER DETAILS and return ONE dad-world file (type dad-world, version 1) in a single fenced JSON block. The description states what every character in the world knows (always injected, keep it focused) and entries carry places, factions, rules and rumors, each following the lore entry rules (real name, 3-6 unique keys, about 45 words, scanDepth null, at most 2 constant). Avoid telling the same fact in several entries. Do not edit the generator.', fit, src],
+    ['dad', 'dad-token-diet', 'Cut fixed prompt cost without losing canon', 'Apply the Henry Tucker cut order to a persona and lore.', 'review',
+      'Reduce the fixed per-turn cost of the character in USER DETAILS using the cost-control cut order: remove duplicates of the pre-instruction first, then merge overlapping lore entries, then tighten long descriptive blocks, then scenario. Keep greetings and example exchanges verbatim, keep every distinct fact and the speech patterns, and mark any uncertain cut as author to confirm. Report characters before and after for each field and the total fixed chars per turn, then give the revised JSON. Do not invent canon or edit the generator.', fit, src],
+    ['dad', 'dad-convert-tavern', 'Convert a Tavern V2/V3 card to Dad-native', 'Map a card and its lorebook into dad-char and say what is lost.', 'review',
+      'Convert the Tavern card or lorebook in USER DETAILS to Dad-native using the mapping reference: description to systemPrompt (plus scenario and examples if they have no slot), personality to the bio, first_mes and alternate_greetings to firstMessage, system_prompt to a custom pre-instruction, post_history_instructions to reminderMessage and character_book to lorebook with real entry names, 3-6 keys, priority and scanDepth clamped to null or 20. Return the dad-char JSON in one fenced block followed by a list of dropped or lossy fields (selective, probability, sticky, cooldown, delay, group and non-forge extensions) with the affected entries. Do not edit the generator.', fit, src],
+    ['dad', 'dad-greetings-examples', 'Write greetings and example dialogue', 'Hooks and voice samples for a character.', 'review',
+      'Write opening messages and example dialogue for the character in USER DETAILS. Greetings are hooks: each a different situation of 2-4 sentences that ends with something {{user}} can answer, with greeting one as the default opening and the rest as alternates. Example dialogue is 3-6 exchanges, each side under 40 words, entirely in voice, never narrating {{user}} actions. Return them in the firstMessage and exampleDialogue shapes of the dad-char format in one fenced JSON block. Do not edit the generator.', fit, src]
+  ];
+  return Object.freeze({ rows });
+});
+
 /* Generator skill catalog and prompt composition. No network or editor mutations. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.WeldSkillsCore = factory();
 })(typeof window === 'object' ? window : globalThis, function () {
   'use strict';
+  // Reference packs (diagrams, file shapes, worked examples) and Dad-Chat rows live in their own files.
+  const viaRequire = typeof module === 'object' && module.exports && typeof require === 'function';
+  const host = typeof window === 'object' ? window : globalThis;
+  const Refs = viaRequire ? require('./skills-refs.js') : (host.WeldSkillsRefs || { packs: [], byId: {}, links: {}, examples: {} });
+  const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
@@ -14441,7 +15448,7 @@
     ['quality', 'Accessibility & quality'], ['engineering', 'Code & planning'],
     ['create', 'Create a generator'], ['text', 'Text & randomness'],
     ['story', 'Stories & worlds'], ['games', 'Games & interaction'],
-    ['cards', 'SillyTavern, Chub & character cards'], ['rework', 'Rebrand, simplify & privacy'],
+    ['cards', 'SillyTavern, Chub & character cards'], ['dad', 'Dad-Chat projects'], ['rework', 'Rebrand, simplify & privacy'],
     ['assist', 'AI input helpers & toolkit']
   ].map(([id, title]) => Object.freeze({ id, title }));
   // Stable IDs are stored as favorites; task instructions stay in the shipped catalog.
@@ -14576,7 +15583,9 @@
     Object.freeze({ id: 'ccv2', title: 'Character Card V2 specification', url: 'https://github.com/malfoyslastname/character-card-spec-v2', path: '' }),
     Object.freeze({ id: 'ccv3', title: 'Character Card V3 specification', url: 'https://github.com/kwaroran/character-card-spec-v3', path: '' }),
     Object.freeze({ id: 'st-docs', title: 'SillyTavern documentation', url: 'https://docs.sillytavern.app/', path: '' }),
-    Object.freeze({ id: 'st-worldinfo', title: 'SillyTavern World Info docs', url: 'https://docs.sillytavern.app/usage/core-concepts/worldinfo/', path: '' })
+    Object.freeze({ id: 'st-worldinfo', title: 'SillyTavern World Info docs', url: 'https://docs.sillytavern.app/usage/core-concepts/worldinfo/', path: '' }),
+    Object.freeze({ id: 'dad-arch', title: 'Dad-Chat architecture (Weld docs)', url: 'https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md', path: '' }),
+    Object.freeze({ id: 'dad-format', title: 'Dad-native format (Weld docs)', url: 'https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md', path: '' })
   ]));
   const types = Object.freeze([
     ['dashboard', 'Dashboards & applications'], ['agent', 'Prompt studios & plugins'], ['text', 'Random & text'], ['image', 'AI images & galleries'], ['chat', 'Chat, characters & memory'],
@@ -14597,7 +15606,8 @@
     text: ['Control generated output', 'Inspect list structure, weights, evaluation timing and shared selections.', 'Preserve intended probabilities while improving valid combinations.', 'Sample bounded local outputs and exercise reroll/lock behavior.', 'Outputs satisfy the stated constraints; statistical claims include sample size and limits.'],
     story: ['Keep the world coherent', 'Map characters, facts, narrative state and the current content structure.', 'Make story rules explicit and retain established lore and saved progress.', 'Walk representative scenes, branches, restarts and resumed sessions.', 'No missing branches, contradictory tracked facts or lost progress in tested paths.'],
     games: ['Make interaction playable', 'Identify the rules, win/loss states and actual game loop.', 'Keep transitions, probabilities, controls and saved state consistent.', 'Play start-to-finish and test restart, invalid actions and boundaries.', 'Progress remains reachable and no tested path soft-locks or duplicates rewards.'],
-    cards: ['Match real chat-card conventions', 'Read the actual chat, character and lore code, plus real sample cards or logs where supplied; map each field to the target convention.', 'Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.', 'Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.', 'Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.'],
+    dad: ['Work inside a Dad-Chat project with its real structure', 'Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.', 'Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.', 'Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.', 'The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.'],
+    cards: ['Match real chat-card conventions', 'Read the actual chat, character and lore code, plus real sample cards or logs where supplied; use the STRUCTURE REFERENCE in the prompt to map each field to the target convention.', 'Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.', 'Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.', 'Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.'],
     rework: ['Change identity safely', 'Inventory every place the target element appears in both panels, imports, metadata, storage labels and network calls.', 'Change only what the user owns or may modify; keep license notices, required attribution, saved-data keys, IDs and list names.', 'Reload from a fresh and an existing saved state and confirm nothing broke or still leaks the old element.', 'Old branding or social features are gone from every visible and network path, and existing saved data still loads.'],
     assist: ['Add helpers that fit the generator', 'Derive the generator purpose, inputs and available text/AI plugins from the actual source.', 'Keep helpers opt-in, reversible, bounded and clearly labeled; never auto-run paid or slow calls.', 'Test empty, filled, failing, cancelled and repeated actions on each input.', 'Every helper has loading, error, cancel and undo behavior and never overwrites user text without a way back.']
   };
@@ -14851,9 +15861,10 @@
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions).map(([category, id, title, description, mode, task, fit, origin]) =>
+  const presets = Object.freeze(rows.concat(additions, Dad.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
     Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
+      refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',
       steps: sections.find(c => c.id === category).steps, check: guides[category][4] })));
   const get = id => presets.find(p => p.id === id) || null;
   function search(query, category, favorites, filters) {
@@ -14882,8 +15893,15 @@
       'WORKFLOW\n' + (p.mode === 'review' ? 'Evaluate these steps and propose remedies; do not implement changes during this review.\n' : '') +
         p.steps.map((step, i) => (i + 1) + '. ' + step).join('\n') + '\nAcceptance' + (p.mode === 'review' ? ' criteria to assess' : '') + ': ' + p.check,
       'CONSTRAINTS\nPreserve unrelated features, names, IDs, list references, working imports, saved data and formats. Perchance DSL is not plain JavaScript; distinguish templating from JavaScript inside scripts. Verify actual plugin APIs and current integration points rather than inventing them. Do not publish, replace providers, add paid services, expose secrets or migrate/delete user data without explicit approval. If a required detail is missing, ask a focused question before dependent work.'];
+    if (p.category === 'dad') parts.splice(2, 0, 'PROJECT CONTEXT: DAD-CHAT\nThis generator should be a Dad Chat (dad-chat-v2) project. The STRUCTURE REFERENCE below is its documented file layout, chat-turn flow and Dad-native data format. Treat it as a map, not proof: confirm every file, function and window.* name in the real source before relying on it and report any difference. If the open generator is not a Dad-Chat project, say so before doing anything else. Dad-native is the master format; Tavern V2/V3 shapes are share-only exports. Where the task refers to USER DETAILS and none were given, ask one focused question instead of guessing.');
     if (type) parts.push('GENERATOR FOCUS\n' + type.title + '. This is the user-selected focus; verify the actual source supports it. Apply only relevant checks.');
     if (o.concise) parts.push('REPLY STYLE\nKeep explanations concise and lead with the result. Preserve complete code, exact names, error details, verification evidence and necessary caveats; brevity must never hide unfinished work.');
+    if (p.refs.length) {
+      const general = p.category === 'dad' ? '' : ' These summarize public conventions, not the behavior of any app version; the project own code and real sample files win, so tell the user where they differ.';
+      parts.push('STRUCTURE REFERENCE\nLayout diagrams and file shapes for this task. Use them to find the right place and the right format, and confirm names against the real source.' + general + '\n\n' +
+        p.refs.map((id, i) => '[' + (i + 1) + '] ' + Refs.byId[id].title.toUpperCase() + '\n' + Refs.byId[id].text).join('\n\n'));
+    }
+    if (p.example) parts.push('WORKED EXAMPLE (shows the expected depth and format; adapt it to the real project and never copy its sample values)\n' + p.example.trim());
     if (String(o.details || '').trim()) parts.push('USER DETAILS\n' + String(o.details).trim());
     if (Array.isArray(o.findings)) {
       const issues = o.findings.filter(f => f.severity === 'warn' || f.severity === 'error');
@@ -14894,7 +15912,8 @@
       (p.mode === 'review' ? 'Report evidence, priority and suggested next steps.' : 'Explain what changed, why, what was actually verified and any remaining limitations. Do not claim success solely because code was written.'));
     return parts.join('\n\n');
   }
-  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt });
+  const refPack = id => Refs.byId[id] || null;
+  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt, refPack });
 });
 
 /* Skills tab: reviewable generator presets routed to Perchance's native AI input. */
@@ -14990,6 +16009,18 @@
         note(p.task),
         E('ol', {}, p.steps.map(step => E('li', { text: step, style: { marginBottom: '6px' } }))), note('Acceptance: ' + p.check)]);
       detail.appendChild(workflow);
+      if (p.refs.length || p.example) {
+        const blockStyle = { whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.45', margin: '6px 0', padding: '8px', borderRadius: '8px',
+          background: 'var(--wc-input,rgba(0,0,0,.18))', maxHeight: '260px', overflow: 'auto' };
+        detail.appendChild(note('Added to the prompt: ' + p.refs.length + ' structure reference' + (p.refs.length === 1 ? '' : 's') + (p.example ? ' and a worked example.' : '.')));
+        const included = E('details', { 'aria-label': 'Structure references in this prompt' }, [E('summary', { text: 'Structure references & example (included in the prompt)', style: { cursor: 'pointer', padding: '8px 0' } })]);
+        p.refs.forEach(id => {
+          const r = C.refPack(id);
+          if (r) included.appendChild(E('details', { style: { marginBottom: '6px' } }, [E('summary', { text: r.title, style: { cursor: 'pointer' } }), E('pre', { text: r.text, style: blockStyle })]));
+        });
+        if (p.example) included.appendChild(E('details', {}, [E('summary', { text: 'Worked example', style: { cursor: 'pointer' } }), E('pre', { text: p.example.trim(), style: blockStyle })]));
+        detail.appendChild(included);
+      }
       if (p.sources.length) {
         const origin = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', fontSize: '12px', margin: '8px 0' } }, [E('span', { text: 'Research & references:' })]);
         p.sources.forEach(id => {
@@ -15018,7 +16049,7 @@
       E('option', { value: 'review', text: 'Review only' }), E('option', { value: 'change', text: 'Make changes' })]);
     mode.value = S.mode; mode.addEventListener('change', () => { S.mode = mode.value; drawList(); });
     wrap.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '12px 0' } },
-      [['dashboard-architecture', 'Plan dashboard'], ['create-dashboard', 'Build an app'], ['fix-bugs', 'Fix problems'], ['custom-feature', 'Add a feature'], ['lorebook-builder', 'Build lorebook'], ['skybridge-integrate', 'Connect Skybridge'], ['ai-input-assist', 'Rewrite & Fill buttons'], ['card-spec-export', 'Tavern card export']].map(([id, title]) =>
+      [['dashboard-architecture', 'Plan dashboard'], ['create-dashboard', 'Build an app'], ['fix-bugs', 'Fix problems'], ['custom-feature', 'Add a feature'], ['lorebook-builder', 'Build lorebook'], ['skybridge-integrate', 'Connect Skybridge'], ['ai-input-assist', 'Rewrite & Fill buttons'], ['card-spec-export', 'Tavern card export'], ['dad-diagnose', 'Diagnose Dad-Chat'], ['dad-add-feature', 'Add Dad-Chat feature'], ['dad-character-create', 'Dad-native character']].map(([id, title]) =>
         E('button', { type: 'button', class: 'wc-btn wc-mini', text: title, onclick: () => {
           S.selected = id; S.query = ''; S.category = ''; S.type = ''; S.mode = ''; S.favoritesOnly = false;
           search.value = ''; category.value = ''; type.value = ''; mode.value = ''; fav.checked = false;

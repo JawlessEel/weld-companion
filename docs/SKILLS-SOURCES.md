@@ -79,3 +79,7 @@ The SillyTavern, Chub and character-card skills describe common conventions and 
 - [SillyTavern World Info](https://docs.sillytavern.app/usage/core-concepts/worldinfo/)
 
 Skybridge skills are based on this repository's own `weld-skybridge/` plugin source.
+
+## Structure references (1.65.0)
+
+Structure packs shipped inside prompts are original summaries written for Weld. The Tavern packs restate the public Character Card V2 and V3 specifications, the PNG chunk layout and commonly seen SillyTavern World Info and chat-log fields, and tell the helper to verify against the linked specifications and real sample files; none of it asserts the behavior of an app version. The Dad-Chat packs are distilled from the project's own [architecture](dad-chat/architecture.md) and [Dad-native format](dad-chat/dad-native-format.md) documents, which are bundled unchanged in `docs/dad-chat/`.

@@ -4,6 +4,11 @@
   else root.WeldSkillsCore = factory();
 })(typeof window === 'object' ? window : globalThis, function () {
   'use strict';
+  // Reference packs (diagrams, file shapes, worked examples) and Dad-Chat rows live in their own files.
+  const viaRequire = typeof module === 'object' && module.exports && typeof require === 'function';
+  const host = typeof window === 'object' ? window : globalThis;
+  const Refs = viaRequire ? require('./skills-refs.js') : (host.WeldSkillsRefs || { packs: [], byId: {}, links: {}, examples: {} });
+  const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
@@ -13,7 +18,7 @@
     ['quality', 'Accessibility & quality'], ['engineering', 'Code & planning'],
     ['create', 'Create a generator'], ['text', 'Text & randomness'],
     ['story', 'Stories & worlds'], ['games', 'Games & interaction'],
-    ['cards', 'SillyTavern, Chub & character cards'], ['rework', 'Rebrand, simplify & privacy'],
+    ['cards', 'SillyTavern, Chub & character cards'], ['dad', 'Dad-Chat projects'], ['rework', 'Rebrand, simplify & privacy'],
     ['assist', 'AI input helpers & toolkit']
   ].map(([id, title]) => Object.freeze({ id, title }));
   // Stable IDs are stored as favorites; task instructions stay in the shipped catalog.
@@ -148,7 +153,9 @@
     Object.freeze({ id: 'ccv2', title: 'Character Card V2 specification', url: 'https://github.com/malfoyslastname/character-card-spec-v2', path: '' }),
     Object.freeze({ id: 'ccv3', title: 'Character Card V3 specification', url: 'https://github.com/kwaroran/character-card-spec-v3', path: '' }),
     Object.freeze({ id: 'st-docs', title: 'SillyTavern documentation', url: 'https://docs.sillytavern.app/', path: '' }),
-    Object.freeze({ id: 'st-worldinfo', title: 'SillyTavern World Info docs', url: 'https://docs.sillytavern.app/usage/core-concepts/worldinfo/', path: '' })
+    Object.freeze({ id: 'st-worldinfo', title: 'SillyTavern World Info docs', url: 'https://docs.sillytavern.app/usage/core-concepts/worldinfo/', path: '' }),
+    Object.freeze({ id: 'dad-arch', title: 'Dad-Chat architecture (Weld docs)', url: 'https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md', path: '' }),
+    Object.freeze({ id: 'dad-format', title: 'Dad-native format (Weld docs)', url: 'https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md', path: '' })
   ]));
   const types = Object.freeze([
     ['dashboard', 'Dashboards & applications'], ['agent', 'Prompt studios & plugins'], ['text', 'Random & text'], ['image', 'AI images & galleries'], ['chat', 'Chat, characters & memory'],
@@ -169,7 +176,8 @@
     text: ['Control generated output', 'Inspect list structure, weights, evaluation timing and shared selections.', 'Preserve intended probabilities while improving valid combinations.', 'Sample bounded local outputs and exercise reroll/lock behavior.', 'Outputs satisfy the stated constraints; statistical claims include sample size and limits.'],
     story: ['Keep the world coherent', 'Map characters, facts, narrative state and the current content structure.', 'Make story rules explicit and retain established lore and saved progress.', 'Walk representative scenes, branches, restarts and resumed sessions.', 'No missing branches, contradictory tracked facts or lost progress in tested paths.'],
     games: ['Make interaction playable', 'Identify the rules, win/loss states and actual game loop.', 'Keep transitions, probabilities, controls and saved state consistent.', 'Play start-to-finish and test restart, invalid actions and boundaries.', 'Progress remains reachable and no tested path soft-locks or duplicates rewards.'],
-    cards: ['Match real chat-card conventions', 'Read the actual chat, character and lore code, plus real sample cards or logs where supplied; map each field to the target convention.', 'Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.', 'Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.', 'Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.'],
+    dad: ['Work inside a Dad-Chat project with its real structure', 'Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.', 'Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.', 'Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.', 'The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.'],
+    cards: ['Match real chat-card conventions', 'Read the actual chat, character and lore code, plus real sample cards or logs where supplied; use the STRUCTURE REFERENCE in the prompt to map each field to the target convention.', 'Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.', 'Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.', 'Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.'],
     rework: ['Change identity safely', 'Inventory every place the target element appears in both panels, imports, metadata, storage labels and network calls.', 'Change only what the user owns or may modify; keep license notices, required attribution, saved-data keys, IDs and list names.', 'Reload from a fresh and an existing saved state and confirm nothing broke or still leaks the old element.', 'Old branding or social features are gone from every visible and network path, and existing saved data still loads.'],
     assist: ['Add helpers that fit the generator', 'Derive the generator purpose, inputs and available text/AI plugins from the actual source.', 'Keep helpers opt-in, reversible, bounded and clearly labeled; never auto-run paid or slow calls.', 'Test empty, filled, failing, cancelled and repeated actions on each input.', 'Every helper has loading, error, cancel and undo behavior and never overwrites user text without a way back.']
   };
@@ -423,9 +431,10 @@
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions).map(([category, id, title, description, mode, task, fit, origin]) =>
+  const presets = Object.freeze(rows.concat(additions, Dad.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
     Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
+      refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',
       steps: sections.find(c => c.id === category).steps, check: guides[category][4] })));
   const get = id => presets.find(p => p.id === id) || null;
   function search(query, category, favorites, filters) {
@@ -454,8 +463,15 @@
       'WORKFLOW\n' + (p.mode === 'review' ? 'Evaluate these steps and propose remedies; do not implement changes during this review.\n' : '') +
         p.steps.map((step, i) => (i + 1) + '. ' + step).join('\n') + '\nAcceptance' + (p.mode === 'review' ? ' criteria to assess' : '') + ': ' + p.check,
       'CONSTRAINTS\nPreserve unrelated features, names, IDs, list references, working imports, saved data and formats. Perchance DSL is not plain JavaScript; distinguish templating from JavaScript inside scripts. Verify actual plugin APIs and current integration points rather than inventing them. Do not publish, replace providers, add paid services, expose secrets or migrate/delete user data without explicit approval. If a required detail is missing, ask a focused question before dependent work.'];
+    if (p.category === 'dad') parts.splice(2, 0, 'PROJECT CONTEXT: DAD-CHAT\nThis generator should be a Dad Chat (dad-chat-v2) project. The STRUCTURE REFERENCE below is its documented file layout, chat-turn flow and Dad-native data format. Treat it as a map, not proof: confirm every file, function and window.* name in the real source before relying on it and report any difference. If the open generator is not a Dad-Chat project, say so before doing anything else. Dad-native is the master format; Tavern V2/V3 shapes are share-only exports. Where the task refers to USER DETAILS and none were given, ask one focused question instead of guessing.');
     if (type) parts.push('GENERATOR FOCUS\n' + type.title + '. This is the user-selected focus; verify the actual source supports it. Apply only relevant checks.');
     if (o.concise) parts.push('REPLY STYLE\nKeep explanations concise and lead with the result. Preserve complete code, exact names, error details, verification evidence and necessary caveats; brevity must never hide unfinished work.');
+    if (p.refs.length) {
+      const general = p.category === 'dad' ? '' : ' These summarize public conventions, not the behavior of any app version; the project own code and real sample files win, so tell the user where they differ.';
+      parts.push('STRUCTURE REFERENCE\nLayout diagrams and file shapes for this task. Use them to find the right place and the right format, and confirm names against the real source.' + general + '\n\n' +
+        p.refs.map((id, i) => '[' + (i + 1) + '] ' + Refs.byId[id].title.toUpperCase() + '\n' + Refs.byId[id].text).join('\n\n'));
+    }
+    if (p.example) parts.push('WORKED EXAMPLE (shows the expected depth and format; adapt it to the real project and never copy its sample values)\n' + p.example.trim());
     if (String(o.details || '').trim()) parts.push('USER DETAILS\n' + String(o.details).trim());
     if (Array.isArray(o.findings)) {
       const issues = o.findings.filter(f => f.severity === 'warn' || f.severity === 'error');
@@ -466,5 +482,6 @@
       (p.mode === 'review' ? 'Report evidence, priority and suggested next steps.' : 'Explain what changed, why, what was actually verified and any remaining limitations. Do not claim success solely because code was written.'));
     return parts.join('\n\n');
   }
-  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt });
+  const refPack = id => Refs.byId[id] || null;
+  return Object.freeze({ categories: Object.freeze(categories), sections, types, sources, presets, get, search, group, buildPrompt, refPack });
 });

@@ -2,9 +2,9 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 166);
+assert.equal(C.presets.length, 190);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
-assert.equal(C.categories.length, 17);
+assert.equal(C.categories.length, 18);
 for (const p of C.presets) {
   assert.ok(C.categories.some(c => c.id === p.category));
   assert.equal(p.steps.length, 3);
@@ -85,7 +85,7 @@ const concise = C.buildPrompt('fix-bugs', { concise: true });
 assert.match(concise, /Preserve complete code, exact names, error details, verification evidence/);
 assert.ok(!C.buildPrompt('fix-bugs').includes('REPLY STYLE'));
 // Skybridge, Tavern/Chub card, rebrand and AI-input-helper skills (1.62.0).
-assert.deepEqual(C.sections.map(s => s.id).slice(-3), ['cards', 'rework', 'assist']);
+assert.deepEqual(C.sections.map(s => s.id).slice(-4), ['cards', 'dad', 'rework', 'assist']);
 assert.ok(C.buildPrompt('skybridge-integrate').includes('call root.weldSkybridge() once early'));
 assert.ok(C.buildPrompt('skybridge-integrate').includes('gate every privileged call on sb.has(name)'));
 assert.match(C.buildPrompt('skybridge-integrate'), /Never place keys on the bridge/);
@@ -109,4 +109,93 @@ for (const s of C.sources) {
   assert.match(s.url, /^https:\/\//);
   if (s.path) assert.match(s.url, /\/blob\/[a-f0-9]{40}\//);
 }
+// Structure references, worked examples and the Dad-Chat section (1.65.0).
+const Refs = require('../src/skills-refs.js');
+const fsx = require('node:fs');
+for (const [id, list] of Object.entries(Refs.links)) {
+  assert.ok(C.get(id), 'link for unknown preset ' + id);
+  assert.ok(list.every(r => Refs.byId[r]), 'unknown pack in ' + id);
+}
+for (const id of Object.keys(Refs.examples)) assert.ok(C.get(id), 'example for unknown preset ' + id);
+assert.equal(new Set(Refs.packs.map(p => p.id)).size, Refs.packs.length);
+assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000')));
+// Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
+const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
+assert.equal(cardSkills.length, 31);
+assert.equal(dadSkills.length, 24);
+for (const p of cardSkills.concat(dadSkills)) {
+  assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
+  assert.ok(p.example.length > 80, p.id + ' needs a worked example');
+  const built = C.buildPrompt(p.id);
+  assert.ok(built.includes('STRUCTURE REFERENCE\n'), p.id);
+  assert.ok(built.includes('WORKED EXAMPLE'), p.id);
+  for (const r of p.refs) assert.ok(built.includes(Refs.byId[r].text), p.id + ' prompt missing pack ' + r);
+}
+for (const p of dadSkills) {
+  assert.deepEqual(Array.from(p.types), ['chat', 'story']);
+  assert.ok(p.sources.includes('dad-arch') && p.sources.includes('dad-format'));
+  assert.match(C.buildPrompt(p.id), /PROJECT CONTEXT: DAD-CHAT/);
+}
+assert.ok(!C.buildPrompt('fix-bugs').includes('STRUCTURE REFERENCE'));
+assert.ok(!C.buildPrompt('fix-bugs').includes('PROJECT CONTEXT'));
+assert.equal(C.sections.find(s => s.id === 'dad').title, 'Dad-Chat projects');
+for (const id of ['dad-orient', 'dad-diagnose', 'dad-fix', 'dad-add-feature', 'dad-improve-feature', 'dad-new-module', 'dad-prompt-tune', 'dad-provider-add', 'dad-ui-polish', 'dad-import-export', 'dad-hub-work', 'dad-prompt-audit', 'dad-persistence-audit', 'dad-safety-review', 'dad-perf-size', 'dad-release-check', 'dad-character-create', 'dad-character-improve', 'dad-lore-build', 'dad-lore-audit', 'dad-world-build', 'dad-token-diet', 'dad-convert-tavern', 'dad-greetings-examples']) assert.ok(C.get(id), id);
+assert.ok(C.search('dad-chat').length >= 24 && C.search('', 'dad', null, { type: 'dashboard' }).length === 0);
+const diagnose = C.buildPrompt('dad-diagnose', { slug: 'dad-chat', details: 'Lore never appears.' });
+assert.match(diagnose, /MODE: REVIEW ONLY/);
+assert.match(diagnose, /main\.pjs \.\.\.\.\.\.\.\.\. plugin imports/);
+assert.match(diagnose, /SCRIPT LOAD ORDER/);
+assert.match(diagnose, /app\.js \(about 2\.4 MB\)/);
+assert.match(diagnose, /PROMPT ASSEMBLY/);
+assert.match(diagnose, /HOW TO MAKE ONE SAFE EDIT/);
+assert.ok(diagnose.indexOf('STRUCTURE REFERENCE') < diagnose.indexOf('USER DETAILS\nLore never appears.'));
+assert.match(C.buildPrompt('dad-fix'), /MODE: IMPLEMENT/);
+assert.match(C.buildPrompt('dad-character-create'), /"type": "dad-char"/);
+assert.match(C.buildPrompt('dad-lore-audit'), /scanDepth \.+ number 1-20 or null/);
+assert.match(C.buildPrompt('card-spec-export'), /89 50 4E 47 0D 0A 1A 0A/);
+assert.match(C.buildPrompt('card-spec-export'), /FILES IN -----> PARSE/);
+assert.match(C.buildPrompt('card-spec-import'), /chara_card_v3/);
+assert.match(C.buildPrompt('lore-import-export'), /keysecondary/);
+assert.match(C.buildPrompt('author-note-depth'), /PROMPT ASSEMBLY ORDER WITH DEPTH INJECTION/);
+assert.match(C.buildPrompt('card-spec-export'), /not the behavior of any app version/);
+assert.ok(!C.buildPrompt('dad-fix').includes('not the behavior of any app version'));
+
+// JSON in the packs must parse, and the Dad-native examples must obey the Dad-native rules.
+const jsonBlocks = id => Refs.byId[id].text.match(/^\{[\s\S]*?^\}/gm) || [];
+const checkEntry = (e, where) => {
+  for (const k of ['id', 'name', 'keys', 'content', 'priority', 'constant', 'vectorized', 'enabled', 'excludeRecursion', 'scanDepth']) assert.ok(Object.hasOwn(e, k), where + ' lacks ' + k);
+  assert.ok(e.keys.length >= 1 && e.keys.length <= 6 && e.keys.every(k => k === k.toLowerCase()), where + ' keys');
+  assert.ok(e.content.split(/\s+/).length <= 70, where + ' content too long');
+  assert.equal(e.scanDepth, null);
+  assert.ok(!/^Entry \d+$/.test(e.name));
+};
+const dadChar = JSON.parse(jsonBlocks('dad-character').pop());
+assert.equal(dadChar.type, 'dad-char'); assert.equal(dadChar.version, 2);
+assert.ok(dadChar.data.id && dadChar.data.name && dadChar.data.systemPrompt && Array.isArray(dadChar.data.firstMessage));
+assert.ok(dadChar.data.exampleDialogue.every(x => x.name1 && x.content1 && x.name2 && x.content2));
+assert.ok(!('avatar' in dadChar.data) && !('lorebookArchive' in dadChar.data) && !('useCount' in dadChar.data));
+Object.values(dadChar.data.lorebook).forEach(e => checkEntry(e, 'dad-character lorebook'));
+checkEntry(JSON.parse(jsonBlocks('dad-lore')[0]), 'dad-lore example');
+const dadWorld = JSON.parse(jsonBlocks('dad-world').pop());
+assert.equal(dadWorld.type, 'dad-world'); assert.equal(dadWorld.version, 1);
+Object.values(dadWorld.world.entries).forEach(e => checkEntry(e, 'dad-world entries'));
+const v2 = JSON.parse(jsonBlocks('st-card-v2')[0]);
+assert.equal(v2.spec, 'chara_card_v2'); assert.equal(v2.spec_version, '2.0'); assert.ok(v2.data.first_mes);
+const v3 = JSON.parse(jsonBlocks('st-card-v3')[0]);
+assert.equal(v3.spec, 'chara_card_v3'); assert.equal(v3.spec_version, '3.0'); assert.ok(Array.isArray(v3.data.assets));
+const lore = jsonBlocks('st-lore'); assert.equal(lore.length, 2);
+assert.ok(Array.isArray(JSON.parse(lore[0]).entries)); assert.ok(JSON.parse(lore[1]).entries['0'].keysecondary);
+const chat = Refs.byId['st-chatlog'].text.split('\n').filter(l => l.startsWith('{"')).map(l => JSON.parse(l));
+assert.equal(chat.length, 3); assert.ok(chat[0].user_name && chat[1].swipes[chat[1].swipe_id] === chat[1].mes);
+
+// The bundled copies of the Dad-Chat docs ship in the repo and agree with the packs on key names and numbers.
+const archDoc = fsx.readFileSync('docs/dad-chat/architecture.md', 'utf8'), formatDoc = fsx.readFileSync('docs/dad-chat/dad-native-format.md', 'utf8');
+for (const fact of ['6,656', 'chatToCardMaxMessages = 40', 'chatToCardMaxCast = 6', 'pjsLiteral', 'Dad_PROVIDER_GROUPS']) {
+  assert.ok((archDoc + formatDoc).includes(fact), 'docs lack ' + fact);
+  assert.ok(Refs.packs.some(p => p.text.includes(fact)), 'packs lack ' + fact);
+}
+for (const file of ['main.pjs', 'pjs-globals.js', 'agent-core.js', 'providers.js', 'forge-core.js', 'forge-bridge.js', 'henry-tucker.js', 'image-forge.js', 'app.js', 'forge-studio.js', 'story-forge.js', 'scene-cast.js', 'immersive.js', 'styling.css'])
+  assert.ok(archDoc.includes(file) && Refs.byId['dad-layout'].text.includes(file), 'layout drift: ' + file);
+for (const key of ['dad_roleplay', 'lorebookArchive', 'lastLoreRun', 'excludeRecursion', 'vectorized', 'reminderMessage', 'userOverride'])
+  assert.ok(formatDoc.includes(key) && Refs.packs.some(p => p.text.includes(key)), 'format drift: ' + key);
 console.log('Skills catalog, scope, search and prompt composition passed');

@@ -91,6 +91,18 @@
         note(p.task),
         E('ol', {}, p.steps.map(step => E('li', { text: step, style: { marginBottom: '6px' } }))), note('Acceptance: ' + p.check)]);
       detail.appendChild(workflow);
+      if (p.refs.length || p.example) {
+        const blockStyle = { whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.45', margin: '6px 0', padding: '8px', borderRadius: '8px',
+          background: 'var(--wc-input,rgba(0,0,0,.18))', maxHeight: '260px', overflow: 'auto' };
+        detail.appendChild(note('Added to the prompt: ' + p.refs.length + ' structure reference' + (p.refs.length === 1 ? '' : 's') + (p.example ? ' and a worked example.' : '.')));
+        const included = E('details', { 'aria-label': 'Structure references in this prompt' }, [E('summary', { text: 'Structure references & example (included in the prompt)', style: { cursor: 'pointer', padding: '8px 0' } })]);
+        p.refs.forEach(id => {
+          const r = C.refPack(id);
+          if (r) included.appendChild(E('details', { style: { marginBottom: '6px' } }, [E('summary', { text: r.title, style: { cursor: 'pointer' } }), E('pre', { text: r.text, style: blockStyle })]));
+        });
+        if (p.example) included.appendChild(E('details', {}, [E('summary', { text: 'Worked example', style: { cursor: 'pointer' } }), E('pre', { text: p.example.trim(), style: blockStyle })]));
+        detail.appendChild(included);
+      }
       if (p.sources.length) {
         const origin = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', fontSize: '12px', margin: '8px 0' } }, [E('span', { text: 'Research & references:' })]);
         p.sources.forEach(id => {
@@ -119,7 +131,7 @@
       E('option', { value: 'review', text: 'Review only' }), E('option', { value: 'change', text: 'Make changes' })]);
     mode.value = S.mode; mode.addEventListener('change', () => { S.mode = mode.value; drawList(); });
     wrap.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '12px 0' } },
-      [['dashboard-architecture', 'Plan dashboard'], ['create-dashboard', 'Build an app'], ['fix-bugs', 'Fix problems'], ['custom-feature', 'Add a feature'], ['lorebook-builder', 'Build lorebook'], ['skybridge-integrate', 'Connect Skybridge'], ['ai-input-assist', 'Rewrite & Fill buttons'], ['card-spec-export', 'Tavern card export']].map(([id, title]) =>
+      [['dashboard-architecture', 'Plan dashboard'], ['create-dashboard', 'Build an app'], ['fix-bugs', 'Fix problems'], ['custom-feature', 'Add a feature'], ['lorebook-builder', 'Build lorebook'], ['skybridge-integrate', 'Connect Skybridge'], ['ai-input-assist', 'Rewrite & Fill buttons'], ['card-spec-export', 'Tavern card export'], ['dad-diagnose', 'Diagnose Dad-Chat'], ['dad-add-feature', 'Add Dad-Chat feature'], ['dad-character-create', 'Dad-native character']].map(([id, title]) =>
         E('button', { type: 'button', class: 'wc-btn wc-mini', text: title, onclick: () => {
           S.selected = id; S.query = ''; S.category = ''; S.type = ''; S.mode = ''; S.favoritesOnly = false;
           search.value = ''; category.value = ''; type.value = ''; mode.value = ''; fav.checked = false;
