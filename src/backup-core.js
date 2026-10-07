@@ -287,7 +287,8 @@
         if (p.kind === 'operational') { skipped.operational++; return; }
         if (p.kind === 'legacy') { skipped.legacy++; return; }
         if (!p.gen || checkStoreWrite(r.key, r.value).ok !== true) { skipped.invalid++; return; }
-        const caller = typeof r.storedBy === 'string' && GEN_RE.test(r.storedBy) ? r.storedBy : p.gen;
+        if (p.kind !== 'snapshot' && p.kind !== 'chat-copy' && p.kind !== 'chat-index') { skipped.invalid++; return; }   // only the three documented key shapes
+        const caller = p.gen;   // never trust a file's storedBy: a record can only land in the namespace its own key names
         if (p.kind === 'chat-copy' && secretScan(isObj(r.value) ? r.value.data : null).length) { skipped.held++; return; }
         const id = caller + '\u0000' + r.key, at = isObj(r.value) ? (num(r.value.at) || 0) : 0, c = { id, caller, key: r.key, p, value: r.value, ex, at };
         const g = groups.get(id);

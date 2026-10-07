@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.72.0
+// @version      1.72.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.72.0';
+  var WC_VERSION = '1.72.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -17325,7 +17325,8 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
         if (p.kind === 'operational') { skipped.operational++; return; }
         if (p.kind === 'legacy') { skipped.legacy++; return; }
         if (!p.gen || checkStoreWrite(r.key, r.value).ok !== true) { skipped.invalid++; return; }
-        const caller = typeof r.storedBy === 'string' && GEN_RE.test(r.storedBy) ? r.storedBy : p.gen;
+        if (p.kind !== 'snapshot' && p.kind !== 'chat-copy' && p.kind !== 'chat-index') { skipped.invalid++; return; }   // only the three documented key shapes
+        const caller = p.gen;   // never trust a file's storedBy: a record can only land in the namespace its own key names
         if (p.kind === 'chat-copy' && secretScan(isObj(r.value) ? r.value.data : null).length) { skipped.held++; return; }
         const id = caller + '\u0000' + r.key, at = isObj(r.value) ? (num(r.value.at) || 0) : 0, c = { id, caller, key: r.key, p, value: r.value, ex, at };
         const g = groups.get(id);

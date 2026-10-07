@@ -279,6 +279,8 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.deepEqual(idx.value.map(e => e.name), ['c', 'a'], 'merged newest first; entry whose copy is absent is dropped');
     assert.equal(plan.skipped.operational, 1); assert.equal(plan.skipped.legacy, 1); assert.equal(plan.skipped.held, 1); assert.ok(plan.skipped.invalid >= 3);
     assert.equal(JSON.stringify(plan).includes('REALSECRET'), false);
+    assert.equal(C.planImport([rec(k('m', 'chat/snap-7-eee'), chat('m', 7, { data: { threads: [], config: {} } }), 1, 'victim'), rec(k('m', 'other-thing'), { generator: 'm' })], local).add.length, 1, 'storedBy cannot redirect; unknown key shapes skipped');
+    assert.equal(C.planImport([rec(k('m', 'chat/snap-7-eee'), chat('m', 7, { data: { threads: [], config: {} } }), 1, 'victim')], local).add[0].caller, 'm');
     assert.equal(C.planImport(docs, local).update.length, plan.update.length, 'planning is repeatable');
   }
   console.log('backup tests passed');
