@@ -268,6 +268,60 @@
   }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
+  // ---- cleanup: find duplicate copies. recs: [{ key, caller, value }]. Pure; deletes nothing.
+  // exact: byte-identical content (compared in full, not by hash alone) -> keep the newest, offer the rest.
+  // near: same generator, same thread and message counts, different content -> only for a human or the AI helper to judge.
+  // Copies holding secret-shaped values are left out entirely: they are never copied to a folder, so they must not be deleted here.
+  function canonical(v) {
+    if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+    if (isObj(v)) return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';
+    return JSON.stringify(v === undefined ? null : v);
+  }
+  function findDuplicates(recs) {
+    const out = { exact: [], near: [], left: 0 };
+    const buckets = new Map();   // gen|kind|content hash -> [{ rec, body }]
+    (recs || []).forEach(rec => {
+      const p = parseKey(rec.key), v = rec.value;
+      if (!p.gen || !isObj(v) || (p.kind !== 'chat-copy' && p.kind !== 'snapshot')) return;
+      if (p.kind === 'chat-copy' && secretScan(v.data).length) { out.left++; return; }
+      // what the copy IS, not when or why it was taken
+      const body = canonical(p.kind === 'chat-copy' ? v.data : { bundle: v.bundle, modelText: v.modelText, outputTemplate: v.outputTemplate, srcManifest: v.srcManifest });
+      const id = p.gen + '|' + p.kind + '|' + hash8(body) + '|' + body.length;
+      let b = buckets.get(id); if (!b) buckets.set(id, b = []);
+      b.push({ rec, p, body, at: isObj(v) ? (num(v.at) || 0) : 0 });
+    });
+    const newest = (a, b) => b.at - a.at || (a.rec.key < b.rec.key ? 1 : -1);
+    const singles = new Map();   // gen -> [{...}] one representative per distinct content, for the near pass
+    buckets.forEach(items => {
+      const groups = [];
+      items.forEach(it => { const g = groups.find(x => x[0].body === it.body); if (g) g.push(it); else groups.push([it]); });   // hash match is confirmed by full comparison
+      groups.forEach(g => {
+        g.sort(newest);
+        if (g.length > 1) out.exact.push({ gen: g[0].p.gen, kind: g[0].p.kind, keep: g[0].rec.key, keepAt: g[0].at, drop: g.slice(1).map(x => ({ key: x.rec.key, caller: x.rec.caller, at: x.at })) });
+        if (g[0].p.kind === 'chat-copy') { let a = singles.get(g[0].p.gen); if (!a) singles.set(g[0].p.gen, a = []); a.push(g[0]); }
+      });
+    });
+    singles.forEach((list, gen) => {
+      const by = new Map();
+      list.forEach(it => {
+        const s = chatSummary(it.rec.value.data), sig = s.threads.length + '/' + s.threads.reduce((a, t) => a + t.messages, 0);
+        if (s.threads.length === 0) return;
+        let a = by.get(sig); if (!a) by.set(sig, a = []); a.push({ key: it.rec.key, caller: it.rec.caller, at: it.at, name: text(it.rec.value.name), threads: s.threads.length, messages: s.threads.reduce((x, t) => x + t.messages, 0) });
+      });
+      by.forEach(a => { if (a.length > 1) out.near.push({ gen, items: a.sort((x, y) => y.at - x.at) }); });
+    });
+    const order = (a, b) => (a.keep || a.gen) < (b.keep || b.gen) ? -1 : 1;
+    out.exact.sort(order); out.near.sort(order);
+    return out;
+  }
+  // Metadata-only report for the AI helper: names, dates and counts. Never chat text, config or source.
+  function duplicateReport(found) {
+    const d = t => fmtDate(t) || 'undated', L = ['Backup copies that look like duplicates. Metadata only; no chat text is included.', ''];
+    found.exact.forEach(g => { L.push('EXACT (identical content) in ' + g.gen + ' [' + g.kind + ']: keep ' + g.keep + ' (' + d(g.keepAt) + '); candidates to delete: ' + g.drop.map(x => x.key + ' (' + d(x.at) + ')').join('; ')); });
+    found.near.forEach(g => { L.push('POSSIBLE in ' + g.gen + ' (same thread and message counts, content differs): ' + g.items.map(x => x.key + ' "' + x.name + '" ' + x.threads + ' threads, ' + x.messages + ' messages, ' + d(x.at)).join('; ')); });
+    return L.join('\n');
+  }
+
   // ---- load from folder: decide what a folder of weld-backup files would change here. Pure; writes nothing.
   // docs: parsed JSON files. local: { get(caller, key) -> value | null (stale/unreadable) | undefined (absent), has(key) -> bool }.
   // Never overwrites a chat copy or other key that exists. A snapshot is replaced only by a strictly newer one;
@@ -333,5 +387,5 @@
   }
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport, findDuplicates, duplicateReport, refToKey };
 });

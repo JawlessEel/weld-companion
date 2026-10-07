@@ -283,5 +283,23 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.equal(C.planImport([rec(k('m', 'chat/snap-7-eee'), chat('m', 7, { data: { threads: [], config: {} } }), 1, 'victim')], local).add[0].caller, 'm');
     assert.equal(C.planImport(docs, local).update.length, plan.update.length, 'planning is repeatable');
   }
+  // cleanup: exact duplicates keep the newest; near duplicates are listed only; secret-shaped copies are never offered
+  {
+    const clean = (gen, at, threads, name) => ({ v: 1, at, protocol: 1, generator: gen, folder: gen, savedBy: gen, name: name || 'c' + at, kind: 'dad-full', size: 1, data: { threads, config: { model: 'x' } } });
+    const th = (n, text) => [{ id: 't1', title: 'T', messages: Array.from({ length: n }, () => ({ text: text || 'hi' })) }];
+    const kk = (g, s) => 'weld:genvault:' + g + '/chat/snap-' + s;
+    const recs = [
+      { key: kk('a', '1-x'), caller: 'a', value: clean('a', 1, th(3)) }, { key: kk('a', '2-y'), caller: 'a', value: clean('a', 2, th(3)) }, { key: kk('a', '3-z'), caller: 'a', value: clean('a', 3, th(3)) },
+      { key: kk('a', '4-w'), caller: 'a', value: clean('a', 4, th(3, 'different')) },
+      { key: kk('b', '1-x'), caller: 'b', value: clean('b', 1, th(3)) },
+      { key: kk('a', '5-s'), caller: 'a', value: chat('a', 5) }, { key: kk('a', '6-s'), caller: 'a', value: chat('a', 6) }
+    ];
+    const f = C.findDuplicates(recs);
+    assert.equal(f.exact.length, 1); assert.equal(f.exact[0].keep, kk('a', '3-z')); assert.deepEqual(f.exact[0].drop.map(d => d.key).sort(), [kk('a', '1-x'), kk('a', '2-y')]);
+    assert.equal(f.near.length, 1); assert.equal(f.near[0].gen, 'a'); assert.equal(f.near[0].items.length, 2, 'distinct contents with the same counts');
+    assert.equal(f.left, 2, 'secret-shaped copies are left out');
+    assert.ok(!JSON.stringify(f.exact).includes('SECRETVALUE'));
+    const rep = C.duplicateReport(f); assert.ok(/EXACT/.test(rep) && /POSSIBLE/.test(rep) && !/different|"hi"/.test(rep), 'report has metadata only');
+  }
   console.log('backup tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

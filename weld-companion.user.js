@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.72.1
+// @version      1.73.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.72.1';
+  var WC_VERSION = '1.73.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -17306,6 +17306,60 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
   }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
+  // ---- cleanup: find duplicate copies. recs: [{ key, caller, value }]. Pure; deletes nothing.
+  // exact: byte-identical content (compared in full, not by hash alone) -> keep the newest, offer the rest.
+  // near: same generator, same thread and message counts, different content -> only for a human or the AI helper to judge.
+  // Copies holding secret-shaped values are left out entirely: they are never copied to a folder, so they must not be deleted here.
+  function canonical(v) {
+    if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+    if (isObj(v)) return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';
+    return JSON.stringify(v === undefined ? null : v);
+  }
+  function findDuplicates(recs) {
+    const out = { exact: [], near: [], left: 0 };
+    const buckets = new Map();   // gen|kind|content hash -> [{ rec, body }]
+    (recs || []).forEach(rec => {
+      const p = parseKey(rec.key), v = rec.value;
+      if (!p.gen || !isObj(v) || (p.kind !== 'chat-copy' && p.kind !== 'snapshot')) return;
+      if (p.kind === 'chat-copy' && secretScan(v.data).length) { out.left++; return; }
+      // what the copy IS, not when or why it was taken
+      const body = canonical(p.kind === 'chat-copy' ? v.data : { bundle: v.bundle, modelText: v.modelText, outputTemplate: v.outputTemplate, srcManifest: v.srcManifest });
+      const id = p.gen + '|' + p.kind + '|' + hash8(body) + '|' + body.length;
+      let b = buckets.get(id); if (!b) buckets.set(id, b = []);
+      b.push({ rec, p, body, at: isObj(v) ? (num(v.at) || 0) : 0 });
+    });
+    const newest = (a, b) => b.at - a.at || (a.rec.key < b.rec.key ? 1 : -1);
+    const singles = new Map();   // gen -> [{...}] one representative per distinct content, for the near pass
+    buckets.forEach(items => {
+      const groups = [];
+      items.forEach(it => { const g = groups.find(x => x[0].body === it.body); if (g) g.push(it); else groups.push([it]); });   // hash match is confirmed by full comparison
+      groups.forEach(g => {
+        g.sort(newest);
+        if (g.length > 1) out.exact.push({ gen: g[0].p.gen, kind: g[0].p.kind, keep: g[0].rec.key, keepAt: g[0].at, drop: g.slice(1).map(x => ({ key: x.rec.key, caller: x.rec.caller, at: x.at })) });
+        if (g[0].p.kind === 'chat-copy') { let a = singles.get(g[0].p.gen); if (!a) singles.set(g[0].p.gen, a = []); a.push(g[0]); }
+      });
+    });
+    singles.forEach((list, gen) => {
+      const by = new Map();
+      list.forEach(it => {
+        const s = chatSummary(it.rec.value.data), sig = s.threads.length + '/' + s.threads.reduce((a, t) => a + t.messages, 0);
+        if (s.threads.length === 0) return;
+        let a = by.get(sig); if (!a) by.set(sig, a = []); a.push({ key: it.rec.key, caller: it.rec.caller, at: it.at, name: text(it.rec.value.name), threads: s.threads.length, messages: s.threads.reduce((x, t) => x + t.messages, 0) });
+      });
+      by.forEach(a => { if (a.length > 1) out.near.push({ gen, items: a.sort((x, y) => y.at - x.at) }); });
+    });
+    const order = (a, b) => (a.keep || a.gen) < (b.keep || b.gen) ? -1 : 1;
+    out.exact.sort(order); out.near.sort(order);
+    return out;
+  }
+  // Metadata-only report for the AI helper: names, dates and counts. Never chat text, config or source.
+  function duplicateReport(found) {
+    const d = t => fmtDate(t) || 'undated', L = ['Backup copies that look like duplicates. Metadata only; no chat text is included.', ''];
+    found.exact.forEach(g => { L.push('EXACT (identical content) in ' + g.gen + ' [' + g.kind + ']: keep ' + g.keep + ' (' + d(g.keepAt) + '); candidates to delete: ' + g.drop.map(x => x.key + ' (' + d(x.at) + ')').join('; ')); });
+    found.near.forEach(g => { L.push('POSSIBLE in ' + g.gen + ' (same thread and message counts, content differs): ' + g.items.map(x => x.key + ' "' + x.name + '" ' + x.threads + ' threads, ' + x.messages + ' messages, ' + d(x.at)).join('; ')); });
+    return L.join('\n');
+  }
+
   // ---- load from folder: decide what a folder of weld-backup files would change here. Pure; writes nothing.
   // docs: parsed JSON files. local: { get(caller, key) -> value | null (stale/unreadable) | undefined (absent), has(key) -> bool }.
   // Never overwrites a chat copy or other key that exists. A snapshot is replaced only by a strictly newer one;
@@ -17371,7 +17425,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
   }
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport, findDuplicates, duplicateReport, refToKey };
 });
 
 /* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
@@ -17673,6 +17727,79 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     }
     return wrap;
   }
+  // ---- cleanup: duplicates. Exact duplicates can be removed in one step (after they are safely in the folder);
+  // near duplicates are only listed and can be sent to the AI helper for a second opinion.
+  const D = { found: null, sel: new Set(), busy: false, secretsLeft: 0 };
+  function findDups() {
+    load();
+    const recs = [];
+    (S.rows || []).forEach(r => { const k = C.parseKey(r.key).kind; if (r.stale || r.parseError || (k !== 'chat-copy' && k !== 'snapshot')) return; const rec = full(r.gmKey); if (rec && !rec.unreadable && !rec.parseError) recs.push({ key: r.key, caller: r.caller, value: rec.value }); });
+    D.found = C.findDuplicates(recs); D.sel = new Set();
+    D.found.exact.forEach(g => g.drop.forEach(x => D.sel.add(x.caller + '\u0000' + x.key)));
+    say(D.found.exact.length || D.found.near.length ? 'Found ' + D.found.exact.length + ' exact duplicate group' + (D.found.exact.length === 1 ? '' : 's') + ' and ' + D.found.near.length + ' possible group' + (D.found.near.length === 1 ? '' : 's') + '.' : 'No duplicates found.');
+    draw();
+  }
+  function askAIAboutDups() {
+    if (!D.found) return;
+    try { H.openAI('Review these backup copies. For each group say which copies are safe to delete and which to keep, and why. Prefer keeping the newest, and keep any copy whose message count is higher.\n\n' + C.duplicateReport(D.found), 'none'); }
+    catch (e) { say('Could not open the AI helper: ' + ((e && e.message) || e), true); draw(); }
+  }
+  async function runCleanup() {
+    if (!D.found || D.busy) return;
+    if (!F.handle || F.perm !== 'granted') { say('Choose a backup folder and allow access first. Duplicates are only deleted after they are safely saved there.', true); return draw(); }
+    D.busy = true; draw();
+    let gone = 0, unsaved = 0;
+    try {
+      await syncToFolder(false);   // copy everything not yet in the folder first
+      const drops = []; D.found.exact.forEach(g => g.drop.forEach(x => { if (D.sel.has(x.caller + '\u0000' + x.key)) drops.push(x); }));
+      const removed = new Map();   // caller|gen -> keys removed
+      for (const x of drops) {
+        const row = (S.rows || []).find(r => r.key === x.key && r.caller === x.caller), rec = row && full(row.gmKey);
+        if (!rec || rec.unreadable || rec.parseError || rec.stale) { unsaved++; continue; }
+        let saved = false;
+        try { const t = C.backupTarget(rec); saved = await exists(await dirAt(F.handle, t.dir, false), t.name); } catch (e) { saved = false; }
+        if (!saved) { unsaved++; continue; }   // never delete what is not provably in the folder
+        let r; try { r = V().remove(row.gmKey); } catch (e) { r = { ok: false }; }
+        if (r && r.ok) { gone++; const id = x.caller + '\u0000' + C.parseKey(x.key).gen; (removed.get(id) || removed.set(id, []).get(id)).push(x.key); } else unsaved++;
+      }
+      removed.forEach((keys, id) => {   // drop the deleted copies from their generator's chat index so nothing points at a missing key
+        const caller = id.split('\u0000')[0], gen = id.split('\u0000')[1];
+        const ir = (S.rows || []).find(r => r.caller === caller && C.parseKey(r.key).kind === 'chat-index' && C.parseKey(r.key).gen === gen), idx = ir && full(ir.gmKey);
+        if (!idx || idx.parseError || idx.stale || !Array.isArray(idx.value)) return;
+        const dropped = new Set(keys), next = idx.value.filter(e => { const r = C.indexRefs([e]); return !(r && r.length && dropped.has(C.refToKey(gen, r[0]))); });
+        if (next.length !== idx.value.length) { try { V().write(caller, idx.key, next); } catch (e) {} }
+      });
+      say('Removed ' + gone + ' duplicate cop' + (gone === 1 ? 'y' : 'ies') + (unsaved ? '; ' + unsaved + ' kept because they were not confirmed in the folder' : '') + '. The folder still has every copy.', unsaved > 0);
+    } catch (e) { say('Cleanup stopped: ' + ((e && e.message) || e), true); }
+    D.found = null; D.sel = new Set(); D.busy = false; load(); draw();
+  }
+  function cleanupCard() {
+    const card = E('div', { 'data-cleanup': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
+    card.appendChild(E('div', { text: 'Cleanup duplicates', style: { fontWeight: '600' } }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Finds copies with identical content. Only exact duplicates can be deleted here, the newest copy is always kept, and each one is deleted only after it is confirmed saved in your backup folder. Possible duplicates (same size, different content) are listed for you or the AI helper to judge.' }));
+    card.appendChild(btn('Find duplicates', () => findDups(), { disabled: D.busy || !(S.rows && S.rows.length) }));
+    const f = D.found; if (!f) return card;
+    if (!f.exact.length && !f.near.length) card.appendChild(note('No duplicates found.'));
+    f.exact.forEach(g => {
+      card.appendChild(E('div', { 'data-dup-group': '1', style: { fontSize: '12px', marginTop: '8px', fontWeight: '600', wordBreak: 'break-all' }, text: g.gen + ' · keep ' + g.keep.slice(g.keep.lastIndexOf('/') + 1) + ' (' + (C.fmtDate(g.keepAt) || 'undated') + ')' }));
+      g.drop.forEach(x => {
+        const id = x.caller + '\u0000' + x.key, cb = E('input', { type: 'checkbox', 'aria-label': 'Delete duplicate ' + x.key }); cb.checked = D.sel.has(id);
+        cb.addEventListener('change', () => { if (cb.checked) D.sel.add(id); else D.sel.delete(id); draw(); });
+        card.appendChild(E('label', { style: { display: 'flex', gap: '7px', fontSize: '12px', alignItems: 'center', wordBreak: 'break-all' } }, [cb, E('span', { text: 'delete ' + x.key + ' (' + (C.fmtDate(x.at) || 'undated') + ')' })]));
+      });
+    });
+    if (f.near.length) {
+      card.appendChild(E('div', { style: { fontSize: '12px', fontWeight: '600', marginTop: '10px' }, text: 'Possible duplicates (not selectable; use Delete on a single key after you check)' }));
+      f.near.forEach(g => g.items.forEach(x => card.appendChild(E('div', { style: { fontSize: '12px', wordBreak: 'break-all' }, text: g.gen + ' · ' + x.key.slice(x.key.lastIndexOf('/') + 1) + ' · "' + x.name + '" · ' + x.threads + ' threads, ' + x.messages + ' messages · ' + (C.fmtDate(x.at) || 'undated') }))));
+    }
+    if (f.exact.length || f.near.length) card.appendChild(E('div', { style: { fontSize: '12px', marginTop: '6px', opacity: '.75' }, text: 'The AI helper gets names, dates and counts only, never chat text. You press Ask yourself there.' }));
+    const row = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' } });
+    if (f.exact.length || f.near.length) row.appendChild(btn('Ask the AI helper to review', () => askAIAboutDups(), { disabled: D.busy }));
+    if (f.exact.length) row.appendChild(btn('Delete ' + D.sel.size + ' selected duplicate' + (D.sel.size === 1 ? '' : 's'), () => { runCleanup(); }, { disabled: D.busy || !D.sel.size || !F.handle || F.perm !== 'granted' }));
+    card.appendChild(row);
+    if (f.exact.length && (!F.handle || F.perm !== 'granted')) card.appendChild(note('Deleting needs a backup folder with access allowed, so every copy is saved first.'));
+    return card;
+  }
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
@@ -17730,6 +17857,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
       (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
     if (!inv.count) wrap.appendChild(note('No generator backups are stored yet. They appear here after a generator saves a copy through Skybridge storage.'));
     wrap.appendChild(folderCard());
+    wrap.appendChild(cleanupCard());
     wrap.appendChild(familyCard(rerender));
     const bar = confirmBar(rerender); if (bar) wrap.appendChild(bar);
     inv.generators.forEach(g => {

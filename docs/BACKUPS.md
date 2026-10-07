@@ -42,3 +42,12 @@ Each file is `{ "format": "weld-backup-record", "v": 1, "exportedAt", "record": 
 - **Secrets stay out.** A chat copy whose config holds a plaintext secret-shaped value (api key, secret, token, webhook) is held back and listed in the card instead of being copied to a drive or cloud folder.
 - Stale (null) records are skipped; unreadable ones are counted as failed.
 - Nothing is restored from the folder automatically. Generators own applying copies.
+
+## Cleanup duplicates
+
+**Find duplicates** compares the chat copies and source copies for each generator by their full content (not a hash alone).
+
+- **Exact duplicates** are listed with the newest copy kept and the older ones pre-ticked. **Delete selected** first saves everything to your backup folder, confirms each copy to delete exists there as a file, then removes only those keys and takes them out of the generator's chat index. It needs a backup folder with access allowed.
+- **Possible duplicates** (same thread and message counts, different content) are only listed. Delete one with the per-key Delete button after checking it.
+- **Ask the AI helper to review** opens the AI helper with a metadata-only report (key names, dates, counts; never chat text or settings). You press Ask yourself.
+- Chat copies holding secret-shaped values are left out of cleanup because they are never copied to the folder.
