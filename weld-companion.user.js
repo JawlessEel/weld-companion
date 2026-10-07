@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.73.0
+// @version      1.73.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.73.0';
+  var WC_VERSION = '1.73.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -17425,7 +17425,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
   }
 
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport, findDuplicates, duplicateReport, refToKey };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport, findDuplicates, duplicateReport, refToKey, canonical };
 });
 
 /* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
@@ -17757,7 +17757,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
         const row = (S.rows || []).find(r => r.key === x.key && r.caller === x.caller), rec = row && full(row.gmKey);
         if (!rec || rec.unreadable || rec.parseError || rec.stale) { unsaved++; continue; }
         let saved = false;
-        try { const t = C.backupTarget(rec); saved = await exists(await dirAt(F.handle, t.dir, false), t.name); } catch (e) { saved = false; }
+        try { const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, false), doc = JSON.parse(await (await (await dir.getFileHandle(t.name)).getFile()).text()); saved = !!(doc && doc.record && doc.record.key === rec.key && C.canonical(doc.record.value) === C.canonical(rec.value)); } catch (e) { saved = false; }   // the file must hold this exact content, not just share its name
         if (!saved) { unsaved++; continue; }   // never delete what is not provably in the folder
         let r; try { r = V().remove(row.gmKey); } catch (e) { r = { ok: false }; }
         if (r && r.ok) { gone++; const id = x.caller + '\u0000' + C.parseKey(x.key).gen; (removed.get(id) || removed.set(id, []).get(id)).push(x.key); } else unsaved++;

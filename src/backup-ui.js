@@ -327,7 +327,7 @@
         const row = (S.rows || []).find(r => r.key === x.key && r.caller === x.caller), rec = row && full(row.gmKey);
         if (!rec || rec.unreadable || rec.parseError || rec.stale) { unsaved++; continue; }
         let saved = false;
-        try { const t = C.backupTarget(rec); saved = await exists(await dirAt(F.handle, t.dir, false), t.name); } catch (e) { saved = false; }
+        try { const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, false), doc = JSON.parse(await (await (await dir.getFileHandle(t.name)).getFile()).text()); saved = !!(doc && doc.record && doc.record.key === rec.key && C.canonical(doc.record.value) === C.canonical(rec.value)); } catch (e) { saved = false; }   // the file must hold this exact content, not just share its name
         if (!saved) { unsaved++; continue; }   // never delete what is not provably in the folder
         let r; try { r = V().remove(row.gmKey); } catch (e) { r = { ok: false }; }
         if (r && r.ok) { gone++; const id = x.caller + '\u0000' + C.parseKey(x.key).gen; (removed.get(id) || removed.set(id, []).get(id)).push(x.key); } else unsaved++;
