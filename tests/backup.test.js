@@ -283,6 +283,25 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.equal(C.planImport([rec(k('m', 'chat/snap-7-eee'), chat('m', 7, { data: { threads: [], config: {} } }), 1, 'victim')], local).add[0].caller, 'm');
     assert.equal(C.planImport(docs, local).update.length, plan.update.length, 'planning is repeatable');
   }
+  // Living State: a world's `state` rides through inspect, export and folder import byte-identical; a legacy world gains none
+  {
+    const state = { updatedAt: 1791400000000, facts: [{ id: 'f1', text: 'Mara left town.', active: true }, { id: 'f2', text: 'The ferry fare is doubled.', active: true }, { id: 'f3', text: 'The east door is locked.', active: false }] };
+    const mk = withState => chat('w', 42, { data: { threads: [], config: { model: 'x', worldBook: { version: 1, activeWorldId: 'w1', worlds: { w1: Object.assign({ id: 'w1', name: 'W', description: 'd', entries: {} }, withState ? { state } : {}) } } } } });
+    const key = 'weld:genvault:w/chat/snap-42-abc', localNone = { get: () => undefined, has: () => false };
+    const wsOf = v => v.data.config.worldBook.worlds.w1;
+    const withS = { key, caller: 'w', size: 1, stale: false, value: mk(true) }, legacy = { key, caller: 'w', size: 1, stale: false, value: mk(false) };
+    assert.doesNotThrow(() => C.inspect(withS, {})); assert.doesNotThrow(() => C.inspect(legacy, {}));
+    const exported = JSON.parse(C.exportRecord(withS, 1).text).record.value;
+    assert.equal(JSON.stringify(wsOf(exported).state), JSON.stringify(state), 'export keeps state byte-identical');
+    const doc = { format: 'weld-backup-record', v: 1, exportedAt: 1, record: C.entryFor(withS) };
+    const planned = C.planImport([JSON.parse(JSON.stringify(doc))], localNone).add[0].value;
+    assert.equal(JSON.stringify(wsOf(planned).state), JSON.stringify(state), 'folder import keeps state byte-identical');
+    const dup = C.findDuplicates([withS, Object.assign({}, withS, { key: 'weld:genvault:w/chat/snap-43-abc', value: Object.assign({}, withS.value, { at: 43 }) })]);
+    assert.equal(dup.exact.length, 1, 'state is part of the content compared');
+    const plannedLegacy = C.planImport([{ format: 'weld-backup-record', v: 1, exportedAt: 1, record: C.entryFor(legacy) }], localNone).add[0].value;
+    assert.equal('state' in wsOf(plannedLegacy), false, 'no state fabricated for a legacy world');
+    assert.equal('state' in wsOf(JSON.parse(C.exportRecord(legacy, 1).text).record.value), false);
+  }
   // cleanup: exact duplicates keep the newest; near duplicates are listed only; secret-shaped copies are never offered
   {
     const clean = (gen, at, threads, name) => ({ v: 1, at, protocol: 1, generator: gen, folder: gen, savedBy: gen, name: name || 'c' + at, kind: 'dad-full', size: 1, data: { threads, config: { model: 'x' } } });

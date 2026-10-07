@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 206);
+assert.equal(C.presets.length, 208);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
 assert.equal(C.categories.length, 18);
 for (const p of C.presets) {
@@ -123,7 +123,7 @@ assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000'
 // Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
 assert.equal(cardSkills.length, 31);
-assert.equal(dadSkills.length, 31);
+assert.equal(dadSkills.length, 33);
 for (const p of cardSkills.concat(dadSkills)) {
   assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
   assert.ok(p.example.length > 80, p.id + ' needs a worked example');

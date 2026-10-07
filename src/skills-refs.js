@@ -75,7 +75,8 @@ from the project documentation; confirm each against the real source before rely
   |        every persona character is paid on every turn: cost control lives here
   |   3 dynamic context, in this order:
   |        world block -> matched lore ([WORLD/LORE DATABASE], <= 6,656 chars,
-  |        world description <= 50% of that) -> manual memory -> summaries ->
+  |        world description <= 50% of that, then the active [WORLD STATE] facts
+  |        <= 1,500 chars when the world has any, then ranked entries) -> manual memory -> summaries ->
   |        retrieved memories -> pinned
   |   4 recent chat turns, then steering: reminder, density, ledger, author's note,
   |        prose director, scene state
@@ -681,6 +682,74 @@ Health check: ${'`'}modelInfo${'`'} → ok-shape or honest ${'`'}no-own-model${'
 self-test ${'`'}set=true get=true list=true${'`'}; an over-size bus message is dropped
 and counted.
 `),
+    pack('dad-skill-world-state', 'Skill: dadchat-world-state (Living State worlds)', String.raw`
+## dadchat-world-state
+
+Purpose: the Living State system — how a dad-chat world records what has
+*changed* from its base setting, and how that reaches the model.
+(Reference: dad-chat-sync ${'`'}src/app.js${'`'} ${'`'}LoreEngine.buildWorldBlock${'`'},
+${'`'}src/forge-studio.js${'`'} World Studio card, template
+${'`'}src/file-templates/04-dad-world.json${'`'}, spec ${'`'}src/dad-native-format.md${'`'} §4.)
+
+- World shape: ${'`'}{id, name, description, entries:{id →
+  {id,name,keys[],content,priority,constant,vectorized,enabled,
+  excludeRecursion,scanDepth}}, state:{updatedAt, facts:[{id,text,active}]}}${'`'}.
+  ${'`'}state${'`'} is ABSENT on legacy worlds — every reader tolerates that, never
+  migrates or fabricates it.
+- Meaning: base ${'`'}description${'`'} + ${'`'}entries${'`'} say what the world *was*; active
+  ${'`'}state.facts${'`'} say what *changed* (someone gone, money moved, a door now
+  locked). One short sentence per fact.
+- Prompt injection order inside the world block: description first (capped at
+  50% of the 6,656-char lore budget), then ${'`'}[WORLD STATE — what has changed]${'`'}
+  with the active facts (capped 1,500 chars, always sent when present), then
+  ranked entries get the remainder. The world block merges AHEAD of character
+  lore, so it reaches every character in that world.
+- Studio: the "Living State" card adds (${'`'}WS.addStateFact${'`'}) / removes
+  (${'`'}WS.toggleStateFact${'`'}) facts. ⬇ Dad-native world export carries ${'`'}state${'`'};
+  re-import adopts it only when the existing world has none.
+- ${'`'}dad-full${'`'} slot/vault copies carry the whole ${'`'}config${'`'}, so ${'`'}worldBook${'`'}
+  (including ${'`'}state${'`'}) travels automatically — a compatible reader must
+  preserve it byte-identical and must never author ${'`'}useCount${'`'}-style fields.
+
+Health check: a world with 3 active facts renders ${'`'}[WORLD STATE]${'`'} with all 3;
+a legacy world without ${'`'}state${'`'} renders its bible unchanged.
+`),
+    pack('dad-skill-curated-density', 'Skill: dadchat-curated-density (prompt packing and budgets)', String.raw`
+## dadchat-curated-density
+
+Purpose: how a dad-chat turn packs the most continuity per token, and the
+budgets every block obeys. (Reference: dad-chat-sync ${'`'}src/app.js${'`'}
+${'`'}MemoryEngine.buildHistory${'`'}, ${'`'}CuratedDensity${'`'}, ${'`'}SummarizationEngine${'`'},
+${'`'}ContinuityLedger${'`'}, ${'`'}src/architecture.md${'`'} §4.)
+
+- Model window: read live via ${'`'}root.generateText({getMetaObject:true})${'`'}
+  → ${'`'}idealMaxContextTokens${'`'} (≈6,000) — a recommendation, never hardcoded.
+  Token counting uses the o200k tokenizer when loaded, chars/4 fallback.
+- Prompt layers, in order: FIXED context (pre-instructions + character
+  persona — always sent, never counted) → CURATED (always kept, each piece
+  self-capped) → recent CHAT (the only thing that yields) → steering
+  injections by depth (reminder, ledger at 3, author's note, prose at 1,
+  immersive scene state, manual pin last).
+- Curated caps: world block ≤6,656 chars (bible ≤50%, state ≤1,500 chars,
+  entries get the rest) + character lore ≤6,656 chars; summaries selected
+  (≤12, oldest-high-level + newest) then token-capped ≤1,800 (oldest
+  foundation first, newest fill, middle yields); recalled memories ≤1,500
+  chars (top-5, score>0.6, labelled use-only-if-relevant); pinned anchors
+  ≤1,500 tokens; continuity ledger ≤900 tokens + card baselines ≤420.
+- Duplicate suppression (${'`'}CuratedDensity.dedupeBlocks${'`'}): exact
+  normalized-sentence match (4+ words, headers kept) drops restatements from
+  lower-priority blocks. Priority high→low: pinned + manual memory →
+  world/lore dynamic context → summaries → recall.
+- Chat budget: free tier keeps the most recent (tier1 6,000 tokens,
+  chat+curated total 8,000 — oldest chat drops first, curated never trimmed);
+  pro tier keeps a larger window (tier1 18,000) with no total cap.
+- Parity rule: the diagnostics context preview MUST equal the production
+  prompt — both go through the same builders/selectors (or a shared helper).
+  Any prompt-assembly change touches both paths, or it is a bug.
+
+Health check: a long thread's prompt keeps its oldest + newest summaries,
+states each canon fact once, and still retains recent chat turns.
+`),
     // ------------------------------------------------------------ Tavern / SillyTavern / Chub
     pack('st-layout', 'Where card, lore and chat features live in a chat app', String.raw`
 A chat-card app is a pipeline. Find these stages in the REAL project before editing:
@@ -1265,7 +1334,19 @@ generator's key or rewrite its generator field; secret-shaped config values are 
 Request: "add named restore points". Keep an index object save_slots (id -> { name, takenAt, threadCount,
 charCount, currentTitle }) and one record per slot at saveslot:<id> with { version: 1, name, takenAt,
 data: { threads, currentThreadId, config } }, max 8 slots, confirm before replacing or restoring, and
-offer a dad-full download before deleting. Slots stay in local kv; they never touch weld:genvault keys.`
+offer a dad-full download before deleting. Slots stay in local kv; they never touch weld:genvault keys.`,
+    'dad-world-state': String.raw`
+Request: "show what has changed in the world". Read config.worldBook.worlds[id].state if it exists, and
+render only facts with active true as one sentence each under [WORLD STATE - what has changed], after the
+description and before ranked entries. A world with state { updatedAt, facts: [{ id: "f1", text: "Mara left
+town.", active: true }] } shows that line; a legacy world with no state key renders exactly as before and
+is never given one. When saving a dad-full file, write worldBook back untouched so state survives.`,
+    'dad-curated-density': String.raw`
+Request: "why was my oldest summary dropped". Trace the layers in order: fixed context, then curated blocks
+(world block, character lore, summaries, recalled memories, pins, ledger) each under its own cap, then recent
+chat. Only recent chat may yield. Check that summaries keep the oldest foundation and the newest, that a
+restated sentence appears once, that the model window comes from getMetaObject and not a constant, and that
+the diagnostics preview calls the same builders as the real prompt.`
   };
 
   // Which packs each preset receives (preset id -> pack ids, in display order).
@@ -1347,7 +1428,9 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     'skybridge-family-adapt': ['weld-family', 'weld-caps'],
     'skybridge-health-check': ['weld-caps', 'weld-family'],
     'dad-vault-bridge': ['dad-skill-vault-bridge', 'dad-skill-presence-bus', 'dad-skill-wire-envelopes', 'dad-skill-dad-full'],
-    'dad-session-slots': ['dad-skill-session-slots', 'dad-skill-dad-full', 'dad-data']
+    'dad-session-slots': ['dad-skill-session-slots', 'dad-skill-dad-full', 'dad-data'],
+    'dad-world-state': ['dad-skill-world-state', 'dad-skill-dad-full', 'dad-world'],
+    'dad-curated-density': ['dad-skill-curated-density', 'dad-flow']
   };
 
   const byId = Object.freeze(packs.reduce((m, p) => { m[p.id] = p; return m; }, {}));
