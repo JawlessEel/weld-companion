@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.75.0
+// @version      1.75.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.75.0';
+  var WC_VERSION = '1.75.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -68,10 +68,50 @@
     try { var v = GM_getValue(NS + ':' + key, undefined); return v === undefined ? dflt : JSON.parse(v); }
     catch (e) { return dflt; }
   }
+  var GSET_MAX_CHARS = 32 * 1024 * 1024;   // Tampermonkey passes values to the extension in one message; Chrome rejects >64 MiB, which stalls every script
   function gset(key, val) {
-    try { GM_setValue(NS + ':' + key, JSON.stringify(val)); return true; } catch (e) { try { toast('Save failed — browser storage may be full'); } catch (_) {} return false; }
+    try { var raw = JSON.stringify(val); if (raw && raw.length > GSET_MAX_CHARS) throw new Error('too-large'); GM_setValue(NS + ':' + key, raw); return true; } catch (e) { try { toast('Save failed — browser storage may be full'); } catch (_) {} return false; }
   }
   function gdel(key) { try { GM_deleteValue(NS + ':' + key); } catch (e) {} }
+
+  // ---- storage guard: oversize stored values make Tampermonkey slow or fail to start scripts ("Message exceeded
+  // maximum allowed size of 64MiB"). Runs shortly after load and from the Tampermonkey menu. Nothing is removed
+  // without a confirm, and a copy of what is removed is downloaded first. Only generator storage (sbk:) and
+  // vault records (weld:genvault:) are ever offered for removal; every other key is only reported.
+  var GUARD_ITEM_CHARS = 2 * 1024 * 1024, GUARD_TOTAL_CHARS = 40 * 1024 * 1024;
+  function storageGuard(manual) {
+    try {
+      if (typeof GM_listValues !== 'function') return;
+      if (!manual && gget('storageGuardDeclined', 0) > Date.now() - 24 * 3600 * 1000) return;
+      var pre = NS + ':', total = 0, big = [];
+      GM_listValues().forEach(function (k) {
+        var v; try { v = GM_getValue(k, ''); } catch (e) { return; }
+        var n = typeof v === 'string' ? v.length : 0; total += n;
+        if (n > GUARD_ITEM_CHARS) big.push({ key: k, chars: n, removable: k.indexOf(pre + 'sbk:') === 0 || k.indexOf(pre + 'weld:genvault:') === 0 });
+      });
+      var mb = function (n) { return (n / 1048576).toFixed(1) + ' MB'; };
+      if (!big.length && total <= GUARD_TOTAL_CHARS) { if (manual) window.alert('Weld storage looks healthy: ' + mb(total) + ' in total, no value over 2 MB.'); return; }
+      big.sort(function (a, b) { return b.chars - a.chars; });
+      var rem = big.filter(function (b) { return b.removable; });
+      var msg = 'Weld storage is ' + mb(total) + ' in total' + (big.length ? ', with ' + big.length + ' value(s) over 2 MB:\n' + big.slice(0, 8).map(function (b) { return '  ' + b.key.slice(0, 70) + '  ' + mb(b.chars) + (b.removable ? '' : '  (kept)'); }).join('\n') : '') +
+        '.\nThis can make Tampermonkey spin for a minute or stop Weld from connecting.\n\n' +
+        (rem.length ? 'OK = download a copy of the ' + rem.length + ' removable value(s), then delete them from browser storage.\nCancel = leave everything and ask again tomorrow.' : 'None of these can be removed automatically (they are not generator storage). Open Weld > Backups to review them.');
+      if (!rem.length) { window.alert(msg); return; }
+      if (!window.confirm(msg)) { gset('storageGuardDeclined', Date.now()); return; }
+      var out = {}; rem.forEach(function (b) { out[b.key] = GM_getValue(b.key, ''); });
+      var blob = new Blob([JSON.stringify(out)], { type: 'application/json' }), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'weld-oversize-storage-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () {
+        if (window.confirm('Copy downloaded as ' + a.download + ' (check your Downloads folder).\nDelete ' + rem.length + ' value(s) from browser storage now?')) {
+          rem.forEach(function (b) { try { GM_deleteValue(b.key); } catch (e) {} });
+          window.alert('Removed. Reload the page.');
+        }
+      }, 800);
+    } catch (e) {}
+  }
+  try { if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('Weld: Check storage size / free space', function () { storageGuard(true); }); } catch (e) {}
+  setTimeout(function () { storageGuard(false); }, 1500);
 
   function el(tag, attrs, children) {
     var n = document.createElement(tag);
@@ -3081,6 +3121,8 @@
       } else if (op === 'set') {
         var BC = window.WeldBackupCore, chk = (BC && BC.checkStoreWrite) ? BC.checkStoreWrite(payload.key, payload.value) : { ok: true };   // refuses a vault record whose generator field names another owner
         if (!chk.ok) return resolve({ ok: false, code: chk.reason, reason: chk.reason });
+        var sbSize = 0; try { sbSize = JSON.stringify(payload.value === undefined ? null : payload.value).length; } catch (e) {}
+        if (sbSize > 2 * 1024 * 1024) return resolve({ ok: false, code: 'too-large', reason: 'value-over-2mb' });   // documented per-value limit; larger ones stall Tampermonkey
         resolve(gset(sbStoreKey(gen, payload.key), payload.value) ? { ok: true } : { ok: false, code: 'quota', reason: 'storage-full' });
       } else if (op === 'list') {
         // gset() stores every key under the NS prefix (NS + ':' + key), so match the real stored name.
