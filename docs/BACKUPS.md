@@ -14,6 +14,15 @@ Generators write to Weld's storage, which is the userscript manager's own storag
 
 Needs Chrome or Edge (other browsers cannot open folders). The folder choice is remembered in the browser's IndexedDB (`weldCompanionBackupFolder`); the automatic setting is stored as `backupFolderAuto`.
 
+### Sharing between computers (Load from folder)
+
+Point Weld on every computer at the same synced folder (for example `Google Drive\My Drive\Weld_shared_saves`) and turn on the automatic save. Each Weld then adds its saves to the folder, and **Check folder for new saves** reads the other computers' saves back:
+
+1. Press **Check folder for new saves**. Weld reads the `weld-backup-record` / `weld-backup-bundle` files in the folder (up to 5 levels deep) and lists what would change. Nothing is written yet.
+2. Press **Apply**. Weld first saves its own current copies to the folder, then writes the listed records into its storage. Reload the generator tab afterwards so it reads them.
+
+What it will and won't do: a record missing here is added; a chat copy that already exists is never overwritten; a source (snapshot) copy is replaced only by one with a strictly newer saved time; a chat index only gains entries whose chat copy is present; keys you deleted here on purpose stay deleted; `_operational` (link and self-test) and `_legacy` records are skipped because they belong to one computer; chat copies holding secret-shaped values are held back.
+
 ### Layout
 
 ```

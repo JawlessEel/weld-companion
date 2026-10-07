@@ -240,6 +240,63 @@
     } catch (e) { F.error = 'Save to folder failed: ' + ((e && e.message) || e); }
     F.busy = false; if (manual || host) draw();
   }
+  // ---- load from folder: the other direction. Reads weld-backup files already in the folder (for example saved by
+  // Weld on another computer into a shared Google Drive folder), shows what would change, and writes only after Apply.
+  const L = { busy: false, plan: null, files: 0, unreadable: 0, msg: '' };
+  async function readJsonFiles(dir, depth, out) {
+    for await (const entry of dir.entries()) {
+      const name = entry[0], h = entry[1];
+      if (out.length + L.unreadable > 5000) return;
+      if (h.kind === 'directory') { if (depth < 5) await readJsonFiles(h, depth + 1, out); continue; }
+      if (!/\.json$/i.test(name)) continue;
+      try { const f = await h.getFile(); if (f.size > 64 * 1048576) { L.unreadable++; continue; } out.push(JSON.parse(await f.text())); } catch (e) { L.unreadable++; }
+    }
+  }
+  async function scanFolder() {
+    if (L.busy) return;
+    if (!F.handle || F.perm !== 'granted') { F.error = 'Choose a backup folder and allow access first.'; draw(); return; }
+    L.busy = true; L.plan = null; L.unreadable = 0; L.msg = ''; draw();
+    try {
+      load();
+      const byId = new Map(), keys = new Set();
+      (S.rows || []).forEach(r => { byId.set(r.caller + '\u0000' + r.key, r); keys.add(r.key); });
+      const docs = []; await readJsonFiles(F.handle, 0, docs); L.files = docs.length;
+      L.plan = C.planImport(docs, {
+        has: k => keys.has(k),
+        get: (c, k) => { const r = byId.get(c + '\u0000' + k); if (!r) return undefined; if (r.stale || r.parseError) return null; const rec = full(r.gmKey); return rec && !rec.unreadable && !rec.parseError ? rec.value : null; }
+      });
+      F.error = '';
+    } catch (e) { F.error = 'Could not read the folder: ' + ((e && e.message) || e); }
+    L.busy = false; draw();
+  }
+  async function applyImport() {
+    const plan = L.plan; if (!plan || L.busy) return;
+    L.busy = true; draw();
+    try {
+      await syncToFolder(false);   // first save what is here, so a replaced snapshot still exists as a file in the folder
+      let ok = 0, bad = 0;
+      plan.add.concat(plan.update).forEach(it => { let r; try { r = V().write(it.caller, it.key, it.value); } catch (e) { r = { ok: false }; } if (r && r.ok) ok++; else bad++; });
+      L.plan = null; load();
+      L.msg = 'Loaded ' + ok + ' record' + (ok === 1 ? '' : 's') + ' from ' + F.name + (bad ? ' (' + bad + ' failed)' : '') + '. Reload the generator tab so it reads them.';
+      say(L.msg, bad > 0);
+    } catch (e) { F.error = 'Load failed: ' + ((e && e.message) || e); }
+    L.busy = false; draw();
+  }
+  function importCard() {
+    const wrap = E('div', { 'data-import': '1', style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--wc-line,#555)' } });
+    wrap.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Load copies that other computers saved into this folder. You see what would change first. Chat copies already here are never overwritten; a source copy is replaced only by a newer one.' }));
+    wrap.appendChild(btn(L.busy ? 'Working...' : 'Check folder for new saves', () => { scanFolder(); }, { disabled: !F.handle || F.perm !== 'granted' || L.busy || F.busy }));
+    const p = L.plan;
+    if (p) {
+      const n = p.add.length + p.update.length, sk = p.skipped;
+      wrap.appendChild(E('div', { 'data-import-summary': '1', style: { fontSize: '12px', margin: '6px 0' }, text: 'Read ' + L.files + ' file' + (L.files === 1 ? '' : 's') + (L.unreadable ? ' (' + L.unreadable + ' unreadable)' : '') + ': ' + p.add.length + ' new, ' + p.update.length + ' updated. Left alone: ' + (sk.present + sk.unchanged + sk.older) + ' already here or older, ' + (sk.operational + sk.legacy) + ' device-specific or legacy' + (sk.held ? ', ' + sk.held + ' held back for secret-shaped values' : '') + (sk.tombstoned ? ', ' + sk.tombstoned + ' deleted here on purpose' : '') + '.' }));
+      p.add.concat(p.update).slice(0, 60).forEach(it => wrap.appendChild(E('div', { style: { fontSize: '12px', wordBreak: 'break-all' }, text: (it.action === 'new' ? 'NEW ' : it.action === 'newer' ? 'NEWER ' : 'MERGE ') + it.key + ' · ' + C.fmtBytes(it.bytes) + ' · ' + it.note })));
+      if (n > 60) wrap.appendChild(E('div', { style: small, text: '...and ' + (n - 60) + ' more.' }));
+      if (!n) wrap.appendChild(E('div', { style: { fontSize: '12px' }, text: 'Everything in the folder is already here.' }));
+      else wrap.appendChild(E('div', { style: { display: 'flex', gap: '8px', marginTop: '6px' } }, [btn('Apply ' + n + ' change' + (n === 1 ? '' : 's'), () => { applyImport(); }, { disabled: L.busy }), btn('Cancel', () => { L.plan = null; draw(); })]));
+    }
+    return wrap;
+  }
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
@@ -265,6 +322,7 @@
     const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
     auto.addEventListener('change', () => setAuto(auto.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    if (F.handle) card.appendChild(importCard());
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;
   }

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.71.3
+// @version      1.72.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.71.3';
+  var WC_VERSION = '1.72.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -3952,6 +3952,14 @@
         remove: function (gm) {   // exactly one key, and only inside the Skybridge storage namespace
           if (typeof gm !== 'string' || gm.indexOf(SBK) !== 0) return { ok: false, reason: 'bad-key' };
           try { GM_deleteValue(gm); return { ok: true }; } catch (e) { return { ok: false, reason: 'delete-failed' }; }
+        },
+        // Used only by Backups > Load from folder, after the user reviews the plan. Same owner check as a generator write.
+        write: function (caller, key, value) {
+          var BC = window.WeldBackupCore;
+          if (typeof caller !== 'string' || !/^[a-z0-9-]{1,64}$/.test(caller) || typeof key !== 'string' || key.indexOf('weld:genvault:') !== 0) return { ok: false, reason: 'bad-key' };
+          var chk = (BC && BC.checkStoreWrite) ? BC.checkStoreWrite(key, value) : { ok: false, reason: 'no-core' };
+          if (!chk.ok) return { ok: false, reason: chk.reason };
+          return gset(sbStoreKey(caller, key), value) ? { ok: true } : { ok: false, reason: 'storage-full' };
         },
         onChange: function (fn) { sbVaultListeners.push(fn); return function () { var i = sbVaultListeners.indexOf(fn); if (i >= 0) sbVaultListeners.splice(i, 1); }; },
         info: function () { return { backend: 'Userscript manager storage (GM_*)' }; },
@@ -17298,8 +17306,71 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
   }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
+  // ---- load from folder: decide what a folder of weld-backup files would change here. Pure; writes nothing.
+  // docs: parsed JSON files. local: { get(caller, key) -> value | null (stale/unreadable) | undefined (absent), has(key) -> bool }.
+  // Never overwrites a chat copy or other key that exists. A snapshot is replaced only by a strictly newer one;
+  // a chat index only gains entries whose chat copy is present. Device-specific and legacy keys are skipped.
+  function planImport(docs, local) {
+    const skipped = { operational: 0, legacy: 0, invalid: 0, held: 0, unchanged: 0, older: 0, present: 0, tombstoned: 0, unreadable: 0 };
+    const groups = new Map();
+    (docs || []).forEach(doc => {
+      let recs = null;
+      if (isObj(doc) && doc.format === 'weld-backup-record' && isObj(doc.record)) recs = [doc.record];
+      else if (isObj(doc) && doc.format === 'weld-backup-bundle' && Array.isArray(doc.records)) recs = doc.records;
+      if (!recs) { skipped.invalid++; return; }
+      const ex = num(doc.exportedAt) || 0;
+      recs.forEach(r => {
+        if (!isObj(r) || typeof r.key !== 'string' || r.stale === true || r.value === null || r.value === undefined) { skipped.invalid++; return; }
+        const p = parseKey(r.key);
+        if (p.kind === 'operational') { skipped.operational++; return; }
+        if (p.kind === 'legacy') { skipped.legacy++; return; }
+        if (!p.gen || checkStoreWrite(r.key, r.value).ok !== true) { skipped.invalid++; return; }
+        const caller = typeof r.storedBy === 'string' && GEN_RE.test(r.storedBy) ? r.storedBy : p.gen;
+        if (p.kind === 'chat-copy' && secretScan(isObj(r.value) ? r.value.data : null).length) { skipped.held++; return; }
+        const id = caller + '\u0000' + r.key, at = isObj(r.value) ? (num(r.value.at) || 0) : 0, c = { id, caller, key: r.key, p, value: r.value, ex, at };
+        const g = groups.get(id);
+        const better = !g || (p.kind === 'snapshot' ? (at > g.at || (at === g.at && ex > g.ex)) : ex > g.ex);
+        if (better) groups.set(id, c);
+      });
+    });
+    const add = [], update = [], adding = new Set();
+    const bytes = v => { try { return JSON.stringify(v).length; } catch (e) { return 0; } };
+    const item = (c, action, note, value) => ({ caller: c.caller, key: c.key, kind: c.p.kind, gen: c.p.gen, action, note, value: value === undefined ? c.value : value, bytes: bytes(value === undefined ? c.value : value) });
+    const indexes = [];
+    groups.forEach(c => {
+      if (c.p.kind === 'chat-index') { indexes.push(c); return; }
+      const cur = local.get(c.caller, c.key);
+      if (cur === undefined) { add.push(item(c, 'new', 'not here yet')); adding.add(c.key); return; }
+      if (cur === null) { skipped.tombstoned++; return; }
+      if (c.p.kind === 'snapshot') {
+        const have = isObj(cur) ? (num(cur.at) || 0) : 0;
+        if (c.at > have) update.push(item(c, 'newer', 'folder copy ' + fmtDate(c.at) + ' replaces ' + (have ? fmtDate(have) : 'an undated copy')));
+        else if (c.at < have) skipped.older++; else skipped.unchanged++;
+        return;
+      }
+      skipped.present++;
+    });
+    const haveKey = k => adding.has(k) || local.has(k);
+    indexes.forEach(c => {
+      const gen = c.p.gen, cur = local.get(c.caller, c.key);
+      if (cur === null) { skipped.tombstoned++; return; }
+      if (!Array.isArray(c.value) || (cur !== undefined && !Array.isArray(cur)) || indexRefs(c.value) === null) { skipped.invalid++; return; }
+      const refOf = e => { const r = indexRefs([e]); return r && r.length ? refToKey(gen, r[0]) : null; };
+      const known = new Set(cur === undefined ? [] : cur.map(refOf).filter(Boolean));
+      const fresh = c.value.filter(e => { const k = refOf(e); return k && !known.has(k) && haveKey(k); });
+      if (!fresh.length) { skipped.unchanged++; return; }
+      let merged = (cur === undefined ? [] : cur).concat(fresh);
+      if (merged.every(e => isObj(e) && num(e.takenAt) !== null)) merged = merged.slice().sort((a, b) => b.takenAt - a.takenAt);
+      if (cur === undefined) add.push(item(c, 'new', fresh.length + ' chat cop' + (fresh.length === 1 ? 'y' : 'ies') + ' listed', merged));
+      else update.push(item(c, 'merge-index', 'adds ' + fresh.length + ' chat cop' + (fresh.length === 1 ? 'y' : 'ies') + ' to the list', merged));
+    });
+    const order = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+    add.sort(order); update.sort(order);
+    return { add, update, skipped };
+  }
+
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport };
 });
 
 /* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
@@ -17544,6 +17615,63 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     } catch (e) { F.error = 'Save to folder failed: ' + ((e && e.message) || e); }
     F.busy = false; if (manual || host) draw();
   }
+  // ---- load from folder: the other direction. Reads weld-backup files already in the folder (for example saved by
+  // Weld on another computer into a shared Google Drive folder), shows what would change, and writes only after Apply.
+  const L = { busy: false, plan: null, files: 0, unreadable: 0, msg: '' };
+  async function readJsonFiles(dir, depth, out) {
+    for await (const entry of dir.entries()) {
+      const name = entry[0], h = entry[1];
+      if (out.length + L.unreadable > 5000) return;
+      if (h.kind === 'directory') { if (depth < 5) await readJsonFiles(h, depth + 1, out); continue; }
+      if (!/\.json$/i.test(name)) continue;
+      try { const f = await h.getFile(); if (f.size > 64 * 1048576) { L.unreadable++; continue; } out.push(JSON.parse(await f.text())); } catch (e) { L.unreadable++; }
+    }
+  }
+  async function scanFolder() {
+    if (L.busy) return;
+    if (!F.handle || F.perm !== 'granted') { F.error = 'Choose a backup folder and allow access first.'; draw(); return; }
+    L.busy = true; L.plan = null; L.unreadable = 0; L.msg = ''; draw();
+    try {
+      load();
+      const byId = new Map(), keys = new Set();
+      (S.rows || []).forEach(r => { byId.set(r.caller + '\u0000' + r.key, r); keys.add(r.key); });
+      const docs = []; await readJsonFiles(F.handle, 0, docs); L.files = docs.length;
+      L.plan = C.planImport(docs, {
+        has: k => keys.has(k),
+        get: (c, k) => { const r = byId.get(c + '\u0000' + k); if (!r) return undefined; if (r.stale || r.parseError) return null; const rec = full(r.gmKey); return rec && !rec.unreadable && !rec.parseError ? rec.value : null; }
+      });
+      F.error = '';
+    } catch (e) { F.error = 'Could not read the folder: ' + ((e && e.message) || e); }
+    L.busy = false; draw();
+  }
+  async function applyImport() {
+    const plan = L.plan; if (!plan || L.busy) return;
+    L.busy = true; draw();
+    try {
+      await syncToFolder(false);   // first save what is here, so a replaced snapshot still exists as a file in the folder
+      let ok = 0, bad = 0;
+      plan.add.concat(plan.update).forEach(it => { let r; try { r = V().write(it.caller, it.key, it.value); } catch (e) { r = { ok: false }; } if (r && r.ok) ok++; else bad++; });
+      L.plan = null; load();
+      L.msg = 'Loaded ' + ok + ' record' + (ok === 1 ? '' : 's') + ' from ' + F.name + (bad ? ' (' + bad + ' failed)' : '') + '. Reload the generator tab so it reads them.';
+      say(L.msg, bad > 0);
+    } catch (e) { F.error = 'Load failed: ' + ((e && e.message) || e); }
+    L.busy = false; draw();
+  }
+  function importCard() {
+    const wrap = E('div', { 'data-import': '1', style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--wc-line,#555)' } });
+    wrap.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Load copies that other computers saved into this folder. You see what would change first. Chat copies already here are never overwritten; a source copy is replaced only by a newer one.' }));
+    wrap.appendChild(btn(L.busy ? 'Working...' : 'Check folder for new saves', () => { scanFolder(); }, { disabled: !F.handle || F.perm !== 'granted' || L.busy || F.busy }));
+    const p = L.plan;
+    if (p) {
+      const n = p.add.length + p.update.length, sk = p.skipped;
+      wrap.appendChild(E('div', { 'data-import-summary': '1', style: { fontSize: '12px', margin: '6px 0' }, text: 'Read ' + L.files + ' file' + (L.files === 1 ? '' : 's') + (L.unreadable ? ' (' + L.unreadable + ' unreadable)' : '') + ': ' + p.add.length + ' new, ' + p.update.length + ' updated. Left alone: ' + (sk.present + sk.unchanged + sk.older) + ' already here or older, ' + (sk.operational + sk.legacy) + ' device-specific or legacy' + (sk.held ? ', ' + sk.held + ' held back for secret-shaped values' : '') + (sk.tombstoned ? ', ' + sk.tombstoned + ' deleted here on purpose' : '') + '.' }));
+      p.add.concat(p.update).slice(0, 60).forEach(it => wrap.appendChild(E('div', { style: { fontSize: '12px', wordBreak: 'break-all' }, text: (it.action === 'new' ? 'NEW ' : it.action === 'newer' ? 'NEWER ' : 'MERGE ') + it.key + ' · ' + C.fmtBytes(it.bytes) + ' · ' + it.note })));
+      if (n > 60) wrap.appendChild(E('div', { style: small, text: '...and ' + (n - 60) + ' more.' }));
+      if (!n) wrap.appendChild(E('div', { style: { fontSize: '12px' }, text: 'Everything in the folder is already here.' }));
+      else wrap.appendChild(E('div', { style: { display: 'flex', gap: '8px', marginTop: '6px' } }, [btn('Apply ' + n + ' change' + (n === 1 ? '' : 's'), () => { applyImport(); }, { disabled: L.busy }), btn('Cancel', () => { L.plan = null; draw(); })]));
+    }
+    return wrap;
+  }
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
@@ -17569,6 +17697,7 @@ offer a dad-full download before deleting. Slots stay in local kv; they never to
     const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
     auto.addEventListener('change', () => setAuto(auto.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    if (F.handle) card.appendChild(importCard());
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;
   }

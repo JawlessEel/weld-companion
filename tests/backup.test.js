@@ -251,5 +251,35 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
   listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'delta' })); await until(() => pickedDir.files().some(f => f.startsWith('delta/snapshot/')), 'auto mirror');
   // disconnect never deletes
   const kept = pickedDir.files().length; click('Disconnect folder (nothing in it is deleted)'); await until(() => btn('Choose folder...'), 'disconnected'); assert.equal(pickedDir.files().length, kept);
+  // load from folder: plan only; never overwrites chat copies, replaces a snapshot only with a newer one, merges indexes safely
+  {
+    const rec = (key, value, ex, caller) => ({ format: 'weld-backup-record', v: 1, exportedAt: ex || 1, record: { key, storedBy: caller || key.split('/')[0].slice('weld:genvault:'.length), stale: false, value } });
+    const snap = (gen, at) => ({ v: 1, at, protocol: 1, generator: gen, folder: gen, savedBy: gen, title: gen, modelText: 'm' });
+    const k = (g, s) => 'weld:genvault:' + g + '/' + s;
+    const localMap = new Map([['m\u0000' + k('m', 'snapshot'), snap('m', 100)], ['m\u0000' + k('m', 'chat/snap-1-aaa'), chat('m', 1)], ['t\u0000' + k('t', 'chat/snap-2-bbb'), null],
+      ['m\u0000' + k('m', 'chat/index'), [{ name: 'a', key: k('m', 'chat/snap-1-aaa'), takenAt: 1 }]]]);
+    const local = { get: (c, key) => localMap.get(c + '\u0000' + key), has: key => Array.from(localMap.keys()).some(id => id.endsWith('\u0000' + key)) };
+    const docs = [
+      rec(k('m', 'snapshot'), snap('m', 200), 5), rec(k('m', 'snapshot'), snap('m', 150), 9),                 // newest snapshot by `at` wins -> update
+      rec(k('n', 'snapshot'), snap('n', 50)),                                                                   // absent here -> new
+      rec(k('m', 'chat/snap-1-aaa'), chat('m', 1, { name: 'CHANGED', data: { threads: [], config: {} } })),                                    // present -> left alone
+      rec(k('m', 'chat/snap-3-ccc'), chat('m', 3, { data: { threads: [], config: { model: 'x' } } })),                                                           // new chat copy
+      rec(k('t', 'chat/snap-2-bbb'), chat('t', 2, { data: { threads: [], config: {} } })),                                                             // locally deleted on purpose -> left alone
+      rec(k('m', 'chat/index'), [{ name: 'a', key: k('m', 'chat/snap-1-aaa'), takenAt: 1 }, { name: 'c', key: k('m', 'chat/snap-3-ccc'), takenAt: 3 }, { name: 'gone', key: k('m', 'chat/snap-9-zzz'), takenAt: 9 }], 7),
+      rec('weld:link-record', { at: 1, protocol: 1 }, 1, 'dad-chat'), rec('dadchat:vault:index', [], 1, 'dad-chat'),   // device-specific / legacy
+      rec(k('m', 'chat/snap-4-ddd'), chat('m', 4, { data: { config: { apiKey: 'sk-live-REALSECRET' } } })),   // secret-shaped -> held
+      rec(k('x', 'snapshot'), snap('someone-else', 1)), { format: 'nope' }, 'junk'
+    ];
+    const plan = C.planImport(docs, local), by = (list, key) => list.find(i => i.key === key);
+    assert.equal(by(plan.update, k('m', 'snapshot')).value.at, 200);
+    assert.ok(by(plan.add, k('n', 'snapshot')) && by(plan.add, k('m', 'chat/snap-3-ccc')));
+    assert.ok(!by(plan.add, k('m', 'chat/snap-1-aaa')) && !by(plan.update, k('m', 'chat/snap-1-aaa')), 'existing chat copy untouched');
+    assert.ok(!by(plan.add, k('t', 'chat/snap-2-bbb')) && plan.skipped.tombstoned === 1, JSON.stringify(plan.skipped));
+    const idx = by(plan.update, k('m', 'chat/index')); assert.equal(idx.action, 'merge-index');
+    assert.deepEqual(idx.value.map(e => e.name), ['c', 'a'], 'merged newest first; entry whose copy is absent is dropped');
+    assert.equal(plan.skipped.operational, 1); assert.equal(plan.skipped.legacy, 1); assert.equal(plan.skipped.held, 1); assert.ok(plan.skipped.invalid >= 3);
+    assert.equal(JSON.stringify(plan).includes('REALSECRET'), false);
+    assert.equal(C.planImport(docs, local).update.length, plan.update.length, 'planning is repeatable');
+  }
   console.log('backup tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

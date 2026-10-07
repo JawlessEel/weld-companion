@@ -268,6 +268,69 @@
   }
   const isVaultUpdate = m => isObj(m) && m.type === 'vault-updated';
 
+  // ---- load from folder: decide what a folder of weld-backup files would change here. Pure; writes nothing.
+  // docs: parsed JSON files. local: { get(caller, key) -> value | null (stale/unreadable) | undefined (absent), has(key) -> bool }.
+  // Never overwrites a chat copy or other key that exists. A snapshot is replaced only by a strictly newer one;
+  // a chat index only gains entries whose chat copy is present. Device-specific and legacy keys are skipped.
+  function planImport(docs, local) {
+    const skipped = { operational: 0, legacy: 0, invalid: 0, held: 0, unchanged: 0, older: 0, present: 0, tombstoned: 0, unreadable: 0 };
+    const groups = new Map();
+    (docs || []).forEach(doc => {
+      let recs = null;
+      if (isObj(doc) && doc.format === 'weld-backup-record' && isObj(doc.record)) recs = [doc.record];
+      else if (isObj(doc) && doc.format === 'weld-backup-bundle' && Array.isArray(doc.records)) recs = doc.records;
+      if (!recs) { skipped.invalid++; return; }
+      const ex = num(doc.exportedAt) || 0;
+      recs.forEach(r => {
+        if (!isObj(r) || typeof r.key !== 'string' || r.stale === true || r.value === null || r.value === undefined) { skipped.invalid++; return; }
+        const p = parseKey(r.key);
+        if (p.kind === 'operational') { skipped.operational++; return; }
+        if (p.kind === 'legacy') { skipped.legacy++; return; }
+        if (!p.gen || checkStoreWrite(r.key, r.value).ok !== true) { skipped.invalid++; return; }
+        const caller = typeof r.storedBy === 'string' && GEN_RE.test(r.storedBy) ? r.storedBy : p.gen;
+        if (p.kind === 'chat-copy' && secretScan(isObj(r.value) ? r.value.data : null).length) { skipped.held++; return; }
+        const id = caller + '\u0000' + r.key, at = isObj(r.value) ? (num(r.value.at) || 0) : 0, c = { id, caller, key: r.key, p, value: r.value, ex, at };
+        const g = groups.get(id);
+        const better = !g || (p.kind === 'snapshot' ? (at > g.at || (at === g.at && ex > g.ex)) : ex > g.ex);
+        if (better) groups.set(id, c);
+      });
+    });
+    const add = [], update = [], adding = new Set();
+    const bytes = v => { try { return JSON.stringify(v).length; } catch (e) { return 0; } };
+    const item = (c, action, note, value) => ({ caller: c.caller, key: c.key, kind: c.p.kind, gen: c.p.gen, action, note, value: value === undefined ? c.value : value, bytes: bytes(value === undefined ? c.value : value) });
+    const indexes = [];
+    groups.forEach(c => {
+      if (c.p.kind === 'chat-index') { indexes.push(c); return; }
+      const cur = local.get(c.caller, c.key);
+      if (cur === undefined) { add.push(item(c, 'new', 'not here yet')); adding.add(c.key); return; }
+      if (cur === null) { skipped.tombstoned++; return; }
+      if (c.p.kind === 'snapshot') {
+        const have = isObj(cur) ? (num(cur.at) || 0) : 0;
+        if (c.at > have) update.push(item(c, 'newer', 'folder copy ' + fmtDate(c.at) + ' replaces ' + (have ? fmtDate(have) : 'an undated copy')));
+        else if (c.at < have) skipped.older++; else skipped.unchanged++;
+        return;
+      }
+      skipped.present++;
+    });
+    const haveKey = k => adding.has(k) || local.has(k);
+    indexes.forEach(c => {
+      const gen = c.p.gen, cur = local.get(c.caller, c.key);
+      if (cur === null) { skipped.tombstoned++; return; }
+      if (!Array.isArray(c.value) || (cur !== undefined && !Array.isArray(cur)) || indexRefs(c.value) === null) { skipped.invalid++; return; }
+      const refOf = e => { const r = indexRefs([e]); return r && r.length ? refToKey(gen, r[0]) : null; };
+      const known = new Set(cur === undefined ? [] : cur.map(refOf).filter(Boolean));
+      const fresh = c.value.filter(e => { const k = refOf(e); return k && !known.has(k) && haveKey(k); });
+      if (!fresh.length) { skipped.unchanged++; return; }
+      let merged = (cur === undefined ? [] : cur).concat(fresh);
+      if (merged.every(e => isObj(e) && num(e.takenAt) !== null)) merged = merged.slice().sort((a, b) => b.takenAt - a.takenAt);
+      if (cur === undefined) add.push(item(c, 'new', fresh.length + ' chat cop' + (fresh.length === 1 ? 'y' : 'ies') + ' listed', merged));
+      else update.push(item(c, 'merge-index', 'adds ' + fresh.length + ' chat cop' + (fresh.length === 1 ? 'y' : 'ies') + ' to the list', merged));
+    });
+    const order = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+    add.sort(order); update.sort(order);
+    return { add, update, skipped };
+  }
+
   return { GEN_RE, MAX_VALUE_BYTES, MAX_CHAT_COPIES, parseKey, inScope, snapshotShape, missingFields, indexRefs, chatSummary, secretScan,
-    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor };
+    inspect, buildInventory, fmtBytes, fmtDate, exportRecord, exportBundle, isVaultUpdate, validateEnvelope, presenceTracker, checkStoreWrite, hash8, backupTarget, entryFor, planImport };
 });
