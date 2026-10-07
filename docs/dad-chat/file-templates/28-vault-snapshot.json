@@ -1,0 +1,54 @@
+{
+  "chatCopy": {
+    "key": "weld:genvault:<generator>/chat/snap-<at>-<rand6>",
+    "index": "weld:genvault:<generator>/chat/index",
+    "record": {
+      "v": 1,
+      "at": 1720000000000,
+      "protocol": 1,
+      "generator": "dad-chat-sync",
+      "folder": "weld:genvault:dad-chat-sync/",
+      "savedBy": "dad-chat-sync",
+      "name": "vault-1",
+      "kind": "dad-full",
+      "size": 123456,
+      "redacted": 1,
+      "data": {
+        "threads": {},
+        "currentThreadId": null,
+        "config": {
+          "characterBook": {},
+          "pollinationsApiKey": "[redacted]"
+        }
+      }
+    }
+  },
+  "generatorCopy": {
+    "key": "weld:genvault:<generator>/snapshot",
+    "note": "Download-only, never restored. Covers main.pjs + imports list ONLY.",
+    "record": {
+      "v": 1,
+      "at": 1720000000000,
+      "protocol": 1,
+      "generator": "dad-chat-sync",
+      "folder": "weld:genvault:dad-chat-sync/",
+      "savedBy": "dad-chat-sync",
+      "title": "DadChat | Unrestricted AI Chat",
+      "bundle": {
+        "name": "dad-chat-sync",
+        "imports": ["kv-plugin", "ai-text-plugin", "text-to-image-plugin"],
+        "code": "<main.pjs source, abbreviated here>"
+      },
+      "source": {
+        "apiUrl": "https://perchance.org/api/getGeneratorsAndDependencies?generatorNames=dad-chat-sync",
+        "fetchedAt": 1720000000000,
+        "bytes": 15949,
+        "truncated": false,
+        "reason": "",
+        "coverage": "main.pjs code + imports list; index.html and src/ files are not exposed by this endpoint and are NOT included"
+      }
+    },
+    "truncatedVariant": "When the bundle exceeds ~1.5M chars: same shape with bundle:null, source.truncated:true, and source.reason naming the cap. The pointer (apiUrl) is kept so the copy can be re-fetched."
+  },
+  "_siblingNote": "Sibling generators use the same keys but may omit the chat copy's redacted count and store generator copies as {title, modelText, outputTemplate, srcManifest} (no bundle/source). Key shape + generator stamping is the contract, not field identity."
+}

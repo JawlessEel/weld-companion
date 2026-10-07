@@ -43,7 +43,40 @@ npm run bridge
 
 It prints a secret URL and the one-line setup for each agent, and keeps the same token between runs (stored in `bridge/.weld-bridge.json`, which git ignores; `--rotate-token` makes a new one, `--port <n>` changes the port).
 
-**Connect Weld.** In the Dev tab, Agent bridge: paste the bridge URL (`http://127.0.0.1:8765`) and the token, then press **Connect**. Tick "reconnect automatically" if you want it on at each page load.
+**Start it automatically (no terminal).** A userscript cannot launch programs, so the bridge has to be a process on your computer. Run this once and it starts hidden (no window) at every Windows login; `-Remove` undoes it. If a bridge is already running, starting another just says so and exits.
+
+```powershell
+pwsh -File bridge\install-autostart.ps1
+```
+
+**macOS: start it automatically.** Use a launchd agent instead. Run this once from the project folder (zsh); it starts the bridge at every login and restarts it if it stops. The log goes to `/tmp/weld-bridge.log`, which also shows the MCP URL.
+
+```bash
+NODE=$(which node)
+P=~/Library/LaunchAgents/com.weld.bridge.plist
+cat > "$P" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.weld.bridge</string>
+<key>ProgramArguments</key><array><string>$NODE</string><string>$PWD/bridge/weld-bridge.js</string></array>
+<key>WorkingDirectory</key><string>$PWD</string>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>/tmp/weld-bridge.log</string>
+<key>StandardErrorPath</key><string>/tmp/weld-bridge.log</string>
+</dict></plist>
+EOF
+launchctl bootstrap gui/$(id -u) "$P"
+```
+
+To stop and remove it: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.weld.bridge.plist && rm ~/Library/LaunchAgents/com.weld.bridge.plist`. If you later change Node versions (nvm), re-run the block so the plist points at the new `node`. Then add it to Claude Code without pasting the token into chat:
+
+```bash
+claude mcp add --scope user --transport http weld "http://127.0.0.1:8765/mcp/$(node -e 'console.log(require("./bridge/.weld-bridge.json").token)')"
+```
+
+**Connect Weld.** In the Dev tab, Agent bridge: press **Connect**. Weld fetches the token from the bridge itself (nothing to paste; the bridge only gives it to the userscript, since a web page cannot send the required `X-Weld-Pair` header). Tick "reconnect automatically" and it connects at each page load, waits for the bridge if it is not up yet, and re-pairs if the bridge was given a new token. You can still paste a URL and token by hand.
 
 **Add it to your agents** (use the MCP URL the bridge prints):
 

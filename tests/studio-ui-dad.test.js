@@ -21,11 +21,12 @@ const parent = new Element('main');
 const walk = n => [n, ...n.children.flatMap(walk)];
 const find = (tag, label) => walk(parent).find(n => n.tagName === tag && (n.attrs.text === label || n.attrs['aria-label'] === label));
 const has = label => walk(parent).some(n => n.attrs.text === label || n.attrs['aria-label'] === label);
+const infos = () => walk(parent).map(n => n.textContent || '').join(' | ');
 const texts = () => walk(parent).map(n => n.attrs.text || n.attrs['aria-label'] || '').join('\n');
 function click(label) { const n = find('button', label); assert.ok(n, 'missing button ' + label); n.click(); }
 function toggle(label, checked) { const n = find('input', label); assert.ok(n, 'missing checkbox ' + label); n.checked = checked; n.events.change(); }
 const window = { confirm: msg => { confirms.push(msg); return true; } }; window.top = window;
-window.WeldStudioCore = C; window.WeldStudioDad = D;
+window.WeldStudioCore = C; window.WeldStudioDad = D; window.WeldDadTemplates = require('../src/dad-templates.js');
 window.weldStudioHost = {
   el: (tag, attrs, children) => new Element(tag, attrs, children),
   get: (key, fallback) => store.has(key) && store.get(key) !== null ? C.copy(store.get(key)) : fallback,
@@ -48,6 +49,30 @@ const dadChar = name => ({ type: 'dad-char', version: 2, data: { id: 'char_' + n
 (async () => {
   render();
   assert.ok(has('Import a file (card, lorebook, world, chat, backup, zip)'), 'welcome screen offers a universal import');
+
+  // Starter file templates are offered with or without a project; downloads are offline.
+  {
+    const before = downloads.length, zips = byteDownloads.length;
+    assert.ok(walk(parent).some(n => n.attrs.text === 'Dad Chat starter file templates'), 'template panel is present');
+    click('Download template');
+    assert.equal(downloads.length, before + 1);
+    const first = downloads[downloads.length - 1];
+    assert.equal(first.name, 'dad-char.template.json'); assert.equal(JSON.parse(first.content).type, 'dad-char');
+    const pick = find('select', 'Template'); pick.value = '17-chat-transcript-stripped.txt'; pick.events.change();
+    assert.match(infos(), /17-chat-transcript-stripped\.txt/);
+    click('Download template');
+    assert.equal(downloads[downloads.length - 1].name, 'chat-transcript-stripped.template.txt');
+    assert.match(downloads[downloads.length - 1].content, /^Jeff:/);
+    pick.value = '12-st-world-info.json'; pick.events.change();
+    assert.match(infos(), /Studio can import this shape/);
+    pick.value = '15-dexie-perchance.json'; pick.events.change();
+    assert.match(infos(), /Studio does not import this shape directly/);
+    click('Download all templates (zip)');
+    assert.equal(byteDownloads.length, zips + 1); assert.equal(byteDownloads[byteDownloads.length - 1].name, 'dad-chat-file-templates.zip');
+    const entries = await D.unzip(byteDownloads[byteDownloads.length - 1].bytes);
+    assert.equal(entries.length, 31);
+    downloads.length = before; byteDownloads.length = zips;
+  }
 
   // Import with no project: preview first, then a new project is created.
   nextFile = file('Mira.dad-char.json', JSON.stringify(dadChar('Mira'))); click('Import a file (card, lorebook, world, chat, backup, zip)'); await tick();

@@ -1,0 +1,19 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "name": "Jeff",
+      "content": "I approach the wagon and ask about the salve."
+    },
+    {
+      "role": "assistant",
+      "name": "Morgana Vex",
+      "content": "Morgana squints at you over her mortar, then slides a small tin across the counter without a word."
+    },
+    {
+      "role": "user",
+      "name": "Jeff",
+      "content": "How much for the whole tin?"
+    }
+  ]
+}

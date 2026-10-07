@@ -139,9 +139,12 @@ const v2Entry = (i, keys, content, over) => Object.assign({ id: i, entry_id: i, 
   const full = { type: 'dad-full', version: 2, appVersion: 'Dad-CORE v2.0', date: 'x', currentThreadId: 't1',
     config: { aiName: 'AI', userName: 'U', characterBook: { char_preset_Dad: Object.assign(dadChar(), { id: 'char_preset_Dad', name: 'Dad' }), char_test_1: dadChar() },
       globalUser: { name: 'U', description: 'd', profiles: [{ id: 'p1', label: 'Sam', name: 'Sam', text: 'A cook.' }] },
-      worldBook: { version: 1, activeWorldId: 'w1', worlds: { w1: { id: 'w1', name: 'World One', description: 'Desc.', entries: { e1: dadLore('e1', 'E', ['e'], 'body') } } } } },
+      worldBook: { version: 1, activeWorldId: 'w1', worlds: { w1: { id: 'w1', name: 'World One', description: 'Desc.', entries: { e1: dadLore('e1', 'E', ['e'], 'body') } }, w2: { id: 'w2', name: 'World Two', description: 'Living.', entries: {}, state: { updatedAt: 1, facts: [{ id: 'f1', text: 'A.', active: true }, { id: 'f2', text: 'B.', active: true }, { id: 'f3', text: 'C.', active: false }] } } } } },
     threads: { t1: dadThread() } };
-  const fp = await D.readFile(file('dad-full-backup.json', JSON.stringify(full)));
+  const stateBefore = JSON.stringify(full.config.worldBook.worlds.w2.state), fp = await D.readFile(file('dad-full-backup.json', JSON.stringify(full)));
+  assert.equal(JSON.stringify(full.config.worldBook.worlds.w2.state), stateBefore, 'reading a world with Living State leaves it untouched');
+  assert.ok(fp.items.some(i => i.kind === 'world' && /World Two/.test(i.label)) && fp.items.some(i => i.kind === 'world' && /World One/.test(i.label)), 'worlds with and without state both read');
+  assert.equal('state' in full.config.worldBook.worlds.w1, false, 'a legacy world gains no state');
   assert.equal(fp.format, 'Dad Chat full backup');
   assert.equal(fp.items.find(i => i.label === 'Dad').checked, false); assert.equal(fp.items.find(i => i.label === 'Mira Vale').checked, true);
   assert.ok(fp.items.filter(i => ['session', 'world', 'lore', 'persona'].includes(i.kind)).every(i => !i.checked));

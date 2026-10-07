@@ -1,0 +1,32 @@
+{
+  "version": "2.0",
+  "characterId": "char_example_001",
+  "characterName": "Morgana Vex",
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "entries": [
+    {
+      "id": "lore_example_1",
+      "name": "Herb Wagon",
+      "keys": ["wagon", "herbs", "apothecary cart"],
+      "content": "Morgana's wagon holds her livelihood: dried herbs, tinctures, and a sleeping stray dog under the bench.",
+      "priority": 10,
+      "constant": false,
+      "vectorized": false,
+      "enabled": true,
+      "excludeRecursion": false,
+      "scanDepth": null
+    },
+    {
+      "id": "lore_example_2",
+      "name": "Guild Exile",
+      "keys": ["guild", "exile", "capital"],
+      "content": "{{char}} was exiled from the capital apothecary guild for treating patients the guild had condemned.",
+      "priority": 20,
+      "constant": false,
+      "vectorized": false,
+      "enabled": true,
+      "excludeRecursion": false,
+      "scanDepth": null
+    }
+  ]
+}

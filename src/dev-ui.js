@@ -203,9 +203,32 @@
   function startBridge() {
     bridgeCfg();
     if (!loopbackUrl(B.cfg.url)) { B.state = 'error'; B.error = 'The bridge URL must point to this computer (127.0.0.1 or localhost). Weld never sends editor contents to another host.'; return draw(); }
-    if (!/^[0-9a-f]{16,128}$/i.test(B.cfg.token)) { B.state = 'error'; B.error = 'Paste the token printed by the bridge.'; return draw(); }
-    if (B.running) return;
+    if (B.running || B.pairing) return;
+    if (!/^[0-9a-f]{16,128}$/i.test(B.cfg.token)) {   // no token yet: ask the bridge for it, so nothing has to be pasted
+      B.pairing = true; B.state = 'connecting'; B.error = ''; draw();
+      return pairBridge(err => {
+        B.pairing = false;
+        if (err) { B.state = 'error'; B.error = err; draw(); return void retryPair(); }
+        startBridge();
+      });
+    }
     B.running = true; B.gen = (B.gen || 0) + 1; B.state = 'connecting'; B.error = ''; B.backoff = 0; draw(); poll(B.gen);
+  }
+  // Pairing: the bridge hands its token to a request that carries the X-Weld-Pair header. A web page cannot send
+  // that header cross-origin (the browser preflights it and the bridge refuses), so only the userscript can pair.
+  function pairBridge(cb) {
+    bridgeCfg();
+    if (!loopbackUrl(B.cfg.url)) return cb('The bridge URL must point to this computer (127.0.0.1 or localhost).');
+    H.request({ method: 'GET', url: B.cfg.url.replace(/\/+$/, '') + '/pair', headers: { 'X-Weld-Pair': '1' }, timeout: 5000 }, (err, res) => {
+      if (err || !res) return cb('Cannot reach the bridge. Is it running? It can start by itself at login: see docs/DEV.md.');
+      let tok = ''; try { tok = JSON.parse(res.text).token || ''; } catch (e) {}
+      if (res.status !== 200 || !/^[0-9a-f]{16,128}$/i.test(tok)) return cb('The bridge did not accept pairing (HTTP ' + res.status + '). Update the bridge, or paste its token.');
+      B.cfg.token = tok; saveBridgeCfg(); cb(null);
+    });
+  }
+  function retryPair() {   // "reconnect automatically" also waits for a bridge that is not up yet
+    if (!B.cfg.auto || B.retryTimer) return;
+    B.retryTimer = setTimeout(() => { B.retryTimer = null; if (B.cfg.auto && !B.running && !B.pairing) startBridge(); }, 10000);
   }
   function stopBridge() {
     const was = B.running; B.running = false; B.state = 'off';
@@ -218,10 +241,13 @@
     H.request({ method: 'GET', url, timeout: 35000 }, (err, res) => {
       if (!B.running || gen !== B.gen) return;
       if (err || !res || res.status !== 200) {
+        if (res && res.status === 404 && !B.repaired) {   // the bridge restarted with a new token: fetch it again
+          B.repaired = true; return pairBridge(e2 => { if (!e2) { if (B.running && gen === B.gen) poll(gen); return; } B.state = 'error'; B.error = e2; draw(); });
+        }
         B.state = 'error'; B.error = err ? 'Cannot reach the bridge. Is it running?' : (res.status === 404 ? 'The bridge rejected the URL or token.' : 'The bridge answered HTTP ' + res.status + '.'); draw();
         B.backoff = Math.min(15000, (B.backoff || 1000) * 2); return void setTimeout(() => poll(gen), B.backoff);
       }
-      B.backoff = 0; if (B.state !== 'connected') { B.state = 'connected'; B.error = ''; draw(); }
+      B.backoff = 0; B.repaired = false; if (B.state !== 'connected') { B.state = 'connected'; B.error = ''; draw(); }
       let cmds = []; try { cmds = JSON.parse(res.text).commands || []; } catch (e) {}
       cmds.forEach(runCommand); poll(gen);
     });
@@ -531,12 +557,12 @@
     const colors = { off: '#768390', connecting: '#d29922', connected: '#3fb950', error: '#e5534b' };
     parent.appendChild(E('div', { style: { margin: '4px 0', color: colors[B.state] }, text: 'Bridge: ' + (B.state === 'connected' ? 'connected' + (B.calls ? ' \u00b7 ' + B.calls + ' request(s), last: ' + B.last : '') : B.state === 'connecting' ? 'connecting\u2026' : B.state === 'error' ? B.error : 'off') }));
     parent.appendChild(field('Bridge URL', B.cfg.url, v => { B.cfg.url = v.trim(); saveBridgeCfg(); }, { placeholder: 'http://127.0.0.1:8765' }));
-    parent.appendChild(field('Bridge token', B.cfg.token, v => { B.cfg.token = v.trim(); saveBridgeCfg(); }, { type: 'password', placeholder: 'token printed by: npm run bridge', autocomplete: 'off' }));
+    parent.appendChild(field('Bridge token', B.cfg.token, v => { B.cfg.token = v.trim(); saveBridgeCfg(); }, { type: 'password', placeholder: 'filled in automatically when you press Connect', autocomplete: 'off' }));
     row(parent, [B.running ? btn('Disconnect', stopBridge) : btn('Connect', startBridge, { accent: true }),
       check('Reconnect automatically when I open Perchance', B.cfg.auto, v => { B.cfg.auto = v; saveBridgeCfg(); })]);
     row(parent, [check('Let agents propose edits (they still need your approval)', B.cfg.allowPropose, v => { B.cfg.allowPropose = v; saveBridgeCfg(); }),
       check('Let agents run samples (re-rolls the generator)', B.cfg.allowSample, v => { B.cfg.allowSample = v; saveBridgeCfg(); }, 'Off by default: update() can have side effects on some generators.')]);
-    note(parent, 'To start the bridge, double-click start-bridge.cmd in your Weld Companion project folder (or run "npm run bridge" there in a terminal). A window opens, shows the setup line for each agent and copies the token to your clipboard: paste it above. Keep that window open while you use it. See docs/DEV.md.');
+    note(parent, 'Press Connect: Weld fetches the token from the bridge by itself, so there is nothing to paste. A userscript cannot start programs, so the bridge has to be running: run bridge\\install-autostart.ps1 once and it starts hidden at every Windows login (see docs/DEV.md), or double-click start-bridge.cmd when you need it.');
   }
   function proposalsSection(parent) {
     if (!S.proposals.length) return note(parent, 'Nothing yet. When an agent proposes a change it appears here with a diff.');
@@ -617,7 +643,7 @@
     if (booted) return; booted = true;
     bootFolder().catch(() => {}); bridgeCfg();
     const m = H.get(GM_KEYS.markers, null); if (m && m.on) { S.markInfo = !!m.info; setMarkers(true); }
-    if (B.cfg.auto && B.cfg.token) startBridge();
+    if (B.cfg.auto) startBridge();
   }
   function render(parent) {
     boot();

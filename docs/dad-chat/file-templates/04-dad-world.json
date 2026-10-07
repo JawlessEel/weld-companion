@@ -1,0 +1,24 @@
+{
+  "type": "dad-world",
+  "version": 1,
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "world": {
+    "id": "world_example_001",
+    "name": "Aethelgard",
+    "description": "A frontier kingdom where walled market towns dot a wide desert, and every traveler knows the stagecoach runs only by daylight.",
+    "entries": {
+      "we_example_1": {
+        "id": "we_example_1",
+        "name": "Stagecoach Rule",
+        "keys": ["stagecoach", "travel", "roads"],
+        "content": "The stagecoach runs between walled towns only by daylight. Nobody travels the open desert at night.",
+        "priority": 20,
+        "constant": false,
+        "vectorized": false,
+        "enabled": true,
+        "excludeRecursion": false,
+        "scanDepth": null
+      }
+    }
+  }
+}

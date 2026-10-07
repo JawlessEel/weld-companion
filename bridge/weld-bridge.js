@@ -157,6 +157,12 @@ function createBridge(options) {
       if (!isLoopbackHost(req.headers.host)) return send(res, 403, { error: 'Forbidden host' });
       const url = new URL(req.url, 'http://127.0.0.1');
       const parts = url.pathname.split('/').filter(Boolean);
+      // ---- pairing: /pair hands the token to the userscript. It needs a custom header, which a web page
+      // cannot send cross-origin (the preflight gets no CORS approval), and a loopback Host (checked above).
+      if (parts[0] === 'pair' && parts.length === 1) {
+        if (req.method !== 'GET' || req.headers['x-weld-pair'] !== '1' || req.headers.origin) return send(res, 404, { error: 'Not found' });
+        return send(res, 200, { ok: true, bridge: VERSION, token });
+      }
       // ---- MCP endpoint: /mcp/<token>
       if (parts[0] === 'mcp') {
         if (!parts[1] || !tokenOk(parts[1]) || parts.length !== 2) return send(res, 404, { error: 'Not found' });
@@ -272,7 +278,19 @@ if (require.main === module) {
       try { const r = require('node:child_process').spawnSync(tool[0], tool.slice(1), { input: cfg.token }); console.log(r.status === 0 ? '\nThe token is copied to your clipboard: paste it into Weld (Dev tab, Agent bridge).' : '\n(Could not copy the token automatically; copy it from above.)'); } catch (e) { console.log('\n(Could not copy the token automatically; copy it from above.)'); }
     }
     console.log('\nWaiting for Weld and agents. Press Ctrl+C to stop.');
-  }).catch(e => { console.error(e.code === 'EADDRINUSE' ? 'Port ' + cfg.port + ' is already in use. Use --port <n>.' : e.message); process.exit(1); });
+  }).catch(e => {
+    if (e.code !== 'EADDRINUSE') { console.error(e.message); process.exit(1); }
+    // Already running (for example started at login)? Say so and leave it alone rather than failing.
+    const q = http.get({ host: '127.0.0.1', port: cfg.port, path: '/pair', headers: { 'X-Weld-Pair': '1' }, timeout: 2000 }, r => {
+      let t = ''; r.on('data', c => { t += c; }); r.on('end', () => {
+        let same = false; try { same = JSON.parse(t).token === cfg.token; } catch (x) {}
+        console.log(same ? 'The Weld bridge is already running on port ' + cfg.port + '. Nothing to do.' : 'Port ' + cfg.port + ' is in use by something else. Use --port <n>.');
+        process.exit(same ? 0 : 1);
+      });
+    });
+    q.on('error', () => { console.error('Port ' + cfg.port + ' is already in use. Use --port <n>.'); process.exit(1); });
+    q.on('timeout', () => q.destroy());
+  });
   process.on('SIGINT', () => bridge.close().then(() => process.exit(0)));
 }
 module.exports = { createBridge, isLoopbackHost, isLoopbackOrigin, configHelp, SUPPORTED, VERSION };

@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "at": 1720000000000,
+  "protocol": 1,
+  "generator": "example-generator",
+  "folder": "weld:genvault:example-generator/",
+  "savedBy": "example-generator",
+  "title": "Example Generator",
+  "modelText": "(the generator's lists panel text)",
+  "outputTemplate": "(the generator's HTML panel text)",
+  "srcManifest": {}
+}

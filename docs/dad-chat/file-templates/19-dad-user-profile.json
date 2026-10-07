@@ -1,0 +1,8 @@
+{
+  "type": "dad-user-profile",
+  "version": 1,
+  "profileLabel": "Main",
+  "chatName": "Jeff",
+  "avatar": null,
+  "systemPromptContext": "The user is an old hand on the frontier trail, laconic but fair."
+}

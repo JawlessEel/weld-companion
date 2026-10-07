@@ -36,6 +36,95 @@ for (const url of [
 }
 assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
 
+// With "Perchance built-in" selected the bridge cannot run a model: replies keep the legacy reason strings and add a code and a hint.
+{
+  const toasts = [];
+  const cfg = { provider: 'builtin' };
+  const env = { aiConfig: () => cfg, toast: (m) => toasts.push(String(m)), Date, PROVIDERS: {}, lookupModelLimits: () => ({}), Promise };
+  const code = between('var sbNoModelToastAt', 'function sbServiceAI(') + between('function sbServiceModel(', 'function sbOriginOk(');
+  const m = load(['sbNoModel', 'sbServiceModel'], code, env);
+  const r = m.sbNoModel('no-own-model');
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'no-own-model'); // legacy string stays: generators match on it
+  assert.equal(r.code, 'no-own-model');
+  assert.match(r.hint, /Perchance built-in/);
+  assert.match(r.hint, /Model connection and AI settings/);
+  assert.equal(toasts.length, 1, 'first request shows one toast');
+  m.sbNoModel('no-own-model');
+  assert.equal(toasts.length, 1, 'toast is throttled');
+  m.sbServiceModel().then((x) => {
+    assert.equal(x.ok, false);
+    assert.equal(x.reason, 'no own model configured');
+    assert.ok(x.hint && x.code === 'no-own-model');
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
+// A streamed reply with no answer text (reasoning model out of budget) must fail with a reason, never succeed with ''.
+{
+  const sse = (...objs) => objs.map((o) => 'data: ' + JSON.stringify(o) + '\n\n').join('') + 'data: [DONE]\n\n';
+  const run = (text) => new Promise((resolve) => {
+    const env = {
+      PROVIDERS: { localai: { noKey: true, defaultEndpoint: 'http://localhost:1234', defaultModel: 'm', headers: () => ({}), body: () => '{"stream":false}' } },
+      sbApplyMaxTokens() {}, sbApplyTemperature() {}, aiUserForProvider: (p, u) => u, aiErr: (s) => 'http ' + s, JSON, String, Array, Object,
+      GM_xmlhttpRequest: (o) => { setTimeout(() => { o.onprogress({ status: 200, responseText: text }); o.onload({ status: 200, responseText: text }); }, 0); },
+    };
+    const f = load(['callOwnAIStream'], between('var STREAM = {', 'var AI_WORKSPACE'), env);
+    const chunks = [];
+    f.callOwnAIStream({ provider: 'localai', keys: {}, models: {}, endpoints: {} }, 's', 'u', false, 0, null, (c) => chunks.push(c), (err, val) => resolve({ err, val, chunks }));
+  });
+  const delta = (d, finish) => ({ choices: [{ index: 0, delta: d, finish_reason: finish || null }] });
+  Promise.all([
+    run(sse(delta({ reasoning_content: 'thinking' }), delta({}, 'length'))),
+    run(sse(delta({ reasoning_content: 'thinking' }), delta({ content: 'ok' }), delta({}, 'stop'))),
+    run(sse(delta({}, 'stop'))),
+  ]).then(([budget, good, empty]) => {
+    assert.match(budget.err, /token budget for reasoning/);
+    assert.equal(budget.val, null);
+    assert.equal(good.err, null);
+    assert.equal(good.val, 'ok');
+    assert.deepEqual(Array.from(good.chunks), ['ok']);
+    assert.match(empty.err, /no final text/);
+    console.log('Skybridge streamed reasoning-model replies tests passed');
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
+// Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
+{
+  const store = new Map();
+  const NS = 'weldCompanion';
+  const GM_setValue = (k, v) => store.set(k, v), GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+  const gget = (k, d) => { const v = GM_getValue(NS + ':' + k, undefined); return v === undefined ? d : JSON.parse(v); };
+  const gset = (k, v) => { GM_setValue(NS + ':' + k, JSON.stringify(v)); return true; };
+  const GM_listValues = () => Array.from(store.keys());
+  const anchorStorage = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS, gget, gset, GM_listValues, Promise, window: { WeldBackupCore: require('../src/backup-core.js') } });
+  const call = (gen, payload) => anchorStorage.sbServiceStorage(gen, payload);
+  call('gen-a', { op: 'set', key: 'slot1', value: { n: 1 } })
+    .then(() => call('gen-a', { op: 'set', key: 'slot2', value: 2 }))
+    .then(() => call('gen-b', { op: 'set', key: 'other', value: 3 }))
+    .then(() => call('gen-a', { op: 'list' }))
+    .then((r) => {
+      assert.deepEqual(Array.from(r.value).sort(), ['slot1', 'slot2']);
+      return call('gen-a', { op: 'list', prefix: 'slot2' });
+    })
+    .then((r) => {
+      assert.deepEqual(Array.from(r.value), ['slot2']);
+      return call('gen-a', { op: 'get', key: 'slot1' });
+    })
+    .then((r) => {
+      assert.deepEqual(r.value, { n: 1 });
+      return call('alpha', { op: 'set', key: 'weld:genvault:alpha/snapshot', value: { generator: 'beta' } });
+    })
+    .then((r) => {
+      assert.deepEqual([r.ok, r.reason], [false, 'owner-mismatch'], 'a record naming another owner is refused');
+      return call('alpha', { op: 'get', key: 'weld:genvault:alpha/snapshot' });
+    })
+    .then((r) => {
+      assert.equal(r.value, null, 'nothing was stored by the refused write');
+      return call('alpha', { op: 'set', key: 'weld:genvault:alpha/snapshot', value: { generator: 'alpha' } });
+    })
+    .then((r) => { assert.equal(r.ok, true); return call('alpha', { op: 'set', key: '', value: 1 }); })
+    .then((r) => { assert.deepEqual([r.ok, r.reason], [false, 'bad-key']); console.log('Skybridge anchor storage set/get/list tests passed'); })
+    .catch((e) => { console.error(e); process.exit(1); });
+}
+
 const providerOptions = load(
   ['sbApplyMaxTokens', 'sbApplyTemperature'],
   between('function sbApplyMaxTokens(', 'function classifyAIError('),
@@ -245,4 +334,34 @@ console.log('skybridge and GitHub push contract tests passed');
     assert.ok(sent[0].url.startsWith('https://example.com/') && !(sent[0].headers && sent[0].headers.Authorization), 'non-GitHub URLs never get the token');
     console.log('Private-repo Pull/Diff fetch tests passed');
   })().catch((e) => { console.error(e); process.exit(1); });
+}
+
+// Bus: known channels are validated before relay, presence is observed (never published), other channels pass through as before.
+{
+  const BC = require('../src/backup-core.js');
+  const sent = [];
+  const code = between('var sbBusSubs = {};', '// ---- the outer Helper as a bus AGENT') + between('function sbServiceBus(', 'function sbHandleMessage(');
+  const env = { window: { WeldBackupCore: BC }, SB: 'weld.skybridge', BroadcastChannel: undefined, Promise, Date, sbMaybeAgent() {} };
+  const ctx = { console, ...env }; vm.createContext(ctx); vm.runInContext(code, ctx);
+  const frame = { postMessage: (m) => sent.push(m) };
+  const run = async () => {
+    const pub = (channel, message) => ctx.sbServiceBus({ op: 'publish', channel, message }, frame, 'https://x');
+    await ctx.sbServiceBus({ op: 'subscribe', channel: 'dad-chat:presence' }, frame, 'https://x');
+    await ctx.sbServiceBus({ op: 'subscribe', channel: 'dad:genvault' }, frame, 'https://x');
+    await ctx.sbServiceBus({ op: 'subscribe', channel: 'free:chan' }, frame, 'https://x');
+    const now = Date.now(), beat = { v: 1, type: 'presence', id: 'tab12345:1', from: 'tab12345', gen: 'alpha', at: now };
+    assert.equal((await pub('dad-chat:presence', beat)).ok, true);
+    const bad = await pub('dad-chat:presence', { ...beat, v: 9 });
+    assert.deepEqual([bad.ok, bad.code], [false, 'malformed']);
+    assert.equal((await pub('dad-chat:presence', beat)).ok, true, 'a duplicate id is accepted by the publisher but never relayed or counted');
+    assert.equal((await pub('free:chan', 'anything goes')).ok, true, 'channels without rules are untouched');
+    assert.equal((await pub('dad:genvault', { v: 1, type: 'vault-updated', generator: 'alpha', at: now })).ok, true);
+    assert.equal((await pub('dad:genvault', { v: 1, type: 'vault-updated' })).ok, false);
+    const relayed = sent.filter((m) => m.type === 'bus').map((m) => m.busChannel);
+    assert.deepEqual(relayed, ['dad-chat:presence', 'free:chan', 'dad:genvault'], 'only valid, non-duplicate messages are relayed');
+    const snap = ctx.sbPresence.snapshot();
+    assert.deepEqual(Object.assign({}, snap.tabs), { alpha: 1 }); assert.equal(snap.ignored, 3);   // bad publish + duplicate + bad vault-updated
+    console.log('Skybridge bus envelope validation and presence tests passed');
+  };
+  run().catch((e) => { console.error(e); process.exit(1); });
 }
