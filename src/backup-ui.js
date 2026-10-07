@@ -165,8 +165,8 @@
   // ------------------------------------------------------------- backup folder (any drive or cloud-sync folder)
   // The user picks a folder with the browser's folder picker (Chrome/Edge). Records are copied there as JSON files.
   // Files are only ever ADDED: a changed record gets a new file, an unchanged one is skipped, nothing is overwritten or deleted.
-  const AUTO_KEY = 'backupFolderAuto';
-  const F = { supported: false, handle: null, name: '', perm: 'none', auto: false, busy: false, error: '', last: null };
+  const AUTO_KEY = 'backupFolderAuto', KEEP_KEY = 'backupFolderKeep';
+  const F = { supported: false, handle: null, name: '', perm: 'none', auto: false, keep: true, busy: false, error: '', last: null };
   const memKv = new Map();
   let dbp = null;
   function kvdb() {
@@ -212,6 +212,28 @@
   async function forgetFolder() {
     F.handle = null; F.name = ''; F.perm = 'none'; await kvDel('handle'); say('Backup folder disconnected. Nothing in it was deleted.'); draw();
   }
+  // Chrome drops folder permission on restart; requestPermission() needs a user gesture, so with "Keep access
+  // allowed" on, the first click or key press anywhere re-grants it (no need to open Weld's panel).
+  let regrantArmed = false;
+  function armRegrant() {
+    if (regrantArmed || !F.handle || F.perm === 'granted' || !F.keep || typeof document === 'undefined') return;
+    regrantArmed = true;
+    const go = async () => {
+      document.removeEventListener('pointerdown', go, true); document.removeEventListener('keydown', go, true); regrantArmed = false;
+      if (!F.handle || F.perm === 'granted' || !F.keep) return;
+      F.perm = await permission(F.handle, true); if (F.perm === 'granted') F.error = '';
+      if (F.perm === 'granted' && F.auto) scheduleSync(500);
+      if (host) draw();
+    };
+    document.addEventListener('pointerdown', go, true); document.addEventListener('keydown', go, true);
+  }
+  async function recheckAccess() {
+    if (!F.handle || !F.keep) return;
+    const was = F.perm; F.perm = await permission(F.handle, false);
+    if (F.perm !== 'granted') armRegrant();
+    if (F.perm !== was && host) draw();
+  }
+  function setKeep(on) { F.keep = !!on; H.set(KEEP_KEY, F.keep); if (F.keep) recheckAccess(); draw(); }
   function setAuto(on) { F.auto = !!on; H.set(AUTO_KEY, F.auto); if (F.auto) scheduleSync(300); draw(); }
   async function dirAt(root, segs, create) { let d = root; for (const s of segs) d = await d.getDirectoryHandle(s, { create }); return d; }
   async function exists(dir, name) {
@@ -373,8 +395,10 @@
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
-    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true;
+    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
+    try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
+    armRegrant();
     const v = V(); if (v && typeof v.onChange === 'function') v.onChange(() => { if (F.auto) scheduleSync(1500); });   // a generator saved: mirror it
     if (F.auto) scheduleSync(3000);
     if (host) draw();
@@ -395,6 +419,9 @@
     const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
     auto.addEventListener('change', () => setAuto(auto.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    const keep = E('input', { type: 'checkbox', 'aria-label': 'Keep folder access allowed' }); keep.checked = F.keep;
+    keep.addEventListener('change', () => setKeep(keep.checked));
+    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' }, title: 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\'s prompt to stop it forgetting at all.' }, [keep, E('span', { text: 'Keep access allowed (re-ask on my next click after a browser restart)' })]));
     if (F.handle) card.appendChild(importCard());
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.74.0
+// @version      1.75.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.74.0';
+  var WC_VERSION = '1.75.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -8001,6 +8001,9 @@
         persistNote.textContent = yes ? '\u2713 This origin\u2019s storage is marked persistent (the browser won\u2019t auto-evict it).' : '\u26a0 Storage is NOT marked persistent \u2014 the browser may evict it under disk pressure. Backups matter.';
       });
       bd.appendChild(persistNote);
+      if (navigator.storage.persist) bd.appendChild(el('div', { class: 'wlib-bar' }, [el('button', { class: 'wlib-mini', text: 'Ask browser to keep storage persistent', onclick: function () {
+        navigator.storage.persist().then(function (yes) { persistNote.textContent = yes ? '\u2713 This origin\u2019s storage is marked persistent (the browser won\u2019t auto-evict it).' : '\u26a0 The browser declined (it usually grants this for sites you use often or have bookmarked).'; toast(yes ? 'Storage marked persistent' : 'Browser declined'); }, function () { toast('Could not ask the browser'); });
+      } })]));
     }
     bd.appendChild(el('div', { class: 'wlib-bar', style: { marginTop: '8px' } }, [
       el('button', { class: 'wlib-mini', text: '\u29c9 Run sweep backup now', onclick: function () {
@@ -14236,7 +14239,7 @@
   const GM_KEYS = { bridge: 'bridge', folder: 'folderSync', agents: 'agentHandoff', markers: 'devMarkers', baseline: 'baseline:' };
   const MARK_COLORS = { error: '#e5534b', warn: '#d29922', info: '#768390' };
 
-  const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, dslPath: '', htmlPath: '' },
+  const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' },
     plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false };
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
@@ -14274,7 +14277,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   async function dirFor(root, rel, create) {
     const segs = rel.split('/'), name = segs.pop(); let dir = root;
@@ -14321,6 +14324,29 @@
     } catch (e) { if (!(e && e.name === 'AbortError')) { F.error = e.message || String(e); } }
     draw();
   }
+  // Chrome drops a folder's permission when it restarts. requestPermission() needs a user gesture, so when
+  // "Keep access allowed" is on, the first click or key press anywhere on the page re-grants it without
+  // opening Weld. (Choose "Allow on every visit" in Chrome's prompt and Chrome stops forgetting it at all.)
+  let regrantArmed = false;
+  function armRegrant() {
+    if (regrantArmed || !F.handle || F.perm === 'granted' || !F.cfg.keepAccess || typeof document === 'undefined') return;
+    regrantArmed = true;
+    const go = async () => {
+      document.removeEventListener('pointerdown', go, true); document.removeEventListener('keydown', go, true); regrantArmed = false;
+      if (!F.handle || F.perm === 'granted' || !F.cfg.keepAccess) return;
+      F.perm = await permission(F.handle, true);
+      if (F.perm === 'granted') { F.error = ''; tick(true).catch(() => {}); }
+      draw();
+    };
+    document.addEventListener('pointerdown', go, true); document.addEventListener('keydown', go, true);
+  }
+  async function recheckAccess() {
+    if (!F.handle || !F.cfg.keepAccess) return;
+    const was = F.perm; F.perm = await permission(F.handle, false);
+    if (F.perm !== 'granted') armRegrant();
+    if (F.perm !== was) draw();
+  }
+  function setKeepAccess(v) { F.cfg.keepAccess = !!v; saveFolderCfg(); if (v) recheckAccess(); }
   async function reconnectFolder() {
     if (!F.handle) return;
     F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.';
@@ -14338,7 +14364,8 @@
       const h = await kvGet('handle');
       if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); }
     } catch (e) {}
-    startWatch(); draw();
+    try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
+    armRegrant(); startWatch(); draw();
   }
   let watchTimer = null;
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
@@ -14753,7 +14780,7 @@
       return;
     }
     parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Folder: ' + F.name + (F.perm === 'granted' ? '' : '  (access not confirmed)') }));
-    if (F.perm !== 'granted') { note(parent, 'The browser needs you to confirm access to this folder again.'); row(parent, [btn('Allow access', reconnectFolder, { accent: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]); return; }
+    if (F.perm !== 'granted') { note(parent, 'The browser needs you to confirm access to this folder again.' + (F.cfg.keepAccess ? ' Your next click on the page will do it.' : '')); row(parent, [btn('Allow access', reconnectFolder, { accent: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]); row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press.')]); return; }
     const slug = H.slug(), safe = D.safeSlug(slug);
     if (!safe) note(parent, 'Open a generator to sync it.');
     else {
@@ -14769,6 +14796,7 @@
     }
     row(parent, [check('Write the editor to the folder automatically every few seconds', F.cfg.autoMirror, v => { F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
       check('Watch the folder for changes', F.cfg.watch, v => { F.cfg.watch = v; saveFolderCfg(); })]);
+    row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\u2019s prompt to stop it forgetting at all.')]);
     note(parent, 'Files: ' + (safe ? paths(slug).dsl + ' and ' + paths(slug).html : '{name}/{name}-top-panel.txt and {name}/{name}-html-panel.html') + '. Checked ' + (F.lastCheck ? ago(F.lastCheck) : 'not yet') + '.');
     if (F.error) note(parent, F.error, { color: '#e5534b' });
     row(parent, [btn('Download all starred generators', seedStarred, { mini: true, disabled: !!F.seeding }), btn('List generators in folder', listFolders, { mini: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]);
@@ -17682,8 +17710,8 @@ the diagnostics preview calls the same builders as the real prompt.`
   // ------------------------------------------------------------- backup folder (any drive or cloud-sync folder)
   // The user picks a folder with the browser's folder picker (Chrome/Edge). Records are copied there as JSON files.
   // Files are only ever ADDED: a changed record gets a new file, an unchanged one is skipped, nothing is overwritten or deleted.
-  const AUTO_KEY = 'backupFolderAuto';
-  const F = { supported: false, handle: null, name: '', perm: 'none', auto: false, busy: false, error: '', last: null };
+  const AUTO_KEY = 'backupFolderAuto', KEEP_KEY = 'backupFolderKeep';
+  const F = { supported: false, handle: null, name: '', perm: 'none', auto: false, keep: true, busy: false, error: '', last: null };
   const memKv = new Map();
   let dbp = null;
   function kvdb() {
@@ -17729,6 +17757,28 @@ the diagnostics preview calls the same builders as the real prompt.`
   async function forgetFolder() {
     F.handle = null; F.name = ''; F.perm = 'none'; await kvDel('handle'); say('Backup folder disconnected. Nothing in it was deleted.'); draw();
   }
+  // Chrome drops folder permission on restart; requestPermission() needs a user gesture, so with "Keep access
+  // allowed" on, the first click or key press anywhere re-grants it (no need to open Weld's panel).
+  let regrantArmed = false;
+  function armRegrant() {
+    if (regrantArmed || !F.handle || F.perm === 'granted' || !F.keep || typeof document === 'undefined') return;
+    regrantArmed = true;
+    const go = async () => {
+      document.removeEventListener('pointerdown', go, true); document.removeEventListener('keydown', go, true); regrantArmed = false;
+      if (!F.handle || F.perm === 'granted' || !F.keep) return;
+      F.perm = await permission(F.handle, true); if (F.perm === 'granted') F.error = '';
+      if (F.perm === 'granted' && F.auto) scheduleSync(500);
+      if (host) draw();
+    };
+    document.addEventListener('pointerdown', go, true); document.addEventListener('keydown', go, true);
+  }
+  async function recheckAccess() {
+    if (!F.handle || !F.keep) return;
+    const was = F.perm; F.perm = await permission(F.handle, false);
+    if (F.perm !== 'granted') armRegrant();
+    if (F.perm !== was && host) draw();
+  }
+  function setKeep(on) { F.keep = !!on; H.set(KEEP_KEY, F.keep); if (F.keep) recheckAccess(); draw(); }
   function setAuto(on) { F.auto = !!on; H.set(AUTO_KEY, F.auto); if (F.auto) scheduleSync(300); draw(); }
   async function dirAt(root, segs, create) { let d = root; for (const s of segs) d = await d.getDirectoryHandle(s, { create }); return d; }
   async function exists(dir, name) {
@@ -17890,8 +17940,10 @@ the diagnostics preview calls the same builders as the real prompt.`
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
-    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true;
+    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
+    try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
+    armRegrant();
     const v = V(); if (v && typeof v.onChange === 'function') v.onChange(() => { if (F.auto) scheduleSync(1500); });   // a generator saved: mirror it
     if (F.auto) scheduleSync(3000);
     if (host) draw();
@@ -17912,6 +17964,9 @@ the diagnostics preview calls the same builders as the real prompt.`
     const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
     auto.addEventListener('change', () => setAuto(auto.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    const keep = E('input', { type: 'checkbox', 'aria-label': 'Keep folder access allowed' }); keep.checked = F.keep;
+    keep.addEventListener('change', () => setKeep(keep.checked));
+    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' }, title: 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\'s prompt to stop it forgetting at all.' }, [keep, E('span', { text: 'Keep access allowed (re-ask on my next click after a browser restart)' })]));
     if (F.handle) card.appendChild(importCard());
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;

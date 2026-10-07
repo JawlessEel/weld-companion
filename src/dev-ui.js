@@ -9,7 +9,7 @@
   const GM_KEYS = { bridge: 'bridge', folder: 'folderSync', agents: 'agentHandoff', markers: 'devMarkers', baseline: 'baseline:' };
   const MARK_COLORS = { error: '#e5534b', warn: '#d29922', info: '#768390' };
 
-  const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, dslPath: '', htmlPath: '' },
+  const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' },
     plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false };
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
@@ -47,7 +47,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   async function dirFor(root, rel, create) {
     const segs = rel.split('/'), name = segs.pop(); let dir = root;
@@ -94,6 +94,29 @@
     } catch (e) { if (!(e && e.name === 'AbortError')) { F.error = e.message || String(e); } }
     draw();
   }
+  // Chrome drops a folder's permission when it restarts. requestPermission() needs a user gesture, so when
+  // "Keep access allowed" is on, the first click or key press anywhere on the page re-grants it without
+  // opening Weld. (Choose "Allow on every visit" in Chrome's prompt and Chrome stops forgetting it at all.)
+  let regrantArmed = false;
+  function armRegrant() {
+    if (regrantArmed || !F.handle || F.perm === 'granted' || !F.cfg.keepAccess || typeof document === 'undefined') return;
+    regrantArmed = true;
+    const go = async () => {
+      document.removeEventListener('pointerdown', go, true); document.removeEventListener('keydown', go, true); regrantArmed = false;
+      if (!F.handle || F.perm === 'granted' || !F.cfg.keepAccess) return;
+      F.perm = await permission(F.handle, true);
+      if (F.perm === 'granted') { F.error = ''; tick(true).catch(() => {}); }
+      draw();
+    };
+    document.addEventListener('pointerdown', go, true); document.addEventListener('keydown', go, true);
+  }
+  async function recheckAccess() {
+    if (!F.handle || !F.cfg.keepAccess) return;
+    const was = F.perm; F.perm = await permission(F.handle, false);
+    if (F.perm !== 'granted') armRegrant();
+    if (F.perm !== was) draw();
+  }
+  function setKeepAccess(v) { F.cfg.keepAccess = !!v; saveFolderCfg(); if (v) recheckAccess(); }
   async function reconnectFolder() {
     if (!F.handle) return;
     F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.';
@@ -111,7 +134,8 @@
       const h = await kvGet('handle');
       if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); }
     } catch (e) {}
-    startWatch(); draw();
+    try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
+    armRegrant(); startWatch(); draw();
   }
   let watchTimer = null;
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
@@ -526,7 +550,7 @@
       return;
     }
     parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Folder: ' + F.name + (F.perm === 'granted' ? '' : '  (access not confirmed)') }));
-    if (F.perm !== 'granted') { note(parent, 'The browser needs you to confirm access to this folder again.'); row(parent, [btn('Allow access', reconnectFolder, { accent: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]); return; }
+    if (F.perm !== 'granted') { note(parent, 'The browser needs you to confirm access to this folder again.' + (F.cfg.keepAccess ? ' Your next click on the page will do it.' : '')); row(parent, [btn('Allow access', reconnectFolder, { accent: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]); row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press.')]); return; }
     const slug = H.slug(), safe = D.safeSlug(slug);
     if (!safe) note(parent, 'Open a generator to sync it.');
     else {
@@ -542,6 +566,7 @@
     }
     row(parent, [check('Write the editor to the folder automatically every few seconds', F.cfg.autoMirror, v => { F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
       check('Watch the folder for changes', F.cfg.watch, v => { F.cfg.watch = v; saveFolderCfg(); })]);
+    row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\u2019s prompt to stop it forgetting at all.')]);
     note(parent, 'Files: ' + (safe ? paths(slug).dsl + ' and ' + paths(slug).html : '{name}/{name}-top-panel.txt and {name}/{name}-html-panel.html') + '. Checked ' + (F.lastCheck ? ago(F.lastCheck) : 'not yet') + '.');
     if (F.error) note(parent, F.error, { color: '#e5534b' });
     row(parent, [btn('Download all starred generators', seedStarred, { mini: true, disabled: !!F.seeding }), btn('List generators in folder', listFolders, { mini: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]);
