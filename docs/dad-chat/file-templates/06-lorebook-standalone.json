@@ -1,0 +1,23 @@
+{
+  "version": "2.0",
+  "lorebookId": "lorebook_example_001",
+  "lorebookName": "Frontier Pack",
+  "characterName": "Frontier Pack",
+  "description": "Shared frontier lore any character can link.",
+  "enabled": true,
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "entries": [
+    {
+      "id": "lore_example_9",
+      "name": "Night Desert",
+      "keys": ["night", "desert", "dark"],
+      "content": "The desert between towns belongs to coyotes and bandits after sundown. Fires are kept small and watches doubled.",
+      "priority": 15,
+      "constant": false,
+      "vectorized": false,
+      "enabled": true,
+      "excludeRecursion": false,
+      "scanDepth": null
+    }
+  ]
+}

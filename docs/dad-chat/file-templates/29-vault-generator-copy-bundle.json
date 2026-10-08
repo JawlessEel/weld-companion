@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "at": 1720000000000,
+  "protocol": 1,
+  "generator": "example-generator",
+  "folder": "weld:genvault:example-generator/",
+  "savedBy": "example-generator",
+  "title": "Example Generator",
+  "bundle": {
+    "name": "example-generator",
+    "imports": [
+      "kv",
+      "generateText"
+    ],
+    "code": "(the generator's lists panel text)"
+  },
+  "source": {
+    "apiUrl": "https://perchance.org/api/downloadGenerator?generatorName=example-generator",
+    "fetchedAt": 1720000000000,
+    "bytes": 1234,
+    "truncated": false,
+    "reason": "",
+    "coverage": "lists panel and imports only; HTML panel and src files are not included"
+  }
+}

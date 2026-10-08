@@ -7,7 +7,7 @@
   let p = null, revision = 0, snapshots = [], tab = 'overview', selected = '', sessionId = '', greetingPick = '0';
   let busy = false, request = null, generation = 0, status = '', preview = null, importPreview = null;
   let draft = '', report = '', compareA = '', compareB = '', editing = -1, loreFilter = '', loreView = '', loreTest = '';
-  let conceptText = '', direction = '', aiUndo = null, regexSample = '', importPlan = null, exportChar = '';
+  let conceptText = '', direction = '', aiUndo = null, regexSample = '', importPlan = null, exportChar = '', templateFile = '';
   const INDEX = 'studio:index:v1';
   const key = id => 'studio:project:v1:' + id;
   const E = H.el;
@@ -264,7 +264,7 @@
     area(parent, 'Persona description (optional, sent to the model)', p.persona.description, v => { p.persona.description = v; save(); });
     area(parent, 'Author note: steering text injected into the conversation', p.settings.authorNote, v => { p.settings.authorNote = v; save(); });
     fields(parent, p.settings, [['authorNoteDepth', 'Author note depth (0 = after the last message): 0–100', 'number']]);
-    note(parent, 'Put secrets in private lore entries. World description and rules are sent to every character. All Studio model calls use the provider saved in Tools → AI Helper, and each asks before sending.');
+    note(parent, 'Put secrets in private lore entries. World description and rules are sent to every character. All Studio model calls use the provider saved in Tools → Model connection and AI settings, and each asks before sending.');
   }
 
   // ---- Characters ----
@@ -665,6 +665,31 @@
     button('Cancel import', () => { importPlan = null; draw(); })]);
     parent.appendChild(card);
   }
+  // Starter files for every shape Dad Chat reads and writes (docs/dad-chat/file-templates). Offline; nothing is sent anywhere.
+  function templatePanel(parent) {
+    const T = window.WeldDadTemplates;
+    if (!T || !T.rows.length) return;
+    if (!T.byFile[templateFile]) templateFile = T.rows[0].file;
+    const box = E('details', {});
+    box.appendChild(E('summary', { text: 'Dad Chat starter file templates' }));
+    note(box, 'Valid example files for every shape Dad Chat writes and reads, to fill in by hand or hand to an AI agent. Dad-native files are the master; Tavern, Forge and other shapes are share copies. Replace the example ids and text before importing.');
+    const info = E('div', { class: 'wc-section-note' });
+    const describe = () => {
+      const t = T.byFile[templateFile];
+      let reads = '';
+      if (Dad && /\.json$/.test(t.file)) { try { reads = Dad.detect(JSON.parse(t.text)).kind !== 'unknown' ? ' Studio can import this shape.' : ' Studio does not import this shape directly.'; } catch (e) { reads = ''; } }
+      info.textContent = t.file + ' · ' + t.direction + '.' + reads;
+    };
+    select(box, 'Template', templateFile, T.rows.map(t => [t.file, t.label + ' (' + t.direction + ')']), v => { templateFile = v; describe(); });
+    box.appendChild(info); describe();
+    const name = t => t.file.replace(/^\d\d-/, '').replace(/(\.[^.]+)$/, '.template$1');
+    row(box, [button('Download template', () => { const t = T.byFile[templateFile]; download(name(t), t.text); }),
+      button('Download all templates (zip)', () => {
+        if (!Dad || !Dad.zip) throw new Error('Zip export is not available in this environment.');
+        downloadBytes('dad-chat-file-templates.zip', Dad.zip(T.rows.map(t => ({ name: t.file, data: t.text }))), 'application/zip');
+      })]);
+    parent.appendChild(box);
+  }
   function exportButtons(parent) {
     if (!Dad) return;
     if (!p.characters.some(c => c.id === exportChar)) exportChar = p.characters[0] ? p.characters[0].id : '';
@@ -716,6 +741,7 @@
       imported.id = C.id(); adopt(imported);
     }))]);
     body.appendChild(create);
+    templatePanel(body);
     if (!p) return note(body, 'Create or open a project to begin. Existing Lore Library and AICC data remain available through their original tools.');
     row(body, [['overview', 'Overview'], ['world', 'World & settings'], ['characters', 'Characters'], ['lore', 'Lore'], ['relationships', 'Relationships'],
       ['timeline', 'Timeline'], ['playground', 'Test chat & memory'], ['tools', 'Chat tools'], ['checks', 'Consistency'], ['backups', 'Export & snapshots']]

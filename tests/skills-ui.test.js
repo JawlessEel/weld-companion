@@ -42,8 +42,8 @@ const render = () => window.weldSkills.render(parent);
 
 (async () => {
   render();
-  assert.equal(cards().length, 166);
-  assert.equal(walk(parent).filter(n => n.attrs["data-section"]).length, 17);
+  assert.equal(cards().length, 208);
+  assert.equal(walk(parent).filter(n => n.attrs["data-section"]).length, 18);
   assert.equal(walk(parent).find(n => n.attrs['data-section']).attrs['data-section'], 'dashboards');
   assert.ok(walk(parent).filter(n => n.attrs['data-section']).every(n => !Object.hasOwn(n.attrs, 'open')));
   assert.ok(!byLabel('Send to Perchance AI').disabled);
@@ -65,7 +65,7 @@ const render = () => window.weldSkills.render(parent);
   // Search/filter updates the catalog without losing a hand-edited prompt or focus field.
   setValue(byId('wc-skill-prompt'), initial + '\nPreserve my custom controls.');
   const search = byLabel('Search skills'); setValue(search, 'gallery');
-  assert.ok(cards().length < 166);
+  assert.ok(cards().length < 208);
   assert.equal(byLabel('Search skills'), search);
   assert.match(byId('wc-skill-prompt').value, /Preserve my custom controls/);
   setValue(byLabel('Skill category'), 'ai', 'change');
@@ -147,6 +147,21 @@ const render = () => window.weldSkills.render(parent);
   byLabel('Build lorebook').click();
   assert.match(byId('wc-skill-prompt').value, /Build & improve usable lorebooks/);
   assert.ok(byId('wc-skill-prompt').value.includes('receiving bot contracts'));
+
+  // Dad-Chat and card skills show the structure references that are added to their prompts.
+  byLabel('Diagnose Dad-Chat').click();
+  assert.match(byId('wc-skill-prompt').value, /PROJECT CONTEXT: DAD-CHAT/);
+  assert.match(byId('wc-skill-prompt').value, /SCRIPT LOAD ORDER/);
+  assert.ok(byLabel('Structure references in this prompt'));
+  assert.ok(walk(parent).some(n => n.tagName === 'pre' && /SCRIPT LOAD ORDER/.test(n.attrs.text)));
+  assert.ok(walk(parent).some(n => n.attrs.text === 'Worked example'));
+  assert.ok(walk(parent).some(n => n.tagName === 'a' && n.attrs.href.includes('docs/dad-chat/architecture.md')));
+  byLabel('Tavern card export').click();
+  assert.match(byId('wc-skill-prompt').value, /89 50 4E 47 0D 0A 1A 0A/);
+  assert.ok(walk(parent).some(n => n.tagName === 'pre' && /PNG FILE/.test(n.attrs.text)));
+  setValue(byLabel('Search skills'), 'Find & fix bugs'); card('fix-bugs').click();
+  assert.ok(!byLabel('Structure references in this prompt'));
+  setValue(byLabel('Search skills'), '');
 
   // Navigation clears generator-specific instructions and blocks an outdated open UI.
   const calls = native.length; slug = 'other'; byLabel('Send to Perchance AI').click();

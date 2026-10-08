@@ -33,6 +33,13 @@ function raw(port, { method = 'GET', path, headers = {}, body }) {
   // ---- transport rules -------------------------------------------------------
   assert.equal((await raw(port, { path: '/mcp/WRONG', method: 'POST', body: '{}' })).status, 404, 'wrong token');
   assert.equal((await raw(port, { path: '/nothing' })).status, 404);
+  // pairing: only a request carrying the custom header (which a web page cannot send cross-origin) gets the token
+  assert.equal((await raw(port, { path: '/pair' })).status, 404, 'pair needs the header');
+  assert.equal((await raw(port, { path: '/pair', headers: { 'X-Weld-Pair': '1', Origin: 'https://evil.example.com' } })).status, 404, 'pair refuses a request with an Origin');
+  assert.equal((await raw(port, { path: '/pair', method: 'OPTIONS', headers: { 'Access-Control-Request-Headers': 'x-weld-pair' } })).status, 404, 'no CORS preflight approval');
+  assert.equal((await raw(port, { path: '/pair', headers: { 'X-Weld-Pair': '1', Host: 'evil.example.com' } })).status, 403, 'pair refuses a foreign Host');
+  const paired = await raw(port, { path: '/pair', headers: { 'X-Weld-Pair': '1' } });
+  assert.equal(paired.status, 200); assert.equal(JSON.parse(paired.text).token, 'TESTTOKEN');
   assert.equal((await raw(port, { path: MCP, method: 'GET' })).status, 405, 'no SSE stream offered');
   assert.equal((await raw(port, { path: MCP, method: 'DELETE' })).status, 405);
   assert.equal((await raw(port, { ...json({ jsonrpc: '2.0', id: 1, method: 'ping' }), headers: { Host: 'evil.example.com', 'Content-Type': 'application/json' } })).status, 403, 'DNS-rebinding Host is refused');

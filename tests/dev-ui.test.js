@@ -192,10 +192,9 @@ const norm = t => t.replace(/\r\n?/g, '\n');
   urlInput.value = 'https://evil.example.com'; urlInput.events.input(); tokInput.value = bridge.token; tokInput.events.input();
   click('Connect'); assert.match(dev.state.B.error, /must point to this computer/); assert.equal(dev.state.B.running, false);
   urlInput.value = 'http://127.0.0.1:' + port; urlInput.events.input(); tokInput.value = 'short'; tokInput.events.input();
-  render(); click('Connect'); assert.match(dev.state.B.error, /Paste the token/);
-  render();
-  const url2 = walk(parent).find(n => n.tagName === 'input' && n.attrs['aria-label'] === 'Bridge token'); url2.value = bridge.token; url2.events.input();
-  click('Connect'); await until(() => dev.state.B.state === 'connected', 4000, 'bridge connected');
+  // an invalid token is replaced by the one the bridge hands out (pairing), so nothing has to be pasted
+  render(); click('Connect'); await until(() => dev.state.B.state === 'connected', 4000, 'bridge paired and connected');
+  assert.equal(host.get('bridge', {}).token, bridge.token, 'the paired token is saved');
   const st = data(await call('weld_status', {}));
   assert.equal(st.connected, true); assert.equal(st.tabs[0].generator, 'zoo'); assert.match(st.tabs[0].editor, /open/);
 

@@ -1,0 +1,23 @@
+{
+  "app": "dad-chat",
+  "exported": "2026-01-01T00:00:00.000Z",
+  "count": 2,
+  "items": [
+    {
+      "threadId": "thread_example_001",
+      "nodeId": "n_u1",
+      "role": "user",
+      "name": "Jeff",
+      "ts": 1720000001000,
+      "text": "I approach the wagon and ask about the salve."
+    },
+    {
+      "threadId": "thread_example_001",
+      "nodeId": "n_a1",
+      "role": "assistant",
+      "name": "Morgana Vex",
+      "ts": 1720000002000,
+      "text": "Morgana squints at you over her mortar, then slides a small tin across the counter."
+    }
+  ]
+}
