@@ -2,9 +2,9 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 208);
+assert.equal(C.presets.length, 242);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
-assert.equal(C.categories.length, 18);
+assert.equal(C.categories.length, 19);
 for (const p of C.presets) {
   assert.ok(C.categories.some(c => c.id === p.category));
   assert.equal(p.steps.length, 3);
@@ -188,6 +188,40 @@ const lore = jsonBlocks('st-lore'); assert.equal(lore.length, 2);
 assert.ok(Array.isArray(JSON.parse(lore[0]).entries)); assert.ok(JSON.parse(lore[1]).entries['0'].keysecondary);
 const chat = Refs.byId['st-chatlog'].text.split('\n').filter(l => l.startsWith('{"')).map(l => JSON.parse(l));
 assert.equal(chat.length, 3); assert.ok(chat[0].user_name && chat[1].swipes[chat[1].swipe_id] === chat[1].mes);
+
+// Website builder skills and cross-cutting edge-case skills (1.76.0).
+const webSkills = C.presets.filter(p => p.category === 'web');
+assert.equal(webSkills.length, 24);
+assert.equal(C.sections.find(s => s.id === 'web').title, 'Websites & site builders');
+assert.ok(C.types.some(t => t.id === 'website'));
+for (const p of webSkills) assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
+const oneClick = C.buildPrompt('site-one-click-builder', { slug: 'demo', details: 'A bakery in Ames.' });
+assert.match(oneClick, /ONE textarea|ONE idea/);
+assert.match(oneClick, /Single page or Multi page/);
+assert.match(oneClick, /ONE-CLICK SITE BUILDER PIPELINE/);
+assert.match(oneClick, /SITE SPEC: THE ONE MODEL/);
+assert.match(oneClick, /AI FIELD HELPER CONTRACT/);
+assert.match(oneClick, /never invent prices, contact details or testimonials/);
+assert.match(oneClick, /nothing was published/);
+assert.ok(oneClick.indexOf('WORKED EXAMPLE') < oneClick.indexOf('USER DETAILS\nA bakery in Ames.'));
+assert.match(C.buildPrompt('site-ai-fields'), /never overwrite text typed while a request was running/);
+assert.match(C.buildPrompt('site-pipeline-resilience'), /ignore late replies from a stopped or older run/);
+assert.match(C.buildPrompt('site-contact-forms'), /do not pretend a message was sent/);
+assert.match(C.buildPrompt('site-multipage'), /relative \.html links that work from disk|work from disk/);
+assert.match(C.buildPrompt('site-render-safety'), /MODE: REVIEW ONLY/);
+assert.ok(C.get('site-quality-audit').mode === 'review' && C.get('site-edge-cases').mode === 'review');
+assert.ok(C.search('', 'web', null, { type: 'website' }).length === webSkills.length);
+assert.ok(C.search('', 'web', null, { type: 'dashboard' }).length === 0);
+assert.ok(C.search('website').length >= 20);
+for (const id of ['ai-json-contract', 'ai-context-budget', 'sandbox-frame-fallbacks', 'unicode-text-safety', 'size-limit-guard', 'cross-tab-state', 'backup-readiness', 'undo-redo', 'large-generator-slicing', 'perchance-syntax-guard']) {
+  assert.ok(C.get(id), id);
+  assert.ok(C.get(id).refs.length >= 1, id + ' needs a reference');
+}
+assert.match(C.buildPrompt('size-limit-guard'), /2 MB/);
+assert.match(C.buildPrompt('large-generator-slicing'), /6k tokens/);
+// The Site Spec example in the pack must be valid JSON once placeholders are read as data.
+const specText = Refs.byId['web-spec'].text.match(/^\{[\s\S]*?\}\s*$/m);
+assert.ok(specText && JSON.parse(specText[0].replace(/"single" \| "multi"/, '"single"')).pages[0].sections[0].type === 'hero');
 
 // The native AI input is believed to take about 6k tokens: every built-in prompt must leave real headroom.
 for (const p of C.presets) assert.ok(C.estimateTokens(C.buildPrompt(p.id, { slug: 'a-long-generator-name', concise: true })) <= 4500, p.id + ' prompt too large');

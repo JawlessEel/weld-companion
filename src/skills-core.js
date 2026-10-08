@@ -9,6 +9,7 @@
   const host = typeof window === 'object' ? window : globalThis;
   const Refs = viaRequire ? require('./skills-refs.js') : (host.WeldSkillsRefs || { packs: [], byId: {}, links: {}, examples: {} });
   const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
+  const Web = viaRequire ? require('./skills-web.js') : (host.WeldSkillsWeb || { rows: [] });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
@@ -16,7 +17,7 @@
     ['features', 'Add features'], ['ai', 'AI & media'],
     ['data', 'Data & persistence'], ['performance', 'Performance & reliability'],
     ['quality', 'Accessibility & quality'], ['engineering', 'Code & planning'],
-    ['create', 'Create a generator'], ['text', 'Text & randomness'],
+    ['create', 'Create a generator'], ['web', 'Websites & site builders'], ['text', 'Text & randomness'],
     ['story', 'Stories & worlds'], ['games', 'Games & interaction'],
     ['cards', 'SillyTavern, Chub & character cards'], ['dad', 'Dad-Chat projects'], ['rework', 'Rebrand, simplify & privacy'],
     ['assist', 'AI input helpers & toolkit']
@@ -159,7 +160,8 @@
   ]));
   const types = Object.freeze([
     ['dashboard', 'Dashboards & applications'], ['agent', 'Prompt studios & plugins'], ['text', 'Random & text'], ['image', 'AI images & galleries'], ['chat', 'Chat, characters & memory'],
-    ['story', 'Stories & worlds'], ['game', 'Games & RPGs'], ['art', 'Procedural art'], ['utility', 'Tools & utilities']
+    ['story', 'Stories & worlds'], ['game', 'Games & RPGs'], ['art', 'Procedural art'], ['utility', 'Tools & utilities'],
+    ['website', 'Websites & site builders']
   ].map(([id, title]) => Object.freeze({ id, title })));
   const guides = {
     dashboards: ['Build a dependable application', 'Map real sources, data contracts, units, timestamps and the current application state.', 'Validate data at each boundary and keep UI, calculations and network lifecycle separate.', 'Check normal data, gaps, stale feeds, failures, symbol changes and saved layouts.', 'Displayed values have traceable sources and timestamps; stale or missing data is never presented as live.'],
@@ -173,6 +175,7 @@
     quality: ['Verify real use', 'Inspect the real user journey and its failure boundaries.', 'Prioritize concrete accessibility, input and compatibility barriers.', 'Check keyboard, special characters, empty/error states and intended browsers.', 'Observed passes and failures are listed separately from untested coverage.'],
     engineering: ['Plan & maintain', 'Map both panels, contracts, imports and persisted state.', 'Identify a bounded improvement with explicit acceptance criteria.', 'Compare changed behavior against the existing workflows and contracts.', 'Deliver actionable evidence and next steps without unrelated refactoring.'],
     create: ['Build a working foundation', 'Use the brief to define audience, output and the smallest usable workflow.', 'Implement complete paired lists/HTML code with supported imports and clear state.', 'Run first load, generation, controls, errors and a narrow-screen check.', 'A usable generator runs in preview; unfinished wiring and placeholder behavior are unacceptable.'],
+    web: ['Build a site that works without surprises', 'Read the brief and the current generator; define one Site Spec that fields, preview, save and export all share.', 'Fill it in small validated AI stages, keep every field editable, and render only through the safe renderer.', 'Check an empty and a vague idea, single and multi page, Stop, a failed stage, reload, mobile width and export opened from disk.', 'The site builds from one idea, every value is editable, nothing is invented or published, and a failed stage never loses finished work.'],
     text: ['Control generated output', 'Inspect list structure, weights, evaluation timing and shared selections.', 'Preserve intended probabilities while improving valid combinations.', 'Sample bounded local outputs and exercise reroll/lock behavior.', 'Outputs satisfy the stated constraints; statistical claims include sample size and limits.'],
     story: ['Keep the world coherent', 'Map characters, facts, narrative state and the current content structure.', 'Make story rules explicit and retain established lore and saved progress.', 'Walk representative scenes, branches, restarts and resumed sessions.', 'No missing branches, contradictory tracked facts or lost progress in tested paths.'],
     games: ['Make interaction playable', 'Identify the rules, win/loss states and actual game loop.', 'Keep transitions, probabilities, controls and saved state consistent.', 'Play start-to-finish and test restart, invalid actions and boundaries.', 'Progress remains reachable and no tested path soft-locks or duplicates rewards.'],
@@ -449,7 +452,7 @@
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions, Dad.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
+  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
     Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
       refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',

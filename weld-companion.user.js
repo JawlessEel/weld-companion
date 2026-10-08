@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.75.1
+// @version      1.76.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.75.1';
+  var WC_VERSION = '1.76.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -15966,6 +15966,107 @@ IMPORT (Tavern -> Dad-native)             EXPORT (Dad-native -> Tavern, lossy)
      is empty
   NO DAD SLOT (dropped on import): selective, probability, group*, sticky, cooldown, delay,
   role, book-level scan_depth, non-forge extensions.*
+`),
+    // ------------------------------------------------------------------ Websites and cross-cutting edge cases
+    pack('web-spec', 'Site Spec: the one model behind a generated website', String.raw`
+ONE JSON object is the source of truth. AI stages fill parts of it, editable fields edit parts of it,
+the preview and the export render only from it. Adapt names to the generator; keep it versioned.
+
+{ "v": 1, "mode": "single" | "multi",
+  "brief": { "idea": "", "audience": "", "goal": "", "tone": "", "language": "en", "inferred": ["tone"] },
+  "brand": { "name": "", "tagline": "",
+             "palette": { "bg": "#ffffff", "text": "#111111", "accent": "#0a6c5a", "muted": "#667085" },
+             "fonts": { "heading": "serif-system", "body": "sans-system" } },
+  "pages": [ { "id": "p1", "slug": "home", "title": "", "navLabel": "",
+               "seo": { "title": "", "description": "" },
+               "sections": [ { "id": "s1", "type": "hero", "fields": { "heading": "", "text": "", "cta": "" },
+                               "image": { "prompt": "", "alt": "" }, "locked": [] } ] } ],
+  "footer": { "text": "", "links": [] },
+  "meta": { "stage": "done", "rev": 1, "updated": 0 } }
+
+SECTION TYPES AND LIMITS (characters)
+  hero     heading 80, text 220, cta 30         features items 3-6 {title 40, text 120}
+  about    text 600                            services items {title, text}
+  pricing  plans 1-4 {name, price, items[]}    ONLY prices the user wrote
+  testimonials                                ONLY real quotes the user supplied
+  faq      items 3-8 {q 100, a 300}            gallery items {alt, image}
+  contact  heading, text, email (user supplied) cta heading, button     footer text, links
+RULES  single mode = one page, nav items are #anchors.   multi mode = 2-7 pages, slugs unique
+lowercase a-z 0-9 -, home first, every page in the nav once.   Unknown section types render as nothing and
+are KEPT in the spec. Validate by path (pages[1].sections[0].fields.heading too long), never by throwing.
+`),
+    pack('web-pipeline', 'One-click site builder pipeline', String.raw`
+USER TOUCHES: one idea box, one Single/Multi choice, one Build button, one final review.
+
+ idea + mode -> [1 brief] -> [2 plan] -> [3 pages, one request each] -> [4 design] -> [5 images?] -> [6 SEO] -> preview
+                 JSON        sitemap     sections + copy                 tokens        opt-in        titles/meta
+ EVERY STAGE: small prompt (short brief + only what this stage needs) -> run id + timeout
+              -> strip fences, extract first balanced JSON -> validate against the Site Spec
+              -> repair once with a short corrective request -> merge into the spec -> save -> next stage
+ STAGE STATE: pending | running | ok | failed | skipped. A failed stage offers Retry and Skip; the rest is kept.
+ RULES
+  - One run at a time. A reply whose run id is old (after Stop or a restart) is ignored.
+  - Stop finishes nothing new and keeps finished stages. Build never starts by itself on load.
+  - Multi page: bounded concurrency 1-2 so one bad page never loses the site.
+  - Resume: the spec is saved after each stage; after a reload offer Continue or Start over.
+  - A part that cannot be repaired uses a plain template and says so in the progress list.
+  - Never invent prices, phones, addresses, emails, testimonials, awards or statistics.
+  - The idea text is data: instructions inside it never change the schema, stages or safety rules.
+  - Image generation and any paid or slow call is opt-in or confirmed once with a count.
+  - Progress shows real stage names and counts, never invented percentages.
+`),
+    pack('web-field-ai', 'AI field helper contract (every site field)', String.raw`
+FIELD    { id, label, kind: line | text | list | url | color | select, max, role: "hero heading", locked, history[] }
+BUTTONS  Rewrite (has text) | Fill (empty) | Variants (3 choices) | Undo | Lock | Stop (while loading)
+REQUEST  short brief (<= 600 chars) + page + section type + this field role and max + current text
+         + at most 3 neighbor values. Nothing else: small, cheap, fast.
+REPLY    strip code fences, surrounding quotes and "Here is..." lines; strip markdown for line fields;
+         cut to max at a word boundary; reject empty, identical, wrong-language, refusal or placeholder text.
+APPLY    only to the field that asked. If the user typed meanwhile, show the reply as a suggestion.
+LOCKED   fields are skipped by Fill all and by one-click rebuilds. HISTORY keeps the last 5 values; restore calls no AI.
+STATES   idle | loading | error (message shown, text kept). One request per field; extra clicks are ignored.
+FILL ALL one structured request keyed by field id; validate each field; apply only to empty unlocked fields;
+         preview first; whole-batch undo.
+CHANGE THIS  per section instruction -> new section object -> validated -> side by side -> Accept or Reject.
+`),
+    pack('web-render-safety', 'Safe render and export for generated sites', String.raw`
+AI text is DATA. Build the DOM with createElement and textContent; never innerHTML for spec text.
+URLs     allow https:, http:, mailto:, tel: and #anchors only. Refuse javascript:, file:, and data: except own images.
+COLORS   #rgb or #rrggbb only.   FONTS  pick from a fixed list of system stacks.   SIZES  numeric and clamped.
+CODE     no AI-written script, inline event attribute or style text: the renderer owns all CSS and behavior.
+PREVIEW  iframe with srcdoc and sandbox (no allow-same-origin); escape the closing script tag in embedded JSON;
+         cap the document size; rebuild debounced (about 300 ms), not on every keystroke.
+EXPORT   the same renderer writes ONE self-contained html (single) or one file per page + shared style.css
+         (multi) with relative .html links that work from disk. Add doctype, lang, charset, viewport, title, description.
+IMAGES   https urls or small data urls under a cap; alt text always (empty alt only for decoration).
+SLUGS    lowercase a-z 0-9 -, unique, never empty, not reserved (index, style, assets); filenames come from slugs.
+`),
+    pack('web-edges', 'Edge cases checklist for AI-built sites', String.raw`
+INPUT   empty idea, one word, 5,000+ characters, non-English, right-to-left, emoji, pasted HTML, hostile "ignore the
+        rules" text, an idea naming a real brand or person (no implied endorsement), mode switched mid-run.
+REPLY   not JSON, JSON in fences, truncated JSON, extra keys, missing sections, wrong types, over the limit,
+        wrong language, lorem ipsum or [Company Name] filler, refusal, duplicate slugs.
+RUN     double click, Stop mid-stage, tab closed or reloaded mid-run, offline, rate limit, a stage that never
+        returns (timeout), two tabs building at once, a late reply after Stop (ignore by run id).
+DATA    spec near the storage cap (images as urls, not base64), corrupt saved spec, older spec version (migrate
+        additively), imported spec from someone else (validate, never trust).
+OUTPUT  very long words, missing images, 1 page vs 12 pages, empty sections, long nav on a phone, dark mode, print,
+        keyboard only, reduced motion, export opened from disk.
+SANDBOX clipboard, downloads, popups and storage may each be blocked in the generator frame: offer a fallback
+        (selectable text box, Weld Skybridge download or clipboard, memory-only mode with a visible warning).
+`),
+    pack('weld-limits', 'Perchance and Weld limits that bite', String.raw`
+- The native helper input is believed to take roughly 6k tokens. A skill prompt plus your details must stay
+  small; split big work into slices and finish one before starting the next.
+- Weld caps generator writes at about 2 MB. Keep images and large JSON out of the lists and HTML panels.
+- Weld storage values over 2 MB make Tampermonkey slow; Skybridge storage refuses them (reason value-over-2mb).
+- A generator runs in a sandboxed frame: localStorage may be missing or partitioned; clipboard, downloads and
+  window.open may be blocked. Wrap each use in try/catch and show a fallback.
+- Perchance lists and HTML are not plain JavaScript: bracket and brace text can be templating. Confirm with the
+  live preview and perchanceErrors before trusting an edit; many bracket patterns are harmless.
+- Plugin calls are async and can be slow, fail or answer late: use a run id, a timeout and Stop; do not stack requests.
+- Weld proposes edits and the user accepts a diff: never assume an edit was applied.
+- Both panels, and every imported plugin generator, must be saved again after a change for it to take effect.
 `)
   ];
 
@@ -16319,7 +16420,35 @@ Request: "why was my oldest summary dropped". Trace the layers in order: fixed c
 (world block, character lore, summaries, recalled memories, pins, ledger) each under its own cap, then recent
 chat. Only recent chat may yield. Check that summaries keep the oldest foundation and the newest, that a
 restated sentence appears once, that the model window comes from getMetaObject and not a constant, and that
-the diagnostics preview calls the same builders as the real prompt.`
+the diagnostics preview calls the same builders as the real prompt.`,
+    'site-one-click-builder': String.raw`
+Request: "Add a one-click website builder to my bakery generator."
+Good result: a new Builder page with ONE textarea ("Describe your site"), a Single/Multi radio, a Build button.
+Build runs stage 1 (brief JSON) -> 2 (plan: home, menu, about, contact) -> 3 (one request per page) -> 4 (tokens)
+-> 6 (SEO). A progress list shows "Brief ok, Plan ok, Page 2 of 4 running"; Stop and Retry work. Each result
+sits in a field with Rewrite / Fill. The contact page leaves phone and address EMPTY because the idea gave none.
+Preview shows the site; Export downloads index.html + menu.html + style.css. Nothing says "published".
+Bad result: one giant request that returns the whole site, invented opening hours and 5-star reviews, a build
+that starts on page load, or a Stop button that lets the old run overwrite the new one.`,
+    'site-ai-fields': String.raw`
+Request: "Put AI help in every field on the page."
+Good result: next to "Hero heading" (has text) a Rewrite button; next to empty "Meta description" a Fill button.
+Fill sends: brief (400 chars), page "home", section "seo", role "meta description", max 155, neighbors (title,
+hero heading). Reply '"Fresh sourdough baked daily in Ames."' becomes: Fresh sourdough baked daily in Ames.
+(quotes stripped, 155 max). The old value goes to history; Undo restores it with no AI call. Locked fields skipped.
+Bad result: sending the whole page for every field, replacing text the user typed during loading.`,
+    'site-pipeline-resilience': String.raw`
+Request: "Sometimes the build breaks halfway."
+Good result: reply 'Sure! json {"pages":[{"slug":"home"' (truncated) -> extraction fails -> ONE short repair request
+with the broken text -> still invalid -> that page uses the plain template, progress says "Page 1: used default
+layout (AI reply was cut off)"; pages 2-4 still build. Reload offers Continue from stage 3.
+Bad result: throwing away finished stages, retrying forever, or applying a reply from a stopped run.`,
+    'ai-json-contract': String.raw`
+Request: "The model sometimes wraps JSON in text."
+Good result: parseAiJson(text) strips fences, finds the first balanced {...}, JSON.parse in try/catch, then
+validates {title:string<=80, items:array 3-6}. Invalid -> one corrective request -> else a clear message and the
+user's current values untouched. The reply is never used as HTML.
+Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   };
 
   // Which packs each preset receives (preset id -> pack ids, in display order).
@@ -16403,7 +16532,41 @@ the diagnostics preview calls the same builders as the real prompt.`
     'dad-vault-bridge': ['dad-skill-vault-bridge', 'dad-skill-presence-bus', 'dad-skill-wire-envelopes', 'dad-skill-dad-full'],
     'dad-session-slots': ['dad-skill-session-slots', 'dad-skill-dad-full', 'dad-data'],
     'dad-world-state': ['dad-skill-world-state', 'dad-skill-dad-full', 'dad-world'],
-    'dad-curated-density': ['dad-skill-curated-density', 'dad-flow']
+    'dad-curated-density': ['dad-skill-curated-density', 'dad-flow'],
+    'site-one-click-builder': ['web-spec', 'web-pipeline', 'web-field-ai', 'web-edges'],
+    'site-from-idea': ['web-spec', 'web-render-safety'],
+    'site-ai-fields': ['web-field-ai', 'web-spec'],
+    'site-brief-expander': ['web-pipeline', 'web-spec', 'web-edges'],
+    'site-spec-model': ['web-spec', 'web-edges'],
+    'site-pipeline-resilience': ['web-pipeline', 'web-edges', 'weld-limits'],
+    'site-multipage': ['web-spec', 'web-render-safety'],
+    'site-single-page': ['web-spec'],
+    'site-section-library': ['web-spec', 'web-render-safety'],
+    'site-design-tokens': ['web-spec', 'web-render-safety'],
+    'site-copywriter': ['web-spec', 'web-field-ai'],
+    'site-imagery': ['web-spec', 'web-render-safety', 'weld-limits'],
+    'site-seo-meta': ['web-spec', 'web-render-safety'],
+    'site-contact-forms': ['web-render-safety', 'weld-caps'],
+    'site-interactive-widgets': ['web-spec'],
+    'site-feature-blocks': ['web-spec', 'web-render-safety'],
+    'site-section-editing': ['web-field-ai', 'web-spec'],
+    'site-wrap-generator': ['web-spec', 'web-render-safety'],
+    'site-project-library': ['web-spec', 'weld-limits', 'web-edges'],
+    'site-live-preview': ['web-render-safety', 'weld-limits'],
+    'site-export-bundle': ['web-render-safety', 'weld-caps', 'weld-limits'],
+    'site-render-safety': ['web-render-safety', 'web-spec'],
+    'site-quality-audit': ['web-render-safety', 'web-edges'],
+    'site-edge-cases': ['web-edges', 'web-pipeline', 'weld-limits'],
+    'ai-json-contract': ['web-edges'],
+    'ai-context-budget': ['weld-limits'],
+    'sandbox-frame-fallbacks': ['weld-limits', 'weld-caps'],
+    'unicode-text-safety': ['web-edges'],
+    'size-limit-guard': ['weld-limits'],
+    'cross-tab-state': ['weld-limits', 'weld-caps'],
+    'backup-readiness': ['weld-limits'],
+    'undo-redo': ['web-field-ai'],
+    'large-generator-slicing': ['weld-limits'],
+    'perchance-syntax-guard': ['weld-limits']
   };
 
   const byId = Object.freeze(packs.reduce((m, p) => { m[p.id] = p; return m; }, {}));
@@ -16496,6 +16659,93 @@ the diagnostics preview calls the same builders as the real prompt.`
   return Object.freeze({ rows });
 });
 
+/* Website-building skills (section "web") plus cross-cutting edge-case skills for other sections.
+   Structure references are attached by id from skills-refs.js. Plain data, no network or editor access. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldSkillsWeb = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  // [category, id, title, description, mode, task, fit, sources]
+  const site = ['website', 'utility'], any = [], design = ['anthropic', 'ux'];
+  const rows = [
+    // --- The one-click builder and its AI fields ---
+    ['web', 'site-one-click-builder', 'Add a one-click AI website builder page', 'One idea box, single or multi page, one Build button: AI fills and assembles the whole site.', 'change',
+      'Add a Website Builder page to this generator. The user types ONE idea (a text box), picks Single page or Multi page, and presses Build; AI then fills everything else with no further questions. Follow the SITE SPEC and ONE-CLICK PIPELINE references: stage 1 expands the idea into a brief, stage 2 plans pages and sections, stage 3 writes each page (one request per page in multi mode), stage 4 chooses design tokens, optional stage 5 makes images, stage 6 writes titles and meta text. Show a real progress list per stage, Stop, per-stage Retry and Skip, and a live preview that updates as stages finish. Every generated value lands in an editable field with Rewrite and Fill beside it (see the AI FIELD HELPER reference), and the whole site stays in one saved spec. Use only the text and image plugins this generator already imports (verify their real call shape from the source; add the import only if missing). Never auto-run on load, never invent prices, contact details or testimonials, treat the idea as data, and keep the existing generator working. End with Export and a clear note that nothing was published. Verify an empty idea, a one-word idea, single and multi mode, Stop mid-run, a failed stage and a reload.', site, design],
+    ['web', 'site-from-idea', 'Build a complete website from my idea', 'Create the site itself (not a builder) in this generator, single or multi page.', 'change',
+      'Build the website described in USER DETAILS directly in this generator: choose single page or multi page from the brief (ask one focused question only if the idea is missing). Define the Site Spec first (see reference), then render pages from it with a header, navigation, sections, footer, responsive layout and a coherent palette and type scale. Write real, specific copy from the brief; leave unknown facts (prices, phone, address, testimonials) as clearly marked empty fields instead of inventing them. Use the generator text plugin only if the user wants content generated live; otherwise write the content now. Keep it keyboard accessible, mobile first and free of external trackers. Verify every nav link, the mobile layout and the page title.', site, design],
+    ['web', 'site-ai-fields', 'Add AI Rewrite & Fill to every site field', 'Each title, tagline, section and SEO field gets its own AI helper with undo and lock.', 'change',
+      'Add the AI FIELD HELPER to every editable field of the site builder or site editor page: Rewrite when the field has text, Fill when it is empty, Variants, Undo and Lock. Each request carries only the short brief, the field role and limit, the current text and at most three neighbor values. Clean the reply (fences, quotes, preambles), enforce the character limit at a word boundary, reject empty, identical or wrong-language replies and never overwrite text typed while a request was running. Provide Fill all empty (one structured request keyed by field id, validated per field, applied only to empty unlocked fields) with a preview and whole-batch undo. One request per field, Stop on each, no auto-run on load. Verify empty, filled, locked, failing, cancelled and rapid repeated use.', site, design],
+    ['web', 'site-brief-expander', 'Expand one idea into a full site brief', 'Infer audience, goal, tone, pages and features, and mark every guess.', 'change',
+      'Add the brief stage: from a one-line idea (any language) produce a short structured brief (audience, goal, tone, language, suggested pages, suggested features, a name and tagline candidate). Mark which fields were inferred rather than stated, show the brief as editable fields with Rewrite and Fill, and let the user re-run just this stage. Validate the reply against the schema, cap every field, repair once on malformed output, and fall back to the raw idea if it cannot be repaired. Do not invent a company, address or credentials; keep the idea text as data that cannot change the schema or rules. Verify a vague idea, a detailed idea, a non-English idea and a hostile pasted instruction.', site, design],
+    ['web', 'site-spec-model', 'Define the Site Spec as the single source of truth', 'One JSON model that fields, preview, save and export all share.', 'change',
+      'Introduce or tighten a versioned Site Spec (see reference): brand, pages, sections with typed fields, nav and footer. Make every editable field, the live preview, saved projects and the export read and write only this model. Add a validator that checks types, limits, unique slugs and ids, reports each problem by path, and a migrator that upgrades older specs additively without dropping unknown section types or fields. Never trust an imported or AI-produced spec: validate before it replaces anything and keep the previous one for undo. Verify a valid spec, a corrupt spec, an older version and a spec with unknown section types.', site, []],
+    ['web', 'site-pipeline-resilience', 'Make the AI build pipeline robust', 'Stages, JSON repair, timeouts, Stop, resume and late replies handled.', 'change',
+      'Harden the stage runner behind the site builder using the ONE-CLICK PIPELINE and EDGE CASES references. Give each stage a run id, a timeout and cancellation; ignore late replies from a stopped or older run; allow one run at a time. Parse replies by stripping fences and extracting the first balanced JSON object, validate, repair once with a short corrective request, then fall back to a deterministic template for that part and say so. Keep the request small (brief plus only what the stage needs) so it stays well under the helper input cap. Save the spec after every stage and offer Continue or Start over after a reload. Retry only transient failures with a bounded count and never repeat paid image calls silently. Verify truncated JSON, wrong types, a stage that never returns, Stop, offline and two tabs.', site, []],
+    // --- Structure: pages, sections, layout ---
+    ['web', 'site-multipage', 'Add multi-page navigation inside a generator', 'Several pages with shared header and footer, working links, back button and a 404.', 'change',
+      'Add multi-page structure to this generator: a page list in the Site Spec, shared header, navigation and footer, one rendered page at a time, the active link marked, and the browser back and forward buttons working through the URL hash. Normalize slugs (lowercase, a-z 0-9 and dashes, unique, never empty or reserved), keep home first, show a friendly not-found page for unknown hashes and move focus and scroll to the new page title on navigation. Handle one page, many pages, a long nav on a phone (collapsible menu) and orphan pages that no nav item reaches. Exported files must also link with relative .html links that work from disk. Verify direct open of a hash, rename of a slug, delete of the current page and reload.', site, design],
+    ['web', 'site-single-page', 'Build a single-page scrolling site', 'Anchored sections, sticky nav, scroll highlight and smooth, accessible jumping.', 'change',
+      'Build or convert to a single page website: one document with anchored sections, a sticky header whose links jump to them, scroll-position highlighting of the current link, offset so headings are not hidden under the header, and a back-to-top control. Honor prefers-reduced-motion for smooth scrolling, keep every section reachable by keyboard and make the order in the DOM match the visual order. Keep the section list data-driven from the Site Spec. Verify short and very long pages, a phone width, deep-linked anchors and the keyboard.', site, design],
+    ['web', 'site-section-library', 'Add a library of ready page sections', 'Hero, features, about, pricing, FAQ, gallery, contact and call-to-action blocks.', 'change',
+      'Add data-driven section renderers for the types in the Site Spec reference: hero, features, about, services, pricing, testimonials, faq, gallery, contact, cta and footer. Each renderer takes only its typed fields, tolerates missing and over-long values, renders text through textContent and exposes an add, move, duplicate and delete control in the editor. Pricing and testimonials render only user-supplied content. Give every section an id, a heading level that fits the outline and responsive layout without fixed pixel widths. Verify each type with empty, minimal and maximal data and a very long word.', site, design],
+    ['web', 'site-design-tokens', 'Let AI choose a coherent site design', 'Palette, fonts, spacing and radius as validated tokens with contrast checks.', 'change',
+      'Add a design stage that proposes a small token set (background, text, accent, muted, heading and body font stack from a fixed safe list, radius, spacing scale) from the brief, with 3 to 4 named style directions the user can switch between. Validate colors as hex, compute contrast for text on background and accent on background, and automatically adjust or reject values below WCAG AA. Apply tokens through CSS variables owned by the renderer, never AI-written CSS. Provide a light and a dark variant and a reset to the default. Verify low-contrast output from the model, an invalid color, dark mode and reload.', site, design],
+    ['web', 'site-copywriter', 'Add per-section AI copywriting with tone control', 'Specific, honest copy within length limits, in the chosen language and tone.', 'change',
+      'Add section-level AI copy generation with controls for tone, length and language. Use the brief and the section type so copy is specific rather than generic, obey the field limits, and keep the same voice across sections by passing a short style note. Do not fabricate statistics, awards, customer names, testimonials, prices, certifications or contact details; if the section needs them and none were given, leave the field empty and say so. Reject filler such as lorem ipsum and bracketed placeholders. Keep a Variants choice and undo. Verify tone changes, a non-English site, over-long replies and an empty brief.', site, []],
+    ['web', 'site-imagery', 'Add AI images and alt text to the site', 'Image slots with prompts, alt text, safe fallbacks and a cost guard.', 'change',
+      'Add image slots to sections (hero, gallery, cards) with a prompt derived from the brief and section, mandatory alt text (AI-suggested, editable), and a graphical placeholder when no image exists. Use the image plugin this generator already imports and verify its real options; do not invent sizes, seeds or editing. Generate on request or after a single confirmation that states the number of images, one at a time with Stop, keep results as urls or small data within the storage limit, handle failures with Retry and release temporary resources. Exports must keep alt text and still work with images missing. Verify failure, many slots, reload and a missing image in export.', site, []],
+    ['web', 'site-seo-meta', 'Add SEO titles, descriptions and social tags', 'Per-page title and meta description with limits, heading outline and exported tags.', 'change',
+      'Add per-page SEO fields (title about 60 characters, description about 155, optional social image) with AI Fill and live length counters, plus a check that each page has one h1 and a sensible heading order. Write the title, meta description, canonical-free social tags, lang attribute and viewport tag into the exported pages, and offer a plain sitemap list and robots text for the user to place. Say plainly that a Perchance generator page itself cannot gain these tags from inside its frame, so they apply to the export. Do not invent claims or keywords stuffing. Verify long text, empty fields and multi-page export.', site, []],
+    ['web', 'site-contact-forms', 'Add contact and newsletter forms that tell the truth', 'Validated forms with a real delivery path or an honest copy and mailto fallback.', 'change',
+      'Add a contact form and optional newsletter box to the site. Validate with labels, required and type attributes, inline messages and a honeypot field. A static site has no server, so do not pretend a message was sent: provide only paths that really exist (a mailto link built from a user-supplied address, copy the message to the clipboard with a fallback text box, or a form action URL the user types in), and state which one is active. Never embed API keys or webhook URLs in public code. Keep the submit disabled while working, avoid double submission and keep entered text on error. Verify empty, invalid email, very long text, clipboard blocked and no address set.', site, []],
+    ['web', 'site-interactive-widgets', 'Add accessible interactive page widgets', 'Accordion, tabs, carousel, modal and mobile menu that work with keyboard and touch.', 'change',
+      'Add the requested widgets (accordion for FAQ, tabs, carousel, modal dialog, mobile menu) as small reusable functions driven by the Site Spec. Use the right roles and aria attributes only where needed, full keyboard support (Arrow, Home, End, Escape, Tab order), focus entry and return for dialogs, visible focus, touch targets of at least 44 pixels and prefers-reduced-motion. No autoplay without a pause control. Content must still be readable if the script fails. Verify keyboard-only use, a screen-reader label check, many items and a narrow phone.', site, ['ux', 'market']],
+    ['web', 'site-feature-blocks', 'Add site features: blog, portfolio, pricing, booking, store catalog', 'Pick the features your site needs and add them as editable data-driven blocks.', 'change',
+      'Add the site features named in USER DETAILS (or ask which, from: blog or news list, portfolio grid with filters, pricing table, FAQ, team, events, booking request, product catalog without payments, newsletter, downloads). Model each as typed Site Spec content with an editor, AI Fill for descriptions only, sensible empty states and responsive layout. Do not add payments, accounts or server features that cannot work in a static generator; offer a request-by-email or link-out instead and say so. Keep existing pages and saved data. Verify empty, one item, many items and export.', site, design],
+    ['web', 'site-section-editing', 'Edit sections with AI: change, reorder, undo', 'Per-section instructions with side-by-side accept or reject and full undo.', 'change',
+      'Add section editing to the site editor: a Change this box per section (for example make it shorter, more formal, add a pricing table), producing a new section object that is validated, shown beside the old one and applied only on Accept. Add move up and down, duplicate, delete with confirmation, and a bounded undo and redo history for spec changes. Locked fields stay untouched. Handle an invalid reply, a reply that changes the section type, and many rapid edits. Verify undo across reload-safe saves and delete of the last section.', site, []],
+    ['web', 'site-wrap-generator', 'Turn this generator into a full website', 'Wrap the existing tool in a landing page with about, how it works, FAQ and footer.', 'change',
+      'Keep the existing generator tool exactly as it works and surround it with website pages: a hero that explains what it does, the tool itself as the main section, how it works, examples, FAQ, about and footer, with navigation. Write copy only from what the generator truly does (read the lists and handlers); do not claim features it lacks. Keep all current IDs, handlers and saved data intact, make the tool reachable without scrolling past marketing, and keep mobile layout usable. Verify the tool still generates, copy works and every nav link.', site, design],
+    ['web', 'site-project-library', 'Save, switch and share multiple site projects', 'Autosave, named projects, versions and safe import and export of specs.', 'change',
+      'Add a project library for sites: named projects, autosave after changes with a debounce, a bounded list of restore points, duplicate, rename and delete with confirmation, and import and export of the Site Spec as a file. Validate every imported spec before it replaces anything and never overwrite on import. Store specs compactly (images as urls) and watch the size limits in the WELD LIMITS reference; warn before a save would exceed them and keep the previous good copy if a write fails. Handle unavailable storage with a visible memory-only warning. Verify two tabs, a corrupt record, quota failure and reload.', site, []],
+    // --- Preview and export ---
+    ['web', 'site-live-preview', 'Add a safe live preview with device widths', 'Sandboxed iframe preview that updates smoothly and never runs generated code.', 'change',
+      'Add a live preview of the site rendered from the Site Spec inside a sandboxed iframe (srcdoc, sandbox without allow-same-origin, no AI-written scripts). Update it debounced after edits and stage completion, keep scroll position where possible, offer Phone, Tablet and Desktop widths, an open-in-new-view option only if the sandbox allows it, and a clear error state if rendering fails. Cap the size of the document, escape any embedded JSON and show which page is previewed in multi mode. Verify rapid edits, a huge page, a blocked iframe feature and dark mode.', site, ['anthropic']],
+    ['web', 'site-export-bundle', 'Export the site as ready-to-host files', 'One html file or a page-per-file bundle with shared styles that works from disk.', 'change',
+      'Add export that renders the Site Spec with the same renderer as the preview: one self-contained html file in single mode, or one html file per page plus a shared style.css in multi mode with relative links that work when opened from disk. Include doctype, lang, charset, viewport, title and meta description, sanitize filenames from slugs, and keep totals within download limits. Deliver through Weld Skybridge download when available (sb.has) otherwise a Blob link, and fall back to a selectable text box when downloads are blocked; for multi files offer one file at a time or a single combined text. Never claim the site was published or hosted. Verify single, multi, blocked download, special characters and opening the result in a browser.', site, []],
+    // --- Reviews ---
+    ['web', 'site-render-safety', 'Review generated-site rendering for safety', 'Trace AI text from reply to DOM, URL, CSS and export.', 'review',
+      'Trace every path where AI output or imported spec data reaches the page, preview and export: innerHTML use, href and src values, inline styles and CSS strings, srcdoc construction, filenames, embedded JSON and downloads. Check against the SAFE RENDER reference and report each source-to-sink path with realistic impact, plus URL scheme, color, font and size validation gaps. Do not execute hostile payloads or edit anything.', site, []],
+    ['web', 'site-quality-audit', 'Audit the generated site for quality', 'Headings, contrast, alt text, links, mobile and size on the real output.', 'review',
+      'Inspect the rendered site and exported files: one h1 per page and heading order, landmarks, link text and working links, image alt text, color contrast, keyboard path and focus, touch targets, mobile widths 320 to 768, very long text, empty sections, page weight, title and meta description per page. Report observed pass or fail with the page and section, a separate list of checks not run, and a minimal fix for each failure. Do not change code.', site, ['ux', 'market']],
+    ['web', 'site-edge-cases', 'Test the site builder against its edge cases', 'Walk the full edge-case checklist and report what breaks.', 'review',
+      'Run the builder through the EDGE CASES reference: input cases, AI reply cases, run cases, data cases, output cases and sandbox cases. For each case record what was done, what happened and whether state, saved data and the preview stayed consistent. Use bounded local checks and fixtures; do not start paid or large AI batches, and state plainly which cases could not be run. Rank failures by user impact and give a narrow fix for each. Do not change code.', site, []],
+    // --- Edge cases that apply to every generator ---
+    ['ai', 'ai-json-contract', 'Make AI structured output dependable', 'Extract, validate and repair JSON replies before using them.', 'change',
+      'Find every place the generator asks the model for JSON or another structured format and route it through one parser: strip code fences and chatter, extract the first balanced object or array, parse in try/catch, validate type, required keys, enum values and lengths, drop unknown keys safely, then repair once with a short corrective request before giving a clear error or a deterministic fallback. Treat the reply as untrusted data: never evaluate it, never use it as HTML and cap sizes. Keep user work when parsing fails. Verify fenced, truncated, extra-text, empty, wrong-type and very large replies.', [], ['anthropic']],
+    ['ai', 'ai-context-budget', 'Keep AI requests inside the context window', 'Budget prompt size, summarize or slice, and stay under the helper input cap.', 'change',
+      'Inspect how prompts are assembled and add a budget: estimate size with the same helper everywhere (characters divided by three is a safe estimate), include only what each request needs, and slice or summarize old context instead of sending everything. Read model limits from the plugin or sb.modelInfo when known and treat unknown as unknown. Warn before a request that is too large, never silently truncate the user text, and keep the preview of the assembled prompt identical to what is sent. Verify tiny, normal and oversized inputs.', [], []],
+    ['quality', 'sandbox-frame-fallbacks', 'Handle blocked storage, clipboard and downloads', 'Give every browser feature that can be blocked in the generator frame a fallback.', 'change',
+      'List every use of localStorage, sessionStorage, IndexedDB, clipboard, downloads, window.open, fullscreen, file inputs and notifications. Wrap each in feature detection and try/catch and add the honest fallback: memory-only mode with a visible warning, a selectable text box instead of a blocked clipboard, a Blob or Skybridge download, an inline view instead of a popup. Report the real backend in use, never claim success after a failed call and keep working without any of them. Verify each feature blocked, allowed and throwing.', [], []],
+    ['quality', 'unicode-text-safety', 'Handle any language, emoji and long text', 'Right-to-left, CJK, emoji, combining marks, very long words and pasted markup.', 'change',
+      'Test and fix text handling with right-to-left scripts (dir=auto or per-field direction), CJK without spaces, emoji and combining marks (count and truncate by grapheme, not UTF-16 unit), very long unbroken words (overflow-wrap), normalizing pasted text, and pasted HTML or markdown that must stay text. Check length counters, truncation at limits, file names, JSON round trips and downloads. Preserve the user text exactly unless a field requires normalization. Verify mixed-direction text, a 5,000-character paste and a flag emoji at the cut point.', [], []],
+    ['data', 'size-limit-guard', 'Stay inside Weld and Perchance size limits', 'Keep generator text, saved values and exports under the documented caps.', 'change',
+      'Measure the lists panel, HTML panel and stored values against the limits in the WELD LIMITS reference (generator writes capped near 2 MB, storage values over 2 MB refused or slow). Move large data (images, long JSON, histories) to bounded storage or urls, compress or trim safely, and add a visible size meter with a warning before a save would fail. Keep the previous good copy when a write fails, never truncate user data silently and report exactly what was moved. Verify near-limit, over-limit and restore.', [], []],
+    ['data', 'cross-tab-state', 'Handle two tabs and stale saves', 'Prevent one tab overwriting the other and detect external changes.', 'change',
+      'Inspect saved state shared by several open tabs. Add a revision counter and listen for the storage event (or the Skybridge bus when has) so a tab notices newer data, merges or asks before overwriting, and never saves a stale copy over a newer one. Debounce writes, flush on page hide and keep a single writer for long operations. Keep older records readable. Verify two tabs editing the same item, one tab closed mid-save and storage cleared in one tab.', [], []],
+    ['data', 'backup-readiness', 'Check the generator is safe to back up and restore', 'Review size, secrets, imports and external assets before a Weld backup.', 'review',
+      'Review whether this generator can be backed up from the editor and restored later without loss: total size of both panels against the 2 MB write cap, imported plugins and module generators that also need saving, external assets that may disappear, secrets or personal data embedded in the code, and state kept only in the browser that a backup will not include. Report each risk with evidence and a minimal remedy, and list what cannot be verified from here. Do not change anything.', [], []],
+    ['features', 'undo-redo', 'Add undo and redo for edits', 'A bounded history with keyboard shortcuts that survives rapid changes.', 'change',
+      'Add undo and redo for the edits users make in this generator (text fields, items, settings). Store compact snapshots or inverse operations, bound the history, group rapid typing into one step, bind Ctrl or Cmd+Z and Shift+Z only outside native text-input undo, show buttons with disabled states and clear history on a new project. Never record AI progress chunks as separate steps. Verify many edits, undo after reload when persisted, redo cleared by a new edit and memory use.', [], []],
+    ['engineering', 'large-generator-slicing', 'Plan a big change in small safe slices', 'Split work to fit the helper input cap and verify each slice before the next.', 'review',
+      'Plan the change in USER DETAILS as slices that each fit one helper request (the native input takes roughly 6k tokens): list the slices in order, the files, lists and handlers each one touches, what must still work after it, and a check to run. Put shared contracts (data shapes, ids, storage keys) in the first slice so later ones agree. Flag steps that need both panels or an imported plugin to be re-saved. Do not make the changes in this review.', [], []],
+    ['engineering', 'perchance-syntax-guard', 'Find Perchance syntax traps in lists and HTML', 'Separate templating from JavaScript and fix characters that get misread.', 'change',
+      'Scan both panels for text that Perchance may interpret as templating inside what is meant to be JavaScript, CSS or literal text: square and curly brackets, backslash escapes, dollar-prefixed names, indentation in lists, duplicate list names and unmatched quotes. Confirm each suspicion with the live preview and the perchanceErrors output before editing, since many bracket patterns are harmless, and fix only confirmed problems with the narrowest escape or restructure. Re-run the same workflow afterwards. Report suspicions that could not be confirmed.', [], []]
+  ];
+  return Object.freeze({ rows });
+});
+
 /* Generator skill catalog and prompt composition. No network or editor mutations. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -16507,6 +16757,7 @@ the diagnostics preview calls the same builders as the real prompt.`
   const host = typeof window === 'object' ? window : globalThis;
   const Refs = viaRequire ? require('./skills-refs.js') : (host.WeldSkillsRefs || { packs: [], byId: {}, links: {}, examples: {} });
   const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
+  const Web = viaRequire ? require('./skills-web.js') : (host.WeldSkillsWeb || { rows: [] });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
@@ -16514,7 +16765,7 @@ the diagnostics preview calls the same builders as the real prompt.`
     ['features', 'Add features'], ['ai', 'AI & media'],
     ['data', 'Data & persistence'], ['performance', 'Performance & reliability'],
     ['quality', 'Accessibility & quality'], ['engineering', 'Code & planning'],
-    ['create', 'Create a generator'], ['text', 'Text & randomness'],
+    ['create', 'Create a generator'], ['web', 'Websites & site builders'], ['text', 'Text & randomness'],
     ['story', 'Stories & worlds'], ['games', 'Games & interaction'],
     ['cards', 'SillyTavern, Chub & character cards'], ['dad', 'Dad-Chat projects'], ['rework', 'Rebrand, simplify & privacy'],
     ['assist', 'AI input helpers & toolkit']
@@ -16657,7 +16908,8 @@ the diagnostics preview calls the same builders as the real prompt.`
   ]));
   const types = Object.freeze([
     ['dashboard', 'Dashboards & applications'], ['agent', 'Prompt studios & plugins'], ['text', 'Random & text'], ['image', 'AI images & galleries'], ['chat', 'Chat, characters & memory'],
-    ['story', 'Stories & worlds'], ['game', 'Games & RPGs'], ['art', 'Procedural art'], ['utility', 'Tools & utilities']
+    ['story', 'Stories & worlds'], ['game', 'Games & RPGs'], ['art', 'Procedural art'], ['utility', 'Tools & utilities'],
+    ['website', 'Websites & site builders']
   ].map(([id, title]) => Object.freeze({ id, title })));
   const guides = {
     dashboards: ['Build a dependable application', 'Map real sources, data contracts, units, timestamps and the current application state.', 'Validate data at each boundary and keep UI, calculations and network lifecycle separate.', 'Check normal data, gaps, stale feeds, failures, symbol changes and saved layouts.', 'Displayed values have traceable sources and timestamps; stale or missing data is never presented as live.'],
@@ -16671,6 +16923,7 @@ the diagnostics preview calls the same builders as the real prompt.`
     quality: ['Verify real use', 'Inspect the real user journey and its failure boundaries.', 'Prioritize concrete accessibility, input and compatibility barriers.', 'Check keyboard, special characters, empty/error states and intended browsers.', 'Observed passes and failures are listed separately from untested coverage.'],
     engineering: ['Plan & maintain', 'Map both panels, contracts, imports and persisted state.', 'Identify a bounded improvement with explicit acceptance criteria.', 'Compare changed behavior against the existing workflows and contracts.', 'Deliver actionable evidence and next steps without unrelated refactoring.'],
     create: ['Build a working foundation', 'Use the brief to define audience, output and the smallest usable workflow.', 'Implement complete paired lists/HTML code with supported imports and clear state.', 'Run first load, generation, controls, errors and a narrow-screen check.', 'A usable generator runs in preview; unfinished wiring and placeholder behavior are unacceptable.'],
+    web: ['Build a site that works without surprises', 'Read the brief and the current generator; define one Site Spec that fields, preview, save and export all share.', 'Fill it in small validated AI stages, keep every field editable, and render only through the safe renderer.', 'Check an empty and a vague idea, single and multi page, Stop, a failed stage, reload, mobile width and export opened from disk.', 'The site builds from one idea, every value is editable, nothing is invented or published, and a failed stage never loses finished work.'],
     text: ['Control generated output', 'Inspect list structure, weights, evaluation timing and shared selections.', 'Preserve intended probabilities while improving valid combinations.', 'Sample bounded local outputs and exercise reroll/lock behavior.', 'Outputs satisfy the stated constraints; statistical claims include sample size and limits.'],
     story: ['Keep the world coherent', 'Map characters, facts, narrative state and the current content structure.', 'Make story rules explicit and retain established lore and saved progress.', 'Walk representative scenes, branches, restarts and resumed sessions.', 'No missing branches, contradictory tracked facts or lost progress in tested paths.'],
     games: ['Make interaction playable', 'Identify the rules, win/loss states and actual game loop.', 'Keep transitions, probabilities, controls and saved state consistent.', 'Play start-to-finish and test restart, invalid actions and boundaries.', 'Progress remains reachable and no tested path soft-locks or duplicates rewards.'],
@@ -16947,7 +17200,7 @@ the diagnostics preview calls the same builders as the real prompt.`
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions, Dad.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
+  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
     Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
       refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',
