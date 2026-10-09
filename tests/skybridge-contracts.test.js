@@ -209,6 +209,78 @@ assert.equal(routed, 1);
 touch = true; onKey({ key: 'Enter' }); assert.equal(routed, 1);
 agentBtn.listeners[0].fn({}); assert.equal(routed, 2);
 
+// GitHub transport settles once, including when the manager never responds.
+{
+  function transport(throws) {
+    const timers = new Map(), responses = [];
+    let nextTimer = 0, options, aborted = 0;
+    const api = load(['ghApi'], between('function ghApi(', 'function ghApiError('), {
+      setTimeout(fn, ms) { timers.set(++nextTimer, { fn, ms }); return nextTimer; },
+      clearTimeout(id) { timers.delete(id); },
+      GM_xmlhttpRequest(o) {
+        if (throws) throw new Error('private transport details');
+        options = o;
+        return { abort() { aborted++; o.onabort(); } };
+      },
+    });
+    api.ghApi('GET', '/repos/owner/repo/git/ref/heads/main', 'private-token', null,
+      (err, status, json) => responses.push({ err, status, json }));
+    return { timers, responses, get options() { return options; }, get aborted() { return aborted; } };
+  }
+  for (const event of ['onerror', 'onabort', 'ontimeout']) {
+    const t = transport();
+    assert.equal(t.options.timeout, 30000);
+    t.options[event]();
+    assert.equal(t.responses.length, 1);
+    assert.ok(t.responses[0].err);
+    assert.equal(t.timers.size, 0);
+    t.options.onload({ status: 200, responseText: '{"object":{"sha":"late"}}' });
+    assert.equal(t.responses.length, 1, 'late success must not continue a failed push');
+  }
+  const hung = transport();
+  const watchdog = [...hung.timers.values()][0];
+  assert.equal(watchdog.ms, 35000);
+  watchdog.fn();
+  assert.match(hung.responses[0].err.message, /timed out/);
+  assert.equal(hung.aborted, 1);
+  assert.equal(hung.responses.length, 1, 'aborting after timeout must not report twice');
+  assert.equal(hung.timers.size, 0);
+  const ok = transport();
+  ok.options.onload({ status: 200, responseText: '{"object":{"sha":"commit"}}' });
+  assert.equal(ok.responses[0].err, null);
+  assert.equal(ok.responses[0].json.object.sha, 'commit');
+  assert.equal(ok.timers.size, 0);
+  const failedStart = transport(true);
+  assert.match(failedStart.responses[0].err.message, /could not start/);
+  assert.doesNotMatch(failedStart.responses[0].err.message, /private/);
+  assert.equal(failedStart.timers.size, 0);
+}
+// A stalled blob upload names its step and never reaches the branch update.
+{
+  const timers = new Map(), requests = [];
+  let id = 0, hanging, outcome;
+  const push = load(['ghPushFilesAtomic'], between('function ghApi(', 'function ghGateNote('), {
+    setTimeout(fn) { timers.set(++id, fn); return id; },
+    clearTimeout(key) { timers.delete(key); },
+    GM_xmlhttpRequest(o) {
+      requests.push(o);
+      if (o.url.endsWith('/ref/heads/main')) o.onload({ status: 200, responseText: '{"object":{"sha":"parent"}}' });
+      else if (o.url.endsWith('/commits/parent')) o.onload({ status: 200, responseText: '{"tree":{"sha":"base-tree"}}' });
+      else hanging = o;
+      return { abort() { o.onabort(); } };
+    },
+  });
+  push.ghPushFilesAtomic('owner', 'repo', 'main', [{ path: 'a.txt', content: 'dsl' }], 'private-token', 'msg',
+    (err, result) => { outcome = { err, result }; });
+  assert.equal(timers.size, 1);
+  [...timers.values()][0]();
+  assert.match(outcome.err.message, /^POST blob:.*timed out/);
+  hanging.onload({ status: 201, responseText: '{"sha":"late-blob"}' });
+  assert.equal(requests.length, 3);
+  assert.ok(!requests.some(r => r.method === 'PATCH'));
+  assert.equal(timers.size, 0);
+}
+
 const calls = [];
 const atomicPush = load(
   ['ghPushFilesAtomic'],

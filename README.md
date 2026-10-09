@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.76.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.76.1-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -102,7 +102,7 @@ If your generators' source lives in a GitHub repo — one folder per generator, 
 
 **⬇ Pull (GitHub → editor).** Fetches the two files from `raw.githubusercontent.com` (public, no auth or cookies) and fills the editor's two CodeMirror panes via the editor's own transaction pipeline — so the change is undoable with `Ctrl+Z`. You then review and click **Save**. Optionally it downloads a local backup of the current source first.
 
-**⬆ Push (editor → GitHub).** Reads both editor panes and commits them together through GitHub's Git Data API. The branch moves only after both blobs and the combined tree are ready, so the DSL and HTML files are always updated in one atomic commit. A confirmation dialog shows exactly what will be committed before anything goes out.
+**⬆ Push (editor → GitHub).** Reads both editor panes and commits them together through GitHub's Git Data API. The branch moves only after both blobs and the combined tree are ready, so the DSL and HTML files are always updated in one atomic commit. A confirmation dialog shows exactly what will be committed before anything goes out. Each GitHub request has a 30-second timeout plus a 35-second watchdog if the userscript manager does not respond. Failures identify the step (such as GET branch or POST blob); aborts and network errors are reported too. A timed-out branch update may still have reached GitHub, so check the repository before retrying.
 
 Push writes to your account, so it needs a token:
 

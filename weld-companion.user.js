@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.76.0
+// @version      1.76.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.76.0';
+  var WC_VERSION = '1.76.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -949,16 +949,32 @@
   // never logged, never put in commit messages.
   function ghToken() { return gget('ghToken', '') || ''; }
   function ghApi(method, apiPath, token, body, cb) {
+    var settled = false, request = null, watchdog = null;
+    function finish(err, status, json) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      cb(err, status, json);
+    }
+    function timedOut() {
+      finish(new Error('GitHub request timed out. Check your connection and Tampermonkey access to api.github.com; check GitHub before retrying.'), 0, null);
+      try { if (request && typeof request.abort === 'function') request.abort(); } catch (e) {}
+    }
+    // The watchdog also covers userscript-manager requests that never call a handler.
+    watchdog = setTimeout(timedOut, 35000);
     try {
-      GM_xmlhttpRequest({
-        method: method, url: 'https://api.github.com' + apiPath,
+      request = GM_xmlhttpRequest({
+        method: method, url: 'https://api.github.com' + apiPath, timeout: 30000,
         headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
         data: body ? JSON.stringify(body) : null,
-        onload: function (r) { var j = null; try { j = JSON.parse(r.responseText); } catch (e) {} cb(null, r.status, j); },
-        onerror: function () { cb(new Error('network error'), 0, null); },
-        ontimeout: function () { cb(new Error('timeout'), 0, null); }
+        onload: function (r) { var j = null; try { j = JSON.parse(r.responseText); } catch (e) {} finish(null, r.status, j); },
+        onerror: function () { finish(new Error('GitHub network error; check your connection and Tampermonkey access to api.github.com'), 0, null); },
+        onabort: function () { finish(new Error('GitHub request aborted'), 0, null); },
+        ontimeout: timedOut
       });
-    } catch (e) { cb(new Error(String((e && e.message) || e)), 0, null); }
+    } catch (e) {
+      finish(new Error('GitHub request could not start; check Tampermonkey access to api.github.com'), 0, null);
+    }
   }
   function ghApiError(action, status, json) { return new Error(action + ' ' + status + (json && json.message ? ' ' + json.message : '')); }
   function ghBranchPath(branch) { return String(branch || '').replace(/^refs\/heads\//, '').split('/').map(encodeURIComponent).join('/'); }
@@ -970,7 +986,7 @@
   function ghPushFilesAtomic(o, repo, branch, files, token, msg, cb, opts) {
     var base = '/repos/' + o + '/' + repo + '/git/';
     function api(method, path, body, done) { ghApi(method, base + path, token, body, done); }
-    function fail(action, err, st, json) { cb(err || ghApiError(action, st, json)); }
+    function fail(action, err, st, json) { cb(err ? new Error(action + ': ' + err.message) : ghApiError(action, st, json)); }
     var branchPath = ghBranchPath(branch);
     if (!branchPath) return cb(new Error('Branch is required'));
     api('GET', 'ref/heads/' + branchPath, null, function (err, st, ref) {
@@ -1085,7 +1101,7 @@
     toast('Pushing ' + name + ' to GitHub\u2026');
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
     ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result) {
-      if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message); return; }
+      if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message, 10000); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
       toast('Pushed ' + name + ' (one atomic commit)');
     });
