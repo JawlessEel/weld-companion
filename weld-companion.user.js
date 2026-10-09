@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.76.2
+// @version      1.77.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.76.2';
+  var WC_VERSION = '1.77.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -16115,6 +16115,92 @@ SANDBOX clipboard, downloads, popups and storage may each be blocked in the gene
 - Plugin calls are async and can be slow, fail or answer late: use a run id, a timeout and Stop; do not stack requests.
 - Weld proposes edits and the user accepts a diff: never assume an edit was applied.
 - Both panels, and every imported plugin generator, must be saved again after a change for it to take effect.
+`),
+    // ------------------------------------------------------------------ AI image prompts
+    pack('img-anatomy', 'PROMPT ANATOMY and STRUCTURED PROMPT shape for image models', String.raw`
+Image prompts that work well in public prompt collections share one order. Use it as a checklist, not a rule:
+
+  1 SUBJECT    who or what, how many, age range, pose, expression, outfit, props
+  2 IDENTITY   edits only: "keep the face exactly as in Image 1", repeated once more at the end
+  3 SCENE      place, era, weather, time of day, background elements
+  4 LIGHT      key, fill, rim; hard or soft; flash, golden hour, window; colour temperature
+  5 CAMERA     lens (35mm wide, 85mm portrait, fisheye), aperture, angle, framing, depth of field
+  6 STYLE      photoreal, flat vector, 3D isometric, clay, film grain, magazine cover
+  7 TEXT       exact words in quotes, language, font feel, position, outline or shadow for contrast
+  8 LAYOUT     aspect ratio, left and right split, margins, safe area, number of panels
+  9 AVOID      a short list: warped face, extra limbs, watermark, blur, muted colours
+
+Plain forms: one paragraph, or labelled sentences ("Crucial Fit Details: ...", "Text: ...").
+Multi-step jobs use tags: <role>, <rules>, <step 1 - analyse>, <step 2 - shots>, <output format>.
+
+STRUCTURED PROMPT (JSON) shape:
+{
+  "subject": { "description": "", "expression": "", "face": { "preserve_original": true } },
+  "accessories": { },
+  "photography": { "camera_style": "", "lighting": "", "angle": "", "shot_type": "", "texture": "" },
+  "background": { "setting": "", "elements": [] },
+  "negative_prompt": ""
+}
+Not every model reads JSON better than prose. Check what the plugin accepts, and keep a flattened text
+fallback. Put each constraint in its own key or sentence and never leave empty keys in the sent version.
+Honest limits: results vary per run, text inside images can be misspelled, and quality words such as 8K
+do not guarantee quality. Ask the user to check text and facts in the output.
+`),
+    pack('img-templates', 'PROMPT LIBRARY CATEGORIES, template model and SLOT SYNTAX', String.raw`
+PROMPT LIBRARY CATEGORIES (common grouping in public collections; a generator may use fewer):
+  Photorealism and aesthetics | Creative experiments | Education and knowledge | E-commerce and virtual studio
+  Workplace and productivity | Photo editing and restoration | Interior design | Social media and marketing
+  Daily life and translation | Social networking and avatars
+
+Template model (one JSON object per prompt; keep user-added items in a separate list from built-ins):
+{
+  "id": "stable-slug",
+  "title": "", "description": "", "category": "", "tags": [],
+  "prompt": "A quote card with the text '{quote|Stay curious}' by {author|Ada}",
+  "slots": [ { "name": "quote", "label": "Quote", "default": "Stay curious" } ],
+  "needsImages": 0, "aspect": "1:1", "language": "en",
+  "credit": { "author": "", "url": "", "license": "" }
+}
+
+SLOT SYNTAX: {name|default} in the prompt text; the same name may appear twice and shares one value.
+Other collections use [Bracket text] or {argument name="x" default="y"}; map those to slots on import
+and keep the default. Escape a literal brace with a backslash. Unknown or empty slots fall back to the
+default; a template with no slots is a plain prompt. Slot values are data: render as text, never HTML or code.
+Credit: keep author, link and license (many collections use CC BY 4.0, which requires attribution).
+`),
+    pack('img-recipes', 'EDIT RECIPES and studio patterns for image models', String.raw`
+Each recipe lists the inputs, the clause that matters, and the usual failure. Image N means the Nth uploaded picture.
+
+  Outpaint     input 1 image + target ratio. "Expand to 16:9, extend scenery both sides, match lighting and texture,
+               complete cut-off objects logically, do not alter the original centre."  Failure: seams, repeated objects.
+  Remove       input 1 image + what to remove. "Remove X, rebuild the background plausibly, keep everything else
+               identical."  Failure: smeared texture where the object was.
+  Restore      old or damaged photo. "Repair scratches and fading, keep faces and composition, do not add detail that
+               was not there; optionally colourize with natural tones."  Failure: faces changed, plastic skin.
+  Try-on       Image 1 garment + Image 2 model. "Wear the garment, natural drape and folds, keep fabric, colour and
+               logos exactly, match lighting and shadows."  Failure: wrong fit, altered logos.
+  Translate    image with text + language. "Replace all visible text with <language>, keep layout and style."
+               Failure: misspelled or missing words; always check.
+  Sketch to UI hand sketch. "Turn into a clean high-fidelity screen, keep layout, use real-looking labels."
+  Infographic  topic + elements + style + label language. Name every element and arrow; say "labels in <language>".
+  Cover        subject + exact headline in quotes + layout side + contrast treatment + format ratio.
+  Product      product image + scene + light. "Keep product shape, colour and logo; new background only."
+  Avatar set   one style block + a short line per pose, so the set stays consistent.
+  Keyframes    describe only what is visible, list anchors that must stay constant, then write one prompt per shot.
+  Miniature    "<place> as an isometric / tilt-shift miniature diorama, clay or plastic, soft studio light, clean background".
+
+Always send a Preserve clause (what must not change) with edits, keep the original file untouched, and let
+the user review the prompt first. Plugins differ in how they take input images: check the source.
+`),
+    pack('img-consent', 'LIKENESS AND CONSENT rules for generated images', String.raw`
+- Use a real person photo only if the user states they have the right to use it. Ask once per session, not on every click.
+- Do not generate named real people in sexual, deceptive, hateful, political or defamatory scenes, or as fake
+  endorsements. Be careful with public figures and never present generated images as real photographs or news.
+- Treat subjects who may be minors with extra care: no sexualised or identity-changing edits.
+- Keep reference images on the user device; do not log, upload or store them beyond the action the user took.
+- Label AI output where it could be mistaken for a photo (caption, filename or metadata) and let the user edit the label.
+- Respect licences: keep credit for imported prompts; do not bundle third-party images or prompts without permission.
+- A filter is never complete: say so, and keep the user in control of every send.
 `)
   ];
 
@@ -16519,6 +16605,23 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     'quick-replies': ['st-layout'],
     'regex-scripts': ['st-layout'],
     'expressions': ['st-layout', 'st-card-v3'],
+    'img-prompt-library': ['img-templates', 'img-anatomy'],
+    'img-prompt-slots': ['img-templates'],
+    'img-json-prompt-builder': ['img-anatomy'],
+    'img-photo-composer': ['img-anatomy'],
+    'img-reference-edit': ['img-recipes', 'img-consent'],
+    'img-edit-recipes': ['img-recipes'],
+    'img-infographic-studio': ['img-recipes', 'img-anatomy'],
+    'img-cover-poster-studio': ['img-recipes', 'img-anatomy'],
+    'img-product-studio': ['img-recipes', 'img-consent'],
+    'img-avatar-pack': ['img-recipes', 'img-consent'],
+    'img-storyboard-keyframes': ['img-recipes', 'img-anatomy'],
+    'img-diorama-presets': ['img-recipes'],
+    'img-prompt-lint': ['img-anatomy'],
+    'img-ab-variations': ['img-anatomy'],
+    'img-aspect-presets': ['img-recipes'],
+    'img-import-credit': ['img-templates', 'img-consent'],
+    'img-likeness-guard': ['img-consent'],
     'rolling-summary': ['st-prompt-order'],
     'chat-log-import-export': ['st-chatlog', 'st-layout'],
     'group-chat': ['st-prompt-order', 'st-chatlog'],
@@ -16794,6 +16897,58 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   return Object.freeze({ rows });
 });
 
+/* AI image prompt skills (section "imagegen"), adapted from ideas in two public Nano Banana Pro prompt collections.
+   Original task wording; no prompts or images from those collections are bundled. Plain data, no network or editor access. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldSkillsImage = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  // [category, id, title, description, mode, task, fit, sources]
+  const img = ['image'], src = ['nano', 'nanoym'];
+  const rows = [
+    // --- Prompt libraries, templates and builders ---
+    ['imagegen', 'img-prompt-library', 'Build an image prompt library & gallery', 'Browse, search, tag and reuse ready-made prompts with example slots.', 'change',
+      'Add a prompt library to this generator: a searchable grid of prompt cards grouped by the PROMPT LIBRARY CATEGORIES in the reference (portraits, creative experiments, education, e-commerce, workplace, photo editing, interior design, social media, daily life, avatars). Each card shows title, one-line description, tags, a short preview of the prompt, and buttons Use (fill the generator prompt box, never auto-generate), Copy, Favorite and Details. Store the library as data in the template model from the reference, keep user-added prompts separate from built-ins, and cap the visible count with Show more. Seed it with a small set of original prompts written for this generator, not copied from other collections. Render all prompt text as text. Verify search, tag filters, an empty result, favorites after reload and a very long prompt.', img, src],
+    ['imagegen', 'img-prompt-slots', 'Add fill-in-the-blank prompt templates', 'Turn a prompt into labeled fields with defaults and a live preview.', 'change',
+      'Add templates whose changeable parts are named slots (see SLOT SYNTAX in the reference). Parse slots from the template, build one labeled input per unique slot with its default as placeholder, show the filled prompt live, and mark unfilled slots clearly. Defaults must produce a good image on their own, so Generate works with zero edits. Support the same slot used twice, slots inside quoted text, a literal brace via escaping and unknown slot names without breaking. Never evaluate slot values as code or HTML, cap value length, keep the template text unchanged when saving values, and let the user save, rename and delete filled presets. Verify empty values, repeated slots, special characters and a template with no slots.', img, src],
+    ['imagegen', 'img-json-prompt-builder', 'Add a structured (JSON) prompt builder', 'Edit subject, photography, background and avoid-list as fields, send as JSON or plain text.', 'change',
+      'Add a builder that edits the prompt as structured fields (subject, clothing or details, accessories, photography with camera style, lighting, angle and texture, background, and an avoid list) following the STRUCTURED PROMPT shape in the reference. Keep the object in one state value, show a live JSON view, and offer a switch to flatten it into a readable paragraph for models that handle prose better. Validate types, drop empty keys, cap sizes, and let the user import and export the JSON. Check the real image plugin or model call to see whether it accepts a long structured prompt before sending JSON, and fall back to the flattened text. Keep any instruction like preserve the original face as its own field. Verify empty fields, nested arrays, invalid imported JSON and very long values.', img, src],
+    ['imagegen', 'img-photo-composer', 'Add a photo style composer with chips', 'Pick lens, lighting, era, mood and finish from labeled options.', 'change',
+      'Add a composer of option groups that assemble prompt clauses: camera and lens (for example 35mm wide, 85mm portrait, fisheye, compact digital), lighting (flash, golden hour, soft window, rim light), era or film look, color grade, depth of field, composition and finish. Use the PROMPT ANATOMY order from the reference, show the clause each chip adds on hover, allow at most one chip per exclusive group, and show the combined prompt before generating. Include a Reset and a Random combination button that respects the exclusive groups. Do not add claims such as 8K or award-winning unless the user picks them. Keep the user own prompt text in its own field and append clauses after it. Verify conflicting chips, no chips and rapid toggling.', img, src],
+    // --- Editing with reference images ---
+    ['imagegen', 'img-reference-edit', 'Add reference-image editing with identity lock', 'Upload one or more images and edit them while keeping faces and details.', 'change',
+      'Add an edit mode where the user supplies one to three reference images and a short instruction. Label images Image 1, Image 2 and Image 3 in the UI and in the prompt so instructions can refer to them. Add an Identity lock switch that appends a clear preserve-the-face-and-features clause, and a Preserve list (logos, texture, colors, pose, background). Before using any photo of a real person show a one-time consent line that the user has the right to use it, and apply the LIKENESS AND CONSENT rules in the reference. Verify the real plugin accepts image input and in what form (url, data URL or blob) from its source before wiring it, and say plainly when it does not. Check file type and size, show thumbnails with Remove, never upload anything automatically, and release object URLs. Verify no image, a wrong file type, an oversized file and three images.', img, src],
+    ['imagegen', 'img-edit-recipes', 'Add one-click photo fix & edit recipes', 'Outpaint, remove crowds, restore, colorize, translate text and more.', 'change',
+      'Add a recipe picker for common edits using the EDIT RECIPES in the reference: outpaint to a new aspect ratio, remove people or objects, restore and colorize old photos, replace the background, relight, fix a tilted or cropped composition, and translate visible text in an image. Each recipe shows what it needs (one image, a target ratio, a language), builds its prompt with a built-in Preserve clause, and lets the user edit the prompt before sending. Offer a Compare view (original and result) and keep the original untouched. Do not promise exact results, and tell the user when the plugin cannot accept an input image. Verify each recipe with missing input, a changed ratio and Cancel.', img, src],
+    // --- Purpose-built studios ---
+    ['imagegen', 'img-infographic-studio', 'Add a concept-to-infographic studio', 'Describe a topic, pick style and language, get a labeled educational image.', 'change',
+      'Add a studio that turns a topic into an educational infographic prompt: topic, audience level, visual style (flat vector, textbook, sketch, bento grid, flow chart, Sankey), language for labels, and a list of the elements and arrows the user wants. Optionally ask the text model to list the key components first (return a short validated list) and let the user edit it before the image is requested. State that label spelling and numbers in generated images must be checked by a person, add a Regenerate with corrections field, and offer a plain text version of the content as a fallback. Do not invent facts or statistics; ask the user to supply data for charts. Verify a two-word topic, a long topic, a non-English label language and an empty element list.', img, src],
+    ['imagegen', 'img-cover-poster-studio', 'Add a cover, thumbnail & poster studio', 'Compose text-on-image designs with exact wording and safe layout.', 'change',
+      'Add a studio for covers, video thumbnails, quote cards, posters and magazine covers. Fields: headline text (exact wording in quotes), optional subtitle, subject or reference image, layout (subject left and text right, centered, full bleed), mood, colors, and format presets with their aspect ratios (16:9, 9:16, 1:1, 4:5, A-series paper). Put every text string in quotes in the prompt, state font feel, outline or shadow for contrast and position, and add a legible-text check reminder. Keep headlines short (warn above about eight words), keep important text inside a safe margin, and keep a text-free version option so the user can add real type later. Verify long text, quotes and apostrophes inside text, non-Latin scripts and each format.', img, src],
+    ['imagegen', 'img-product-studio', 'Add a product, try-on & virtual studio', 'Place products and garments in clean studio, lifestyle or model shots.', 'change',
+      'Add a product studio: product image or description, scene presets (white seamless, marble, lifestyle room, outdoor, floating with shadow), lighting and camera options, a brand color, and optional model try-on where a garment image and a model image are labeled Image 1 and Image 2. Add Preserve controls for fabric texture, color and logos, and a natural-fit clause for drape, folds and shadows that match the scene lighting. Add a batch for angles and backgrounds with a bounded count and a visible cost estimate when the plugin has one. Do not invent logos, certifications or claims, and mark outputs as AI illustrations for listing use. Verify missing product image, mismatched sizes, transparent PNG and a batch cancel.', img, src],
+    ['imagegen', 'img-avatar-pack', 'Add avatar, sticker & multi-pose sets', 'Generate a matching set from one description or reference.', 'change',
+      'Add a set generator: choose a style (blind-box figure, chibi, pet meme, sticker, Y2K scrapbook, game portrait, profile avatar), one subject description or a labeled reference image, and a number of poses or expressions from an editable list. Build one shared style block plus a short per-item line so the set stays consistent, generate with bounded concurrency and show a contact sheet with Retry per item. Offer a transparent-or-plain background option and a text-free option for sticker use. Apply the LIKENESS AND CONSENT rules for real people, never auto-start a large batch and show the count before running. Verify one item failing, Stop mid-batch and re-running only the failed items.', img, src],
+    ['imagegen', 'img-storyboard-keyframes', 'Add a storyboard & keyframe planner', 'Turn one image or idea into a continuous set of cinematic shots.', 'change',
+      'Add a planner that takes one reference image or a short description and produces 3 to 8 shots. Step 1 asks the text model to describe only what is visible (subjects, layout, light, time of day) and list 3 to 6 visual anchors that must stay constant. Step 2 proposes a theme and a short setup, build, turn, payoff arc. Step 3 writes a prompt per shot with shot size, angle, camera move and action, repeating the anchors so subjects, wardrobe, setting and color grade stay continuous, and never adding new characters. Show shots as editable cards with reorder, regenerate and copy. Validate all model replies as JSON, never guess real identities, places or brands, and keep it a planning aid, not an automatic video render. Verify one-shot, eight-shot and a malformed model reply.', img, src],
+    ['imagegen', 'img-diorama-presets', 'Add isometric, miniature & 3D scene presets', 'Place a city, room, object or story into a collectible miniature look.', 'change',
+      'Add a preset set for miniature and 3D looks: isometric room or office, city or country diorama with landmarks, floating island, tiny pool or street scene, ornament or figure, 3D map, and storefront in a chibi or toy style. Each preset has a slot for the place or subject (for example a city name) and fixed clauses for viewing angle, scale, material (clay, plastic, glass, paper), soft studio lighting, tilt-shift depth and a clean background. Add a landmark list the user can edit, an aspect ratio and an optional caption text slot. Do not assert that landmarks are accurate; ask the user to check. Verify an unknown place, a long list of landmarks and each preset with default slots.', img, src],
+    // --- Prompt quality, variation and safety ---
+    ['imagegen', 'img-prompt-lint', 'Review image prompts for common problems', 'Find vague, conflicting or unsafe wording before it is sent.', 'review',
+      'Inspect how this generator builds image prompts and review sample prompts it produces. Check against the PROMPT ANATOMY in the reference: missing subject, vague words with no visual meaning, contradictory lighting or style, too many ideas in one sentence, text that is not in quotes, missing aspect ratio, identity instructions stated once or not at all in edit prompts, negative lists that mention the unwanted thing without need, and boilerplate such as repeated 8K or award-winning claims. Report each finding with the sample, why it hurts the result, and a minimal rewrite. List what could not be checked without generating images. Do not change code.', img, src],
+    ['imagegen', 'img-ab-variations', 'Add A/B prompt variations and side-by-side compare', 'Try two or more wordings or settings and keep the winner.', 'change',
+      'Add a compare mode that runs the same idea with up to four variants (different wording, style chip or one setting) and shows results side by side with their prompts. Cap the count, show the total number of requests before running, run with bounded concurrency, allow Stop, keep partial results and mark which prompt made which image. Add Keep this one, which saves the winning prompt as a preset, and a note field per variant. Never run automatically and never retry failures silently. Verify one failed variant, Stop, and a repeated run that must not mix old images into new slots.', img, src],
+    ['imagegen', 'img-aspect-presets', 'Add aspect ratio & size presets', 'One picker that fits wallpapers, covers, avatars and print.', 'change',
+      'Add an aspect ratio and size picker with presets: square 1:1, portrait 3:4 and 4:5, story 9:16, wide 16:9 and 21:9, plus a custom ratio. Read what the actual image plugin supports (named ratios, width and height, or none) from its source and map the choice to it; when it supports only the prompt text, add the ratio to the prompt and say so. Show a framing preview box, remember the last choice, and warn when the choice may crop text or faces. Never invent plugin options. Verify each preset, a custom value out of range and an unsupported plugin.', img, src],
+    ['imagegen', 'img-import-credit', 'Import prompt collections with source credit', 'Bring in markdown or JSON prompts and keep author, link and license.', 'change',
+      'Add an importer for prompt collections in markdown (headings with a fenced prompt and a source line) and in JSON. Parse into the template model from the reference: title, prompt, tags, language, author, source link and license. Preview the parsed items with duplicates and rejects marked, let the user select which to add, and never import automatically. Keep credit visible on every imported card with a link, store the license note, and block items with no prompt text. Treat all imported text and links as untrusted: render as text, allow only http and https links and cap size and count. Do not bundle third-party prompts into the generator itself. Verify a malformed file, 500 items, a duplicate and a missing source.', img, src],
+    ['imagegen', 'img-likeness-guard', 'Add consent, likeness & labeling safeguards', 'Handle real people, public figures and AI disclosure responsibly.', 'change',
+      'Apply the LIKENESS AND CONSENT rules from the reference to this generator. Add a visible consent checkbox before any photo of a real person is used, block or warn on prompts that ask for a named real person in a misleading, intimate, political or deceptive scene, and never use the output to imply endorsement. Add an optional AI-generated label or caption to saved and downloaded images and keep it editable. Keep uploaded reference images local, do not log them, and give a Clear button. Do not claim the filter is complete. Verify a named public figure, a minor-looking subject in an edit request, an empty consent state and a download with the label on and off.', img, src]
+  ];
+  return Object.freeze({ rows });
+});
+
 /* Generator skill catalog and prompt composition. No network or editor mutations. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -16806,11 +16961,12 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   const Refs = viaRequire ? require('./skills-refs.js') : (host.WeldSkillsRefs || { packs: [], byId: {}, links: {}, examples: {} });
   const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
   const Web = viaRequire ? require('./skills-web.js') : (host.WeldSkillsWeb || { rows: [] });
+  const ImagePrompts = viaRequire ? require('./skills-image.js') : (host.WeldSkillsImage || { rows: [] });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
     ['repair', 'Debug & repair'], ['design', 'Design & modernize'],
-    ['features', 'Add features'], ['ai', 'AI & media'],
+    ['features', 'Add features'], ['ai', 'AI & media'], ['imagegen', 'Image prompts & studios'],
     ['data', 'Data & persistence'], ['performance', 'Performance & reliability'],
     ['quality', 'Accessibility & quality'], ['engineering', 'Code & planning'],
     ['create', 'Create a generator'], ['web', 'Websites & site builders'], ['text', 'Text & randomness'],
@@ -16929,7 +17085,9 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     "Prat011/awesome-llm-skills": "35e1ea23b6c5f50c420d5591973aa8ad4f2931ff",
     "affaan-m/ECC": "ef648e01899ba3e8dc6371642deaaf64b4477775",
     "anthropics/skills": "8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4",
-    "nextlevelbuilder/ui-ux-pro-max-skill": "477bcb28c9812b385cb51a4605ddf30d7b2266e2"
+    "nextlevelbuilder/ui-ux-pro-max-skill": "477bcb28c9812b385cb51a4605ddf30d7b2266e2",
+    "ZeroLu/awesome-nanobanana-pro": "475f02bf67b2cd26d5d9c76ba145b47cb4500700",
+    "YouMind-OpenLab/awesome-nano-banana-pro-prompts": "99bf468962de7df08166543ce67dad25f41e27fb"
 });
   const sources = Object.freeze([
     ['superpowers', 'Superpowers', 'obra/superpowers', 'skills/systematic-debugging/SKILL.md'],
@@ -16942,7 +17100,9 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     ['llm', 'Awesome LLM Skills', 'Prat011/awesome-llm-skills', 'algorithmic-art/SKILL.md'],
     ['ecc', 'ECC', 'affaan-m/ECC', '.agents/skills/frontend-patterns/SKILL.md'],
     ['anthropic', 'Anthropic skills', 'anthropics/skills', 'skills/frontend-design/SKILL.md'],
-    ['ux', 'UI UX Pro Max', 'nextlevelbuilder/ui-ux-pro-max-skill', '.claude/skills/ui-ux-pro-max/SKILL.md']
+    ['ux', 'UI UX Pro Max', 'nextlevelbuilder/ui-ux-pro-max-skill', '.claude/skills/ui-ux-pro-max/SKILL.md'],
+    ['nano', 'Awesome Nano Banana Pro (prompt collection)', 'ZeroLu/awesome-nanobanana-pro', 'README.md'],
+    ['nanoym', 'Awesome Nano Banana Pro Prompts (YouMind)', 'YouMind-OpenLab/awesome-nano-banana-pro-prompts', 'README.md']
   ].map(([id, title, repo, path]) => Object.freeze({ id, title, url: 'https://github.com/' + repo + '/blob/' + sourceRevisions[repo] + '/' + path, path })).concat([
     Object.freeze({ id: 'binance', title: 'Binance market data docs', url: 'https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints', path: '' }),
     Object.freeze({ id: 'binance-streams', title: 'Binance stream docs', url: 'https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams', path: '' }),
@@ -16971,6 +17131,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     quality: ['Verify real use', 'Inspect the real user journey and its failure boundaries.', 'Prioritize concrete accessibility, input and compatibility barriers.', 'Check keyboard, special characters, empty/error states and intended browsers.', 'Observed passes and failures are listed separately from untested coverage.'],
     engineering: ['Plan & maintain', 'Map both panels, contracts, imports and persisted state.', 'Identify a bounded improvement with explicit acceptance criteria.', 'Compare changed behavior against the existing workflows and contracts.', 'Deliver actionable evidence and next steps without unrelated refactoring.'],
     create: ['Build a working foundation', 'Use the brief to define audience, output and the smallest usable workflow.', 'Implement complete paired lists/HTML code with supported imports and clear state.', 'Run first load, generation, controls, errors and a narrow-screen check.', 'A usable generator runs in preview; unfinished wiring and placeholder behavior are unacceptable.'],
+    imagegen: ['Make image prompts dependable', 'Read the real image plugin call and input options first; keep the prompt text, settings and reference images as separate pieces of state.', 'Assemble prompts in one visible function, keep user text intact, ask before using real-person photos and never invent plugin options.', 'Check empty, long, special-character, failed and repeated requests, and read generated text in images with your own eyes.', 'The user sees and can edit the exact prompt, nothing generates or uploads without an action, and failures keep earlier work.'],
     web: ['Build a site that works without surprises', 'Read the brief and the current generator; define one Site Spec that fields, preview, save and export all share.', 'Fill it in small validated AI stages, keep every field editable, and render only through the safe renderer.', 'Check an empty and a vague idea, single and multi page, Stop, a failed stage, reload, mobile width and export opened from disk.', 'The site builds from one idea, every value is editable, nothing is invented or published, and a failed stage never loses finished work.'],
     text: ['Control generated output', 'Inspect list structure, weights, evaluation timing and shared selections.', 'Preserve intended probabilities while improving valid combinations.', 'Sample bounded local outputs and exercise reroll/lock behavior.', 'Outputs satisfy the stated constraints; statistical claims include sample size and limits.'],
     story: ['Keep the world coherent', 'Map characters, facts, narrative state and the current content structure.', 'Make story rules explicit and retain established lore and saved progress.', 'Walk representative scenes, branches, restarts and resumed sessions.', 'No missing branches, contradictory tracked facts or lost progress in tested paths.'],
@@ -17248,7 +17409,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
+  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows, ImagePrompts.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
     Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
       refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',

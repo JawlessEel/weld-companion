@@ -1,6 +1,6 @@
 # Generator skills
 
-Open **Weld > Skills** on a Perchance generator. The library contains **242 presets in 19 sections** for full browser applications as well as creative generators. Dashboards and complex applications come first; all original 48 preset IDs remain compatible with favorites.
+Open **Weld > Skills** on a Perchance generator. The library contains **259 presets in 20 sections** for full browser applications as well as creative generators. Dashboards and complex applications come first; all original 48 preset IDs remain compatible with favorites.
 
 | Section | Presets |
 | --- | ---: |
@@ -10,6 +10,7 @@ Open **Weld > Skills** on a Perchance generator. The library contains **242 pres
 | Design & modernize | 8 |
 | Add features | 9 |
 | AI & media | 14 |
+| Image prompts & studios | 17 |
 | Data & persistence | 13 |
 | Performance & reliability | 8 |
 | Accessibility & quality | 10 |
@@ -27,6 +28,12 @@ Open **Weld > Skills** on a Perchance generator. The library contains **242 pres
 Browse collapsible sections or combine search, generator/application type, task mode and favorites. Generic tasks remain available for every type. Dashboard tasks cover feed adapters, financial calculations, provenance/freshness, terminal layouts, charts, recovery, report parity and AI analyst grounding. Advanced story/chat tasks cover branches, ensemble characters, memory, card interoperability, sync conflicts, vault recall and multimodal workflows. The prompts/models/plugins section covers compiled prompts, preset exchange, model capabilities, routing, reusable interfaces and agent/tool contracts.
 
 **Skybridge** (Prompts, models & plugins): connect a generator to Weld Companion with the real `weld.skybridge` API (import, trigger call, capability checks, storage, own-model AI, bus) and diagnose a link that will not form. **SillyTavern, Chub & character cards**: Character Card V2/V3 import and export (JSON and PNG), field mapping and validation, alternate greetings and swipes, macros, example dialogue, Author’s Note and depth prompts, prompt inspector, Continue/Regenerate/Impersonate, personas, quick replies, regex rules, expressions, rolling summary, chat-log import/export, group chat, World Info upgrades (secondary keys, probability, recursion, budgets, timed effects), lorebook editor and import/export, and a Chub-style library. **Rebrand, simplify & privacy**: audit and replace branding, centralize it in one config block, remove promotional links and community/social chat features, go fully local. **AI input helpers & toolkit**: Rewrite & Fill buttons for prompt inputs (rewrite filled text, generate empty fields from the others and the generator context), fill-all, locks and undo, streaming with Stop, usage guard, diagnostics panel, command palette, share links and templates. Rebrand and removal skills apply only to generators you own or may modify and keep licence and attribution notices. Format-specific prompts tell the helper to check real sample files and keep unknown fields; they do not assert behavior of any particular app version.
+
+## Image prompts & studios (1.77.0)
+
+Section **Image prompts & studios** has 17 skills for generators that call an image model. They are original task instructions inspired by two public prompt collections ([ZeroLu/awesome-nanobanana-pro](https://github.com/ZeroLu/awesome-nanobanana-pro) and [YouMind-OpenLab/awesome-nano-banana-pro-prompts](https://github.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts)); no prompts or images from them are bundled. Four references travel with the prompts: **prompt anatomy and the structured (JSON) prompt shape**, the **prompt library categories, template model and slot syntax**, **edit recipes** (outpaint, remove, restore, try-on, translate, infographic, cover, product, avatars, keyframes, miniatures) and **likeness and consent rules**.
+
+Skills: prompt library and gallery, fill-in-the-blank templates, JSON prompt builder, photo style composer, reference-image editing with identity lock, edit recipes, infographic studio, cover/thumbnail/poster studio, product and try-on studio, avatar and sticker sets, storyboard keyframes, isometric and miniature presets, prompt lint (review), A/B variations, aspect ratio presets, importer with source credit, and consent/labeling safeguards.
 
 ## Websites & site builders (1.76.0)
 
@@ -87,4 +94,4 @@ Favorites persist through Weld storage and contain only catalog IDs. Search, sel
 
 ## Development
 
-Edit `src/skills-core.js` (catalog and pure prompt composition), `src/skills-refs.js` (structure packs, preset-to-pack links and worked examples), `src/skills-dad.js` (Dad-Chat rows), `src/skills-web.js` (website and edge-case rows) and `src/skills-ui.js` (interface), then run `npm run build` and `npm run check`. The generated `SKILLS` block belongs to the build. Native helper internals are feature-detected by the shared `openPerchanceAI` adapter; live validation and installation in a userscript manager are separate checks.
+Edit `src/skills-core.js` (catalog and pure prompt composition), `src/skills-refs.js` (structure packs, preset-to-pack links and worked examples), `src/skills-dad.js` (Dad-Chat rows), `src/skills-web.js` (website and edge-case rows), `src/skills-image.js` (image prompt rows) and `src/skills-ui.js` (interface), then run `npm run build` and `npm run check`. The generated `SKILLS` block belongs to the build. Native helper internals are feature-detected by the shared `openPerchanceAI` adapter; live validation and installation in a userscript manager are separate checks.

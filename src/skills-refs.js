@@ -1094,6 +1094,92 @@ SANDBOX clipboard, downloads, popups and storage may each be blocked in the gene
 - Plugin calls are async and can be slow, fail or answer late: use a run id, a timeout and Stop; do not stack requests.
 - Weld proposes edits and the user accepts a diff: never assume an edit was applied.
 - Both panels, and every imported plugin generator, must be saved again after a change for it to take effect.
+`),
+    // ------------------------------------------------------------------ AI image prompts
+    pack('img-anatomy', 'PROMPT ANATOMY and STRUCTURED PROMPT shape for image models', String.raw`
+Image prompts that work well in public prompt collections share one order. Use it as a checklist, not a rule:
+
+  1 SUBJECT    who or what, how many, age range, pose, expression, outfit, props
+  2 IDENTITY   edits only: "keep the face exactly as in Image 1", repeated once more at the end
+  3 SCENE      place, era, weather, time of day, background elements
+  4 LIGHT      key, fill, rim; hard or soft; flash, golden hour, window; colour temperature
+  5 CAMERA     lens (35mm wide, 85mm portrait, fisheye), aperture, angle, framing, depth of field
+  6 STYLE      photoreal, flat vector, 3D isometric, clay, film grain, magazine cover
+  7 TEXT       exact words in quotes, language, font feel, position, outline or shadow for contrast
+  8 LAYOUT     aspect ratio, left and right split, margins, safe area, number of panels
+  9 AVOID      a short list: warped face, extra limbs, watermark, blur, muted colours
+
+Plain forms: one paragraph, or labelled sentences ("Crucial Fit Details: ...", "Text: ...").
+Multi-step jobs use tags: <role>, <rules>, <step 1 - analyse>, <step 2 - shots>, <output format>.
+
+STRUCTURED PROMPT (JSON) shape:
+{
+  "subject": { "description": "", "expression": "", "face": { "preserve_original": true } },
+  "accessories": { },
+  "photography": { "camera_style": "", "lighting": "", "angle": "", "shot_type": "", "texture": "" },
+  "background": { "setting": "", "elements": [] },
+  "negative_prompt": ""
+}
+Not every model reads JSON better than prose. Check what the plugin accepts, and keep a flattened text
+fallback. Put each constraint in its own key or sentence and never leave empty keys in the sent version.
+Honest limits: results vary per run, text inside images can be misspelled, and quality words such as 8K
+do not guarantee quality. Ask the user to check text and facts in the output.
+`),
+    pack('img-templates', 'PROMPT LIBRARY CATEGORIES, template model and SLOT SYNTAX', String.raw`
+PROMPT LIBRARY CATEGORIES (common grouping in public collections; a generator may use fewer):
+  Photorealism and aesthetics | Creative experiments | Education and knowledge | E-commerce and virtual studio
+  Workplace and productivity | Photo editing and restoration | Interior design | Social media and marketing
+  Daily life and translation | Social networking and avatars
+
+Template model (one JSON object per prompt; keep user-added items in a separate list from built-ins):
+{
+  "id": "stable-slug",
+  "title": "", "description": "", "category": "", "tags": [],
+  "prompt": "A quote card with the text '{quote|Stay curious}' by {author|Ada}",
+  "slots": [ { "name": "quote", "label": "Quote", "default": "Stay curious" } ],
+  "needsImages": 0, "aspect": "1:1", "language": "en",
+  "credit": { "author": "", "url": "", "license": "" }
+}
+
+SLOT SYNTAX: {name|default} in the prompt text; the same name may appear twice and shares one value.
+Other collections use [Bracket text] or {argument name="x" default="y"}; map those to slots on import
+and keep the default. Escape a literal brace with a backslash. Unknown or empty slots fall back to the
+default; a template with no slots is a plain prompt. Slot values are data: render as text, never HTML or code.
+Credit: keep author, link and license (many collections use CC BY 4.0, which requires attribution).
+`),
+    pack('img-recipes', 'EDIT RECIPES and studio patterns for image models', String.raw`
+Each recipe lists the inputs, the clause that matters, and the usual failure. Image N means the Nth uploaded picture.
+
+  Outpaint     input 1 image + target ratio. "Expand to 16:9, extend scenery both sides, match lighting and texture,
+               complete cut-off objects logically, do not alter the original centre."  Failure: seams, repeated objects.
+  Remove       input 1 image + what to remove. "Remove X, rebuild the background plausibly, keep everything else
+               identical."  Failure: smeared texture where the object was.
+  Restore      old or damaged photo. "Repair scratches and fading, keep faces and composition, do not add detail that
+               was not there; optionally colourize with natural tones."  Failure: faces changed, plastic skin.
+  Try-on       Image 1 garment + Image 2 model. "Wear the garment, natural drape and folds, keep fabric, colour and
+               logos exactly, match lighting and shadows."  Failure: wrong fit, altered logos.
+  Translate    image with text + language. "Replace all visible text with <language>, keep layout and style."
+               Failure: misspelled or missing words; always check.
+  Sketch to UI hand sketch. "Turn into a clean high-fidelity screen, keep layout, use real-looking labels."
+  Infographic  topic + elements + style + label language. Name every element and arrow; say "labels in <language>".
+  Cover        subject + exact headline in quotes + layout side + contrast treatment + format ratio.
+  Product      product image + scene + light. "Keep product shape, colour and logo; new background only."
+  Avatar set   one style block + a short line per pose, so the set stays consistent.
+  Keyframes    describe only what is visible, list anchors that must stay constant, then write one prompt per shot.
+  Miniature    "<place> as an isometric / tilt-shift miniature diorama, clay or plastic, soft studio light, clean background".
+
+Always send a Preserve clause (what must not change) with edits, keep the original file untouched, and let
+the user review the prompt first. Plugins differ in how they take input images: check the source.
+`),
+    pack('img-consent', 'LIKENESS AND CONSENT rules for generated images', String.raw`
+- Use a real person photo only if the user states they have the right to use it. Ask once per session, not on every click.
+- Do not generate named real people in sexual, deceptive, hateful, political or defamatory scenes, or as fake
+  endorsements. Be careful with public figures and never present generated images as real photographs or news.
+- Treat subjects who may be minors with extra care: no sexualised or identity-changing edits.
+- Keep reference images on the user device; do not log, upload or store them beyond the action the user took.
+- Label AI output where it could be mistaken for a photo (caption, filename or metadata) and let the user edit the label.
+- Respect licences: keep credit for imported prompts; do not bundle third-party images or prompts without permission.
+- A filter is never complete: say so, and keep the user in control of every send.
 `)
   ];
 
@@ -1498,6 +1584,23 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     'quick-replies': ['st-layout'],
     'regex-scripts': ['st-layout'],
     'expressions': ['st-layout', 'st-card-v3'],
+    'img-prompt-library': ['img-templates', 'img-anatomy'],
+    'img-prompt-slots': ['img-templates'],
+    'img-json-prompt-builder': ['img-anatomy'],
+    'img-photo-composer': ['img-anatomy'],
+    'img-reference-edit': ['img-recipes', 'img-consent'],
+    'img-edit-recipes': ['img-recipes'],
+    'img-infographic-studio': ['img-recipes', 'img-anatomy'],
+    'img-cover-poster-studio': ['img-recipes', 'img-anatomy'],
+    'img-product-studio': ['img-recipes', 'img-consent'],
+    'img-avatar-pack': ['img-recipes', 'img-consent'],
+    'img-storyboard-keyframes': ['img-recipes', 'img-anatomy'],
+    'img-diorama-presets': ['img-recipes'],
+    'img-prompt-lint': ['img-anatomy'],
+    'img-ab-variations': ['img-anatomy'],
+    'img-aspect-presets': ['img-recipes'],
+    'img-import-credit': ['img-templates', 'img-consent'],
+    'img-likeness-guard': ['img-consent'],
     'rolling-summary': ['st-prompt-order'],
     'chat-log-import-export': ['st-chatlog', 'st-layout'],
     'group-chat': ['st-prompt-order', 'st-chatlog'],

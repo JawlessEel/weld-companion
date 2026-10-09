@@ -2,9 +2,9 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 242);
+assert.equal(C.presets.length, 259);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
-assert.equal(C.categories.length, 19);
+assert.equal(C.categories.length, 20);
 for (const p of C.presets) {
   assert.ok(C.categories.some(c => c.id === p.category));
   assert.equal(p.steps.length, 3);
@@ -225,6 +225,28 @@ assert.ok(specText && JSON.parse(specText[0].replace(/"single" \| "multi"/, '"si
 
 // The native AI input is believed to take about 6k tokens: every built-in prompt must leave real headroom.
 for (const p of C.presets) assert.ok(C.estimateTokens(C.buildPrompt(p.id, { slug: 'a-long-generator-name', concise: true })) <= 4500, p.id + ' prompt too large');
+
+// Image prompt skills adapted from public Nano Banana prompt collections (1.77.0).
+const imgSkills = C.presets.filter(p => p.category === 'imagegen');
+assert.equal(imgSkills.length, 17);
+assert.equal(C.sections.find(s => s.id === 'imagegen').title, 'Image prompts & studios');
+for (const p of imgSkills) {
+  assert.ok(p.refs.length >= 1, p.id + ' needs a reference');
+  assert.deepEqual([...p.types], ['image']);
+  assert.ok(p.sources.every(id => C.sources.some(s => s.id === id)) && p.sources.length === 2);
+}
+assert.ok(C.sources.find(s => s.id === 'nano').url.includes('475f02bf67b2cd26d5d9c76ba145b47cb4500700'));
+assert.match(C.buildPrompt('img-prompt-slots'), /SLOT SYNTAX/);
+assert.match(C.buildPrompt('img-reference-edit'), /LIKENESS AND CONSENT/);
+assert.match(C.buildPrompt('img-json-prompt-builder'), /negative_prompt/);
+assert.ok(C.get('img-prompt-lint').mode === 'review');
+assert.ok(C.search('', 'imagegen', null, { type: 'image' }).length === imgSkills.length);
+assert.ok(C.search('', 'imagegen', null, { type: 'dashboard' }).length === 0);
+assert.ok(C.search('infographic').some(p => p.id === 'img-infographic-studio'));
+const slotText = Refs.byId['img-templates'].text.match(/^\{\n  "id"[\s\S]*?\n\}$/m);
+assert.ok(slotText && JSON.parse(slotText[0]).slots[0].name === 'quote');
+const anatomyJson = Refs.byId['img-anatomy'].text.match(/^\{\n  "subject"[\s\S]*?\n\}$/m);
+assert.ok(anatomyJson && JSON.parse(anatomyJson[0]).photography);
 
 // The bundled copies of the Dad-Chat docs ship in the repo and agree with the packs on key names and numbers.
 const archDoc = fsx.readFileSync('docs/dad-chat/architecture.md', 'utf8'), formatDoc = fsx.readFileSync('docs/dad-chat/dad-native-format.md', 'utf8');
