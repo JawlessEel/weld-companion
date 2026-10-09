@@ -10,7 +10,7 @@
   const MARK_COLORS = { error: '#e5534b', warn: '#d29922', info: '#768390' };
 
   const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' },
-    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false };
+    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false, revision: null };
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
   const S = { proposals: [], seq: 0, view: null, markers: false, markInfo: false, refactor: { name: '', to: '', usages: null, preview: null, error: '' },
@@ -49,6 +49,24 @@
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
   function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
+  function folderBaseKey(slug) { return 'base:' + (F.revision ? F.revision + ':' : '') + slug; }
+  async function refreshMasterFolder() {
+    folderCfg();
+    const revision = F.cfg.revision || '';
+    if (F.revision === revision) return;
+    // Reuse the existing handle store so already-connected folders survive this update.
+    const h = await kvGet('handle');
+    F.handle = h && typeof h.queryPermission === 'function' ? h : null;
+    F.name = F.handle ? F.handle.name : '';
+    F.perm = F.handle ? await permission(F.handle, false) : 'none';
+    F.revision = revision; F.plan = null; F.folders = null; F.baseKey = ''; F.notified = ''; F.error = '';
+    if (S.view && S.view.kind === 'folder') S.view = null;
+    armRegrant(); draw();
+  }
+  function pauseFolderWrites() {
+    folderCfg(); F.cfg.autoMirror = false; saveFolderCfg();
+    notice('Automatic Dev folder writes paused for all generators and open tabs.'); draw();
+  }
   async function dirFor(root, rel, create) {
     const segs = rel.split('/'), name = segs.pop(); let dir = root;
     for (const s of segs) dir = await dir.getDirectoryHandle(s, { create });
@@ -66,15 +84,21 @@
   }
   const paths = slug => D.folderPaths(slug, F.cfg);
   async function readPair(slug) {
-    const p = paths(slug), a = await fsRead(F.handle, p.dsl);
+    await refreshMasterFolder();
+    if (!F.handle || F.perm !== 'granted') return null;
+    const handle = F.handle, p = paths(slug), a = await fsRead(handle, p.dsl);
     if (!a) return null;
-    const b = await fsRead(F.handle, p.html);
+    const b = await fsRead(handle, p.html);
     return { dsl: norm(a.text), html: b ? norm(b.text) : null, mtime: Math.max(a.mtime, b ? b.mtime : 0) };
   }
-  async function writePair(slug, dsl, html) {
-    const p = paths(slug);
-    await fsWrite(F.handle, p.dsl, dsl);
-    if (html != null) await fsWrite(F.handle, p.html, html);
+  async function writePair(slug, dsl, html, expectedRevision) {
+    await refreshMasterFolder();
+    if (expectedRevision !== undefined && (F.revision !== expectedRevision || !F.cfg.autoMirror)) return false;
+    if (!F.handle || F.perm !== 'granted') throw new Error('Choose a master Dev folder and allow access first.');
+    const handle = F.handle, p = paths(slug);
+    await fsWrite(handle, p.dsl, dsl);
+    if (html != null) await fsWrite(handle, p.html, html);
+    return true;
   }
   async function permission(handle, ask) {
     try {
@@ -88,8 +112,11 @@
     try {
       const h = await win().showDirectoryPicker({ id: 'weld-folder-sync', mode: 'readwrite' });
       F.handle = h; F.name = h.name; F.perm = await permission(h, true); F.error = '';
-      await kvSet('handle', h); folderCfg(); F.plan = null; F.folders = null;
-      notice(F.perm === 'granted' ? 'Folder connected: ' + h.name : 'Folder chosen, but write permission was not granted.');
+      await kvSet('handle', h); folderCfg();
+      F.cfg.revision = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+      F.cfg.autoMirror = false; saveFolderCfg(); F.revision = null;
+      await refreshMasterFolder();
+      notice(F.perm === 'granted' ? 'Master Dev folder connected for all generators: ' + h.name + '. Automatic writes are off.' : 'Folder chosen, but write permission was not granted.');
       await tick(true);
     } catch (e) { if (!(e && e.name === 'AbortError')) { F.error = e.message || String(e); } }
     draw();
@@ -116,7 +143,7 @@
     if (F.perm !== 'granted') armRegrant();
     if (F.perm !== was) draw();
   }
-  function setKeepAccess(v) { F.cfg.keepAccess = !!v; saveFolderCfg(); if (v) recheckAccess(); }
+  function setKeepAccess(v) { folderCfg(); F.cfg.keepAccess = !!v; saveFolderCfg(); if (v) recheckAccess(); }
   async function reconnectFolder() {
     if (!F.handle) return;
     F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.';
@@ -125,35 +152,37 @@
   }
   async function disconnectFolder() {
     F.handle = null; F.name = ''; F.perm = 'none'; F.plan = null; F.folders = null;
-    await kvDel('handle'); notice('Folder disconnected. Nothing in it was deleted.'); draw();
+    await kvDel('handle'); folderCfg(); F.cfg.autoMirror = false;
+    F.cfg.revision = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); saveFolderCfg(); F.revision = F.cfg.revision;
+    notice('Master Dev folder disconnected for all generators. Nothing in it was deleted.'); draw();
   }
   async function bootFolder() {
     if (F.bootDone) return; F.bootDone = true;
     F.supported = typeof win().showDirectoryPicker === 'function'; folderCfg();
-    try {
-      const h = await kvGet('handle');
-      if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); }
-    } catch (e) {}
-    try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
+    try { await refreshMasterFolder(); } catch (e) {}
+    try { window.addEventListener('focus', () => { refreshMasterFolder().then(recheckAccess).catch(() => {}); }); } catch (e) {}
     armRegrant(); startWatch(); draw();
   }
   let watchTimer = null;
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
   async function tick(force) {
+    await refreshMasterFolder();
     if (!F.handle || F.perm !== 'granted' || F.busy || (!force && (!F.cfg.watch || (typeof document !== 'undefined' && document.hidden)))) return;
     const slug = H.slug();
     if (!D.safeSlug(slug)) { F.plan = null; F.slug = ''; return; }
     F.busy = true;
     try {
       const live = H.isEdit() ? H.live() : null, editor = live && live.dsl != null ? { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) } : null;
-      const disk = await readPair(slug), base = await kvGet('base:' + slug);
+      const revision = F.revision, disk = await readPair(slug), base = await kvGet(folderBaseKey(slug));
       let plan = D.syncPlan(editor, disk, base);
       if (plan.state === 'in-sync' && editor) {
         // both sides agree: remember this as the last sync point (only when it actually moved)
         const bk = slug + ':' + P.hash(D.normForCompare(editor.dsl)) + P.hash(D.normForCompare(editor.html || ''));
-        if (F.baseKey !== bk) { F.baseKey = bk; await kvSet('base:' + slug, { dsl: editor.dsl, html: editor.html }); }
+        if (F.baseKey !== bk) { F.baseKey = bk; await kvSet(folderBaseKey(slug), { dsl: editor.dsl, html: editor.html }); }
       } else if ((plan.state === 'editor-ahead' || plan.state === 'no-disk') && editor && F.cfg.autoMirror) {
-        await writePair(slug, editor.dsl, editor.html); await kvSet('base:' + slug, { dsl: editor.dsl, html: editor.html }); plan = { state: 'in-sync', mirrored: true };
+        if (await writePair(slug, editor.dsl, editor.html, revision)) {
+          await kvSet(folderBaseKey(slug), { dsl: editor.dsl, html: editor.html }); plan = { state: 'in-sync', mirrored: true };
+        }
       }
       const key = plan.state + ':' + (disk ? P.hash(D.normForCompare(disk.dsl)) + P.hash(D.normForCompare(disk.html || '')) : '-');
       if ((plan.state === 'disk-ahead' || plan.state === 'conflict') && F.notified !== key) { F.notified = key; H.toast('The folder copy of "' + slug + '" changed. Open Weld, then the Dev tab, to review it.', 7000); }
@@ -164,11 +193,12 @@
     F.busy = false;
   }
   async function mirrorNow() {
+    await tick(true);
     const slug = H.slug(), live = H.isEdit() ? H.live() : null;
     if (!live || live.dsl == null) return notice('Open the generator\u2019s editor first.');
     if (F.plan && (F.plan.state === 'disk-ahead' || F.plan.state === 'conflict') && !window.confirm('The folder copy has changes that are not in the editor. Overwrite them with the editor?')) return;
     await writePair(slug, norm(live.dsl), live.html == null ? null : norm(live.html));
-    await kvSet('base:' + slug, { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) });
+    await kvSet(folderBaseKey(slug), { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) });
     notice('Wrote the editor to the folder.'); await tick(true);
   }
   async function applyFolder() {
@@ -177,7 +207,7 @@
     const disk = await readPair(slug); if (!disk) return notice('No folder copy of this generator yet.');
     if (!window.confirm('Replace the editor with the folder copy of "' + slug + '"?\n\nCtrl+Z undoes it, and you still press Save in Perchance.')) return;
     const ok = H.applyPane('dsl', disk.dsl) && (disk.html == null || H.applyPane('html', disk.html));
-    if (ok) { await kvSet('base:' + slug, { dsl: disk.dsl, html: disk.html }); notice('Applied the folder copy. Review it, then Save.'); } else notice('Could not write to the editor.');
+    if (ok) { await kvSet(folderBaseKey(slug), { dsl: disk.dsl, html: disk.html }); notice('Applied the folder copy. Review it, then Save.'); } else notice('Could not write to the editor.');
     S.view = null; await tick(true);
   }
   async function showFolderDiff() {
@@ -187,8 +217,8 @@
       panes: [['Lists panel', norm(live.dsl), disk.dsl], ['HTML panel', norm(live.html || ''), disk.html == null ? norm(live.html || '') : disk.html]] };
     draw();
   }
-  async function useFolderAsBase() { const disk = await readPair(H.slug()); if (disk) { await kvSet('base:' + H.slug(), disk); await tick(true); } }
-  async function useEditorAsBase() { const live = H.live(); if (live) { await kvSet('base:' + H.slug(), { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) }); await tick(true); } }
+  async function useFolderAsBase() { const disk = await readPair(H.slug()); if (disk) { await kvSet(folderBaseKey(H.slug()), disk); await tick(true); } }
+  async function useEditorAsBase() { const live = H.live(); if (live) { await kvSet(folderBaseKey(H.slug()), { dsl: norm(live.dsl), html: live.html == null ? null : norm(live.html) }); await tick(true); } }
   async function listFolders() {
     if (!F.handle || F.perm !== 'granted') return;
     const out = [];
@@ -542,14 +572,16 @@
   };
   function folderSection(parent) {
     if (!F.supported) { note(parent, 'This browser cannot give web pages a folder to work in. Use Chrome, Edge or another Chromium browser.', { color: '#d29922' }); return; }
-    note(parent, 'Mirrors the open generator to plain files in a folder you choose, so any editor or AI agent can work on them live. Changes from the folder are never applied automatically: you review a diff first.');
+    note(parent, 'Master Dev location — choose one folder for all generators in this browser profile. Each generator uses its own subfolder. Open tabs pick up changes within a few seconds. GitHub Push uses its separate owner/repo settings.');
+    row(parent, [btn('Pause automatic writes in all tabs', pauseFolderWrites, { mini: true })]);
     if (!F.handle) {
-      note(parent, 'Pick the folder once (for example D:\\projects\\perch_backups_folder_sync). The browser remembers it, and asks you to confirm access after you restart it.');
+      note(parent, 'Choose your master folder once using the folder picker. The browser remembers it for all generators and may ask you to confirm access after a restart.');
       row(parent, [btn('Choose folder\u2026', connectFolder, { accent: true })]);
       if (F.error) note(parent, F.error, { color: '#e5534b' });
       return;
     }
-    parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Folder: ' + F.name + (F.perm === 'granted' ? '' : '  (access not confirmed)') }));
+    parent.appendChild(E('div', { style: { margin: '2px 0' }, text: 'Master Dev folder: ' + F.name + (F.perm === 'granted' ? '' : '  (access not confirmed)') }));
+    row(parent, [btn('Change master folder\u2026', connectFolder, { mini: true })]);
     if (F.perm !== 'granted') { note(parent, 'The browser needs you to confirm access to this folder again.' + (F.cfg.keepAccess ? ' Your next click on the page will do it.' : '')); row(parent, [btn('Allow access', reconnectFolder, { accent: true }), btn('Disconnect folder', disconnectFolder, { mini: true })]); row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press.')]); return; }
     const slug = H.slug(), safe = D.safeSlug(slug);
     if (!safe) note(parent, 'Open a generator to sync it.');
@@ -564,8 +596,8 @@
       kids.push(btn('Download published copy', async () => { await seedFromPublished(slug); notice('Wrote the published copy of ' + slug + ' to the folder.'); await tick(true); }, { mini: true, title: 'Fetch the saved version from Perchance and write it to the folder.' }));
       row(parent, kids);
     }
-    row(parent, [check('Write the editor to the folder automatically every few seconds', F.cfg.autoMirror, v => { F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
-      check('Watch the folder for changes', F.cfg.watch, v => { F.cfg.watch = v; saveFolderCfg(); })]);
+    row(parent, [check('Write editors to the master folder automatically (all generators)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
+      check('Watch the folder for changes', F.cfg.watch, v => { folderCfg(); F.cfg.watch = v; saveFolderCfg(); })]);
     row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\u2019s prompt to stop it forgetting at all.')]);
     note(parent, 'Files: ' + (safe ? paths(slug).dsl + ' and ' + paths(slug).html : '{name}/{name}-top-panel.txt and {name}/{name}-html-panel.html') + '. Checked ' + (F.lastCheck ? ago(F.lastCheck) : 'not yet') + '.');
     if (F.error) note(parent, F.error, { color: '#e5534b' });
