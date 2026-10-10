@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.77.1
+// @version      1.77.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.77.1';
+  var WC_VERSION = '1.77.2';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -993,6 +993,16 @@
     var branchPath = ghBranchPath(branch);
     if (!branchPath) return cb(new Error('Branch is required'));
     api('GET', 'ref/heads/' + branchPath, null, function (err, st, ref) {
+      if (!err && st === 404) {
+        // A 404 can mean "repo hidden from this token" or "no such branch"; ask GitHub which, and who the token is.
+        return ghApi('GET', '/repos/' + o + '/' + repo, token, null, function (eR, sR, repoJson) {
+          ghApi('GET', '/user', token, null, function (eU, sU, user) {
+            var who = (!eU && sU === 200 && user && user.login) ? 'token is for "' + user.login + '"' : 'token not accepted by GitHub (' + (eU ? 'network' : sU) + ')';
+            var why = eR ? 'could not check the repo' : sR === 200 ? 'repo is visible, so branch "' + branch + '" does not exist (token ' + (repoJson && repoJson.permissions && repoJson.permissions.push ? 'can' : 'cannot') + ' push)' : 'this token cannot see ' + o + '/' + repo + ' (check its repository access and owner)';
+            cb(new Error('GET branch 404 Not Found. ' + why + '; ' + who));
+          });
+        });
+      }
       if (err || st !== 200 || !ref || !ref.object || !ref.object.sha) return fail('GET branch', err, st, ref);
       var parent = ref.object.sha;
       api('GET', 'commits/' + encodeURIComponent(parent), null, function (eCommit, sCommit, parentCommit) {
