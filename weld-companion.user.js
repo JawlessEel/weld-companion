@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.77.0
+// @version      1.77.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.77.0';
+  var WC_VERSION = '1.77.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -985,7 +985,10 @@
   // moving `branch` (used by "Push as pull request"). Existing callers pass no opts and behave as before.
   function ghPushFilesAtomic(o, repo, branch, files, token, msg, cb, opts) {
     var base = '/repos/' + o + '/' + repo + '/git/';
-    function api(method, path, body, done) { ghApi(method, base + path, token, body, done); }
+    function api(method, path, body, done) {
+      if (opts && typeof opts.onStep === 'function') { try { opts.onStep(method + ' ' + path.split('/')[0]); } catch (e) {} }
+      ghApi(method, base + path, token, body, done);
+    }
     function fail(action, err, st, json) { cb(err ? new Error(action + ': ' + err.message) : ghApiError(action, st, json)); }
     var branchPath = ghBranchPath(branch);
     if (!branchPath) return cb(new Error('Branch is required'));
@@ -1098,13 +1101,18 @@
     if (pushLint.length) { console.warn('[weld lint]', pushLint); confirmMsg += '\n\n\u26A0 ' + pushLint.length + ' JavaScript problem(s) in the HTML pane (see console) \u2014 pushing commits them as-is.'; }
     confirmMsg += ghGateNote(name, dsl, html);
     if (!confirm(confirmMsg)) { toast('Cancelled'); return; }
-    toast('Pushing ' + name + ' to GitHub\u2026');
+    // Persistent progress toast: a push is several sequential requests, so a 2s toast looked like "nothing happened".
+    var prog = el('div', { class: 'wc-root wc-toast wc-toast-in', role: 'status', 'aria-live': 'polite', text: 'Pushing ' + name + ' to GitHub\u2026' });
+    document.body.appendChild(prog);
+    var steps = 0;
+    function endProg() { try { prog.remove(); } catch (e) {} }
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
     ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result) {
+      endProg();
       if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message, 10000); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
-      toast('Pushed ' + name + ' (one atomic commit)');
-    });
+      toast('Pushed ' + name + ' (one atomic commit)', 5000);
+    }, { onStep: function (s) { steps++; prog.textContent = 'Pushing ' + name + ' to GitHub\u2026 step ' + steps + ' (' + s + ')'; console.log('[weld push] step', steps, s); } });
   }
   function ghConfigure() {
     var cfg = ghCfg();
