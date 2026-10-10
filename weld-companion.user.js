@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.79.2
+// @version      1.79.3
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.79.2';
+  var WC_VERSION = '1.79.3';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -3152,10 +3152,10 @@
     var all = sbPerms(); if (!all[gen]) all[gen] = {}; all[gen][cap] = !!allowed; gset('sb:perm', all);
   }
   // ask the user once per (generator, capability). Returns a Promise<bool>.
-  // Default: no prompts. The user installed and runs this script, so every capability is allowed and any
-  // stored "no" is ignored (a suppressed confirm() used to be saved as a permanent denial). The opt-in
-  // 'sbAsk' setting restores the per-generator prompt for people who want it.
-  function sbAskMode() { return gget('sbAsk', false) === true; }
+  // Default: ask once per (generator, capability) and remember the answer; a stored "no" is honoured.
+  // A prompt the browser suppressed (instant "no") refuses that call but is not saved as a denial.
+  // Turning the 'sbAsk' setting off is an explicit opt-out that allows every capability without prompting.
+  function sbAskMode() { return gget('sbAsk', true) !== false; }
   function sbConsent(gen, cap) {
     return new Promise(function (resolve) {
       if (!sbAskMode()) return resolve(true);
