@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.81.0
+// @version      1.82.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.81.0';
+  var WC_VERSION = '1.82.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -9110,6 +9110,44 @@
       if (done) done();
     });
   }
+  // Storage report / clear. Credentials and settings that hold them are never deleted in bulk and never put in a file.
+  var STATE_KEEP_ON_CLEAR = STATE_SECRET_KEYS.concat(['ai']);
+  function stateReport() {
+    var rows = [], total = 0;
+    stateKeys().forEach(function (k) {
+      var raw; try { raw = GM_getValue(NS + ':' + k, ''); } catch (e) { return; }
+      var n = typeof raw === 'string' ? raw.length : 0; total += n;
+      rows.push({ key: k, chars: n, secret: stateIsSecret(k) });
+    });
+    rows.sort(function (a, b) { return b.chars - a.chars; });
+    return { rows: rows, total: total };
+  }
+  function stateKB(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+  function downloadStateReport() {
+    var r = stateReport();
+    var out = { meta: { type: 'weld-companion-storage-report-v1', t: Date.now(), keys: r.rows.length, totalChars: r.total }, keys: r.rows.map(function (x) { return { key: x.key, chars: x.chars }; }) };
+    download('weld-companion-storage-report.' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(out, null, 1), 'application/json');
+    toast('✓ Storage report: ' + r.rows.length + ' keys, ' + stateKB(r.total));
+  }
+  function clearStateKeys(keys, label) {
+    var safe = keys.filter(function (k) { return STATE_KEEP_ON_CLEAR.indexOf(k) === -1; });
+    if (!safe.length) { toast('Nothing to clear'); return; }
+    if (!window.confirm('Delete ' + safe.length + ' Weld storage key' + (safe.length === 1 ? '' : 's') + (label === 'one' ? ' (' + safe[0] + ')' : ' (everything except your GitHub token, AI settings and bridge token)') + '?\n\nA copy is downloaded first. This cannot be undone.')) return;
+    var copy = {}; safe.forEach(function (k) { var v = gget(k, undefined); if (v !== undefined) copy[k] = stateScrubOut(k, v); });
+    download('weld-companion-cleared.' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ meta: { type: 'weld-companion-state-v1', t: Date.now(), keys: Object.keys(copy).length }, data: copy }, null, 1), 'application/json');
+    setTimeout(function () { safe.forEach(gdel); toast('✓ Cleared ' + safe.length + ' key' + (safe.length === 1 ? '' : 's') + ' — reload the page'); }, 600);
+  }
+  function renderStorageTools(bd) {
+    var r = stateReport();
+    bd.appendChild(el('div', { class: 'wlib-note', style: { margin: '10px 0 6px' }, text: 'Storage: ' + r.rows.length + ' keys, ' + stateKB(r.total) + '. Largest: ' + (r.rows.slice(0, 4).map(function (x) { return x.key + ' ' + stateKB(x.chars); }).join(', ') || 'none') + '.' }));
+    var pick = el('select', { class: 'wlib-field', style: { flex: '1 1 160px' } }, r.rows.filter(function (x) { return STATE_KEEP_ON_CLEAR.indexOf(x.key) === -1; }).map(function (x) { return el('option', { value: x.key, text: x.key + ' (' + stateKB(x.chars) + ')' }); }));
+    bd.appendChild(el('div', { class: 'wlib-bar' }, [
+      el('button', { class: 'wlib-mini', text: '⤓ Download storage report (sizes only)', onclick: downloadStateReport }),
+      el('button', { class: 'wlib-mini', text: '🗑 Clear all Weld data…', onclick: function () { clearStateKeys(stateKeys(), 'all'); } })
+    ]));
+    bd.appendChild(el('div', { class: 'wlib-bar' }, [pick,
+      el('button', { class: 'wlib-mini', text: '🗑 Clear this key…', onclick: function () { if (pick.value) clearStateKeys([pick.value], 'one'); } })]));
+  }
   function renderPortabilityCard(bd) {
     bd.appendChild(el('div', { class: 'wlib-note', style: { marginBottom: '6px' }, text: 'Everything the Companion remembers \u2014 Scrapbook, clips, capsules, ratings, time log, notes, rules \u2014 in one portable file. Import on another browser to carry it over. \u201cMerge\u201d unions lists and sums time; \u201creplace\u201d makes the file win wholesale per key.' }));
     var fileIn = el('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' } });
@@ -9123,6 +9161,7 @@
       el('button', { class: 'wlib-mini', text: '\u2912 Import\u2026', onclick: function () { fileIn.click(); } }),
       fileIn
     ]));
+    try { renderStorageTools(bd); } catch (e) {}
   }
 
   /* ---- cross-everything search -------------------------------------------------------- */
