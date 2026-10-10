@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.79.3
+// @version      1.80.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.79.3';
+  var WC_VERSION = '1.80.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -73,6 +73,9 @@
     try { var raw = JSON.stringify(val); if (raw && raw.length > GSET_MAX_CHARS) throw new Error('too-large'); GM_setValue(NS + ':' + key, raw); return true; } catch (e) { try { toast('Save failed — browser storage may be full'); } catch (_) {} return false; }
   }
   function gdel(key) { try { GM_deleteValue(NS + ':' + key); } catch (e) {} }
+  // Automatic saving into Weld storage (clipboard history, time tracking, generator-initiated Skybridge writes) is OFF by
+  // default: it filled browser storage. Anything the user does on purpose (Save, Pin, Push, Backups) is unaffected.
+  function autoSaveOn() { return gget('autoSave', false) === true; }
 
   // ---- storage guard: oversize stored values make Tampermonkey slow or fail to start scripts ("Message exceeded
   // maximum allowed size of 64MiB"). Runs shortly after load and from the Tampermonkey menu. Nothing is removed
@@ -1231,7 +1234,7 @@
   }
 
   // expose a tiny namespace for debugging / other scripts
-  window.weldCompanion = { gget: gget, gset: gset, gdel: gdel, version: WC_VERSION };   // canonical storage helpers; appended modules delegate here (one source of truth)
+  window.weldCompanion = { gget: gget, gset: gset, gdel: gdel, autoSaveOn: autoSaveOn, version: WC_VERSION };   // canonical storage helpers; appended modules delegate here (one source of truth)
 
   // ---- adopt Perchance's own theme ------------------------------------------
   // Our chrome should belong to the page, not impose a foreign palette. We read
@@ -1996,13 +1999,20 @@
 
     var cardSb = el('div', { class: 'wc-card' });
     cardSb.appendChild(head('Skybridge'));
-    cardSb.appendChild(note('Generators that import the weld-skybridge plugin can use storage, your own AI model, web fetch/search and the message bus through Weld. By default they just work, with no prompts. Turn this on only if you want a prompt the first time each generator uses each capability.'));
+    cardSb.appendChild(note('Generators that import the weld-skybridge plugin can use storage, your own AI model, web fetch/search and the message bus through Weld. By default Weld asks the first time each generator uses each capability and remembers your answer. Turn the box off to allow everything without prompts.'));
     var sbChk = el('input', { type: 'checkbox', id: 'wc-sb-ask', style: { margin: '0 8px 0 0' } });
     sbChk.checked = sbAskMode();
     sbChk.onchange = function () { gset('sbAsk', !!sbChk.checked); toast('Skybridge asks before use: ' + (sbChk.checked ? 'ON' : 'OFF (always allowed)')); };
     cardSb.appendChild(el('div', { class: 'wc-row', style: { alignItems: 'center', marginTop: '4px' } }, [
       sbChk,
       el('label', { class: 'wc-section-note', for: 'wc-sb-ask', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Ask before a generator uses Skybridge (off = always allowed)' })
+    ]));
+    var asChk = el('input', { type: 'checkbox', id: 'wc-autosave', style: { margin: '0 8px 0 0' } });
+    asChk.checked = autoSaveOn();
+    asChk.onchange = function () { gset('autoSave', !!asChk.checked); toast('Automatic saving into Weld storage: ' + (asChk.checked ? 'ON' : 'OFF')); };
+    cardSb.appendChild(el('div', { class: 'wc-row', style: { alignItems: 'center', marginTop: '4px' } }, [
+      asChk,
+      el('label', { class: 'wc-section-note', for: 'wc-autosave', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Save automatically into Weld storage (clipboard history, time tracking, generator saves). Off by default so storage does not fill up; manual Save, Pin, Push and Backups still work.' })
     ]));
     cardSb.appendChild(row([ el('button', { class: 'wc-btn', text: 'Reset permissions', title: 'Forget every saved allow/deny answer (only used when asking is on)', onclick: function () { gset('sb:perm', {}); toast('Skybridge: permissions reset'); } }) ]));
     colB.appendChild(cardSb);
@@ -3188,6 +3198,7 @@
       if (op === 'get') {
         resolve({ ok: true, value: gget(sbStoreKey(gen, payload.key), null) });
       } else if (op === 'set') {
+        if (!autoSaveOn()) return resolve({ ok: false, code: 'autosave-off', reason: 'automatic saving into Weld storage is off (Settings > Skybridge)' });
         var BC = window.WeldBackupCore, chk = (BC && BC.checkStoreWrite) ? BC.checkStoreWrite(payload.key, payload.value) : { ok: true };   // refuses a vault record whose generator field names another owner
         if (!chk.ok) return resolve({ ok: false, code: chk.reason, reason: chk.reason });
         var sbSize = 0; try { sbSize = JSON.stringify(payload.value === undefined ? null : payload.value).length; } catch (e) {}
@@ -8742,6 +8753,7 @@
 
   /* ---- clipboard history --------------------------------------------------- */
   function recordCopy(text, slug) {
+    if (!window.weldCompanion.autoSaveOn()) return;   // automatic clipboard history is opt-in
     var list = gget('clipRing', []) || [];
     var next = core.clipPush(list, text, slug || currentSlug() || 'unknown', Date.now());
     if (next !== list) gset('clipRing', next);
@@ -8920,13 +8932,14 @@
   var HEARTBEAT = 30; // seconds
   setInterval(function () {
     try {
+      if (!window.weldCompanion.autoSaveOn()) return;   // automatic time tracking is opt-in
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
       var slug = currentSlug(); if (!slug) return;
       gset('timeTrack', core.trackAdd(gget('timeTrack', {}) || {}, slug, HEARTBEAT));
     } catch (e) {}
   }, HEARTBEAT * 1000);
   // prune old entries once per boot
-  setTimeout(function () { try { gset('timeTrack', core.trackPrune(gget('timeTrack', {}) || {}, 90)); } catch (e) {} }, 8000);
+  setTimeout(function () { try { if (!window.weldCompanion.autoSaveOn()) return; gset('timeTrack', core.trackPrune(gget('timeTrack', {}) || {}, 90)); } catch (e) {} }, 8000);
 
   function renderTimeCard(bd, setCount) {
     var agg = core.trackAggregate(gget('timeTrack', {}) || {}, new Date());

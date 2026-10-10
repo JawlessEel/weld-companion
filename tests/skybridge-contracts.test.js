@@ -86,6 +86,18 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     console.log('Skybridge streamed reasoning-model replies tests passed');
   }).catch((e) => { console.error(e); process.exit(1); });
 }
+// Automatic saving into Weld storage is off by default: a generator write is refused and nothing is stored; reads still work.
+{
+  const store = new Map();
+  const gget = () => undefined, gset = (k, v) => { store.set(k, v); return true; };
+  const off = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS: 'weldCompanion', autoSaveOn: () => false, gget, gset, GM_listValues: () => [], Promise, window: { WeldBackupCore: require('../src/backup-core.js') } });
+  off.sbServiceStorage('gen-a', { op: 'set', key: 'slot', value: 1 }).then((r) => {
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'autosave-off');
+    assert.equal(store.size, 0);
+    console.log('Skybridge storage writes are refused while automatic saving is off');
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
 // Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
 {
   const store = new Map();
@@ -94,7 +106,7 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
   const gget = (k, d) => { const v = GM_getValue(NS + ':' + k, undefined); return v === undefined ? d : JSON.parse(v); };
   const gset = (k, v) => { GM_setValue(NS + ':' + k, JSON.stringify(v)); return true; };
   const GM_listValues = () => Array.from(store.keys());
-  const anchorStorage = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS, gget, gset, GM_listValues, Promise, window: { WeldBackupCore: require('../src/backup-core.js') } });
+  const anchorStorage = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS, autoSaveOn: () => true, gget, gset, GM_listValues, Promise, window: { WeldBackupCore: require('../src/backup-core.js') } });
   const call = (gen, payload) => anchorStorage.sbServiceStorage(gen, payload);
   call('gen-a', { op: 'set', key: 'slot1', value: { n: 1 } })
     .then(() => call('gen-a', { op: 'set', key: 'slot2', value: 2 }))
