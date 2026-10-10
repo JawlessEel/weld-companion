@@ -1,4 +1,4 @@
-/* Project files and model bytes for GitHub. No cookies, chat databases or credentials. */
+/* Shared collector: generator sources, with optional public cached/model bytes for local downloads. */
 (function (host) {
   'use strict';
   const PART = 4 * 1024 * 1024;
@@ -121,16 +121,18 @@
         return base64(data.subarray(offset, offset + length));
       }, { kind: 'project' });
     }
-    const inventory = await evaluate('inventory');
+    const includeCache = opts.includeCache !== false;
+    const inventory = includeCache ? await evaluate('inventory') : { entries: [], unavailable: [], origin: null };
     for (const [i, item] of inventory.entries.entries()) {
       const label = item.kind === 'opfs' ? item.path.split('/').pop() : new URL(item.url).pathname.split('/').pop();
       asset(prefix + '.weld-backup/assets/' + i + '/' + encodeURIComponent(label), item.size,
         (offset, length) => evaluate('read', Object.assign({}, item, { offset, length })),
         item.kind === 'opfs' ? { kind: item.kind, originalPath: item.path } : { kind: item.kind, url: item.url });
     }
-    const manifest = { format: 'weld-project-backup', version: 1, generator: name, origin: inventory.origin, files: records,
+    const manifest = { format: 'weld-project-backup', version: 1, generator: name, origin: inventory.origin, includeCache, files: records,
       unavailable: inventory.unavailable,
-      coverage: 'Editor panels, complete selected src tree, readable public static/model Cache Storage responses, and browser-model OPFS files in the visible preview origin. HTTP cache, other origins, IndexedDB, cookies, credentials and private chat data are not exported.' };
+      coverage: includeCache ? 'Editor panels, complete selected src tree, readable public static/model Cache Storage responses, and browser-model OPFS files in the visible preview origin. HTTP cache, other origins, IndexedDB, cookies, credentials and private chat data are not exported.'
+        : 'Editor panels and complete selected src tree only. Browser caches, model downloads, OPFS, IndexedDB, cookies, credentials and private chat data are not exported.' };
     add({ path: prefix + '.weld-backup/manifest.json', read: () => JSON.stringify(manifest, null, 2) });
     add({ path: prefix + '.weld-backup/restore.py', content: restoreSource });
     return { files, manifest, bytes: records.reduce((sum, r) => sum + r.size, 0), validate: () => {

@@ -17,6 +17,11 @@ const B = require('../src/github-backup');
     evaluate: async (op, a) => op === 'inventory' ? { origin: 'https://x.perchance.org', entries: [{ kind: 'opfs', path: 'browser-model/model.gguf', size: model.length, modified: 1 }], unavailable: [] }
       : model.subarray(a.offset, a.offset + a.length).toString('base64') };
   const result = await B.collect(opts);
+  const sourceOnly = await B.collect({ ...opts, includeCache: false, evaluate: async () => { throw new Error('GitHub must not inspect browser storage'); } });
+  assert.equal(sourceOnly.manifest.includeCache, false);
+  assert.ok(sourceOnly.manifest.files.every(f => f.kind === 'project'));
+  assert.ok(!sourceOnly.files.some(f => /\/assets\//.test(f.path)), 'GitHub source-only backups contain no cached assets');
+  for (const f of sourceOnly.files) if (f.read) await f.read();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'weld-backup-test-')), root = path.join(tmp, 'dad');
   for (const file of result.files) {
     const content = file.read ? await file.read() : file.content;
@@ -54,6 +59,17 @@ const B = require('../src/github-backup');
   await assert.rejects(env.run('read', { kind: 'cache', url: 'https://example.com/api/session.json' }), /Unsafe/);
   // Failed lazy reads or changed source must never advance the branch.
   const shipped = fs.readFileSync(path.join(__dirname, '../weld-companion.user.js'), 'utf8');
+  const collected = [];
+  const collectorContext = { Promise, setTimeout, clearTimeout, toast() {}, pageProp() {}, ghBackupEval() {},
+    window: { crypto: webcrypto, WeldGitHubBackup: { collect: async options => { collected.push(options); return {}; } } } };
+  vm.createContext(collectorContext);
+  vm.runInContext(shipped.slice(shipped.indexOf('function ghCollectBackup('), shipped.indexOf('function ghBackupNote(')), collectorContext);
+  await collectorContext.ghCollectBackup('dad', opts.dslPath, opts.htmlPath, opts.dsl, opts.html);
+  assert.equal(collected[0].includeCache, false, 'installed GitHub Push/PR collector disables cache capture by default');
+  const localAdapter = shipped.match(/backup:\s*\{\s*collect:\s*(function[^\n]+),\s*\n\s*crypto:/)[1];
+  vm.runInContext('var localCollect = ' + localAdapter, collectorContext);
+  await collectorContext.localCollect('dad', { dsl: opts.dslPath, html: opts.htmlPath }, { dsl: opts.dsl, html: opts.html }, true);
+  assert.equal(collected[1].includeCache, true, 'local download continues to capture requested assets');
   const uploader = shipped.slice(shipped.indexOf('function ghApiError('), shipped.indexOf('function ghGateNote('));
   async function push(file, validate) {
     const calls = [];

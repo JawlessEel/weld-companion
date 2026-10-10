@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.78.0
+// @version      1.79.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.78.0';
+  var WC_VERSION = '1.79.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -996,20 +996,20 @@
       catch (e) { finish(new Error('Could not contact the generator preview')); }
     });
   }
-  function ghCollectBackup(name, dslP, htmlP, dsl, html) {
-    toast('Reading project files and cached model inventory…');
+  function ghCollectBackup(name, dslP, htmlP, dsl, html, quiet, includeCache) {
+    if (!quiet) toast(includeCache ? 'Reading project files and cached model inventory…' : 'Reading generator src files…');
     var timer;
     return Promise.race([window.WeldGitHubBackup.collect({ name: name, dslPath: dslP, htmlPath: htmlP, dsl: dsl, html: html,
-      state: pageProp('srcState'), evaluate: ghBackupEval, crypto: window.crypto,
+      state: pageProp('srcState'), evaluate: ghBackupEval, crypto: window.crypto, includeCache: !!includeCache,
       panels: function (d, h) { return dslView().state.doc.toString() === d && htmlView().state.doc.toString() === h; }
     }), new Promise(function (_, reject) { timer = setTimeout(function () { reject(new Error('Project inventory timed out; choose the correct editor draft and retry')); }, 90000); })])
       .finally(function () { clearTimeout(timer); });
   }
   function ghBackupNote(backup) {
-    return '\n\nProject backup: ' + backup.manifest.files.length + ' asset(s), ' + (backup.bytes / 1048576).toFixed(1) + ' MiB, ' + backup.files.length + ' GitHub file(s).'
-      + '\nLarge assets use verified 4 MiB parts; .weld-backup/restore.py restores their bytes.'
-      + '\nIncludes selected src files and readable public cached assets/models in the preview origin.'
-      + '\nHTTP cache, other origins, cookies, credentials and private chat databases are not included.'
+    return '\n\nProject backup: ' + backup.manifest.files.length + ' src file(s), ' + (backup.bytes / 1048576).toFixed(1) + ' MiB, ' + backup.files.length + ' GitHub file(s).'
+      + '\nLarge source files use verified 4 MiB parts; .weld-backup/restore.py restores their bytes.'
+      + '\nIncludes editor panels and selected src files only.'
+      + '\nBrowser caches, downloaded models, OPFS, cookies, credentials and private chat databases are not included.'
       + (backup.manifest.unavailable.length ? '\nUnavailable: ' + backup.manifest.unavailable.join('; ') : '');
   }
   // Commit both editor panes through Git's blob/tree/commit/ref APIs, rather than
@@ -4046,6 +4046,10 @@
       token: function () { return ghToken() ? true : false; },
       api: function (method, path, body, cb) { var t = ghToken(); if (!t) return cb(new Error('No GitHub token saved'), 0, null); ghApi(method, path, t, body, cb); },
       fetch: function (url, cb) { ghFetch(url, cb); }
+    },
+    backup: {
+      collect: function (name, paths, live, quiet) { return ghCollectBackup(name, paths.dsl, paths.html, live.dsl, live.html || '', quiet, true); },
+      crypto: window.crypto
     },
     // ---- used by the Backups tab: raw, exact-key access to what generators stored through Skybridge storage ----
     vault: (function () {
@@ -14360,7 +14364,8 @@
   const MARK_COLORS = { error: '#e5534b', warn: '#d29922', info: '#768390' };
 
   const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' },
-    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false, revision: null };
+    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false, revision: null,
+    projectBusy: false, projectCheck: 0, projectSlug: '', projectStatus: '', projectError: '', projectCancel: 0 };
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
   const S = { proposals: [], seq: 0, view: null, markers: false, markInfo: false, refactor: { name: '', to: '', usages: null, preview: null, error: '' },
@@ -14397,7 +14402,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); return F.cfg; }
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   function folderBaseKey(slug) { return 'base:' + (F.revision ? F.revision + ':' : '') + slug; }
   async function refreshMasterFolder() {
@@ -14414,7 +14419,8 @@
     armRegrant(); draw();
   }
   function pauseFolderWrites() {
-    folderCfg(); F.cfg.autoMirror = false; saveFolderCfg();
+    F.projectCancel++;
+    folderCfg(); F.cfg.autoMirror = false; F.cfg.projectBackups = {}; saveFolderCfg();
     notice('Automatic Dev folder writes paused for all generators and open tabs.'); draw();
   }
   async function dirFor(root, rel, create) {
@@ -14464,7 +14470,7 @@
       F.handle = h; F.name = h.name; F.perm = await permission(h, true); F.error = '';
       await kvSet('handle', h); folderCfg();
       F.cfg.revision = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-      F.cfg.autoMirror = false; saveFolderCfg(); F.revision = null;
+      F.cfg.autoMirror = false; F.cfg.projectBackups = {}; saveFolderCfg(); F.revision = null;
       await refreshMasterFolder();
       notice(F.perm === 'granted' ? 'Master Dev folder connected for all generators: ' + h.name + '. Automatic writes are off.' : 'Folder chosen, but write permission was not granted.');
       await tick(true);
@@ -14502,7 +14508,7 @@
   }
   async function disconnectFolder() {
     F.handle = null; F.name = ''; F.perm = 'none'; F.plan = null; F.folders = null;
-    await kvDel('handle'); folderCfg(); F.cfg.autoMirror = false;
+    await kvDel('handle'); folderCfg(); F.cfg.autoMirror = false; F.cfg.projectBackups = {};
     F.cfg.revision = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); saveFolderCfg(); F.revision = F.cfg.revision;
     notice('Master Dev folder disconnected for all generators. Nothing in it was deleted.'); draw();
   }
@@ -14517,7 +14523,7 @@
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
   async function tick(force) {
     await refreshMasterFolder();
-    if (!F.handle || F.perm !== 'granted' || F.busy || (!force && (!F.cfg.watch || (typeof document !== 'undefined' && document.hidden)))) return;
+    if (!F.handle || F.perm !== 'granted' || F.busy || (!force && ((!F.cfg.watch && !F.cfg.projectBackups[H.slug()]) || (typeof document !== 'undefined' && document.hidden)))) return;
     const slug = H.slug();
     if (!D.safeSlug(slug)) { F.plan = null; F.slug = ''; return; }
     F.busy = true;
@@ -14538,6 +14544,8 @@
       if ((plan.state === 'disk-ahead' || plan.state === 'conflict') && F.notified !== key) { F.notified = key; H.toast('The folder copy of "' + slug + '" changed. Open Weld, then the Dev tab, to review it.', 7000); }
       const changed = !F.plan || F.plan.state !== plan.state || F.slug !== slug;
       F.plan = plan; F.slug = slug; F.lastCheck = Date.now(); F.error = '';
+      if (!document.hidden && H.isEdit() && F.cfg.projectBackups[slug] && !F.projectBusy &&
+          (F.projectSlug !== slug || Date.now() - F.projectCheck >= 60000)) await downloadProject(false);
       if (changed || force) draw();
     } catch (e) { F.error = (e && e.message) || String(e); }
     F.busy = false;
@@ -14586,6 +14594,49 @@
     const proj = await window.weldProject.fetchPublished(slug);
     await writePair(slug, norm(proj.dsl), proj.html == null ? null : norm(proj.html));
     return proj;
+  }
+  async function downloadProject(manual = true) {
+    if (F.projectBusy) return;
+    const slug = H.slug(), live = H.isEdit() ? H.live() : null;
+    if (!D.safeSlug(slug) || !live || live.dsl == null) return notice('Open this generator\u2019s editor first.');
+    if (!H.backup || !window.WeldLocalBackup) return notice('The project backup module is unavailable.');
+    if (!F.handle || F.perm !== 'granted') return notice('Choose the computer save folder and allow access first.');
+    if (manual && !window.confirm('Download all project files and readable cached assets/models for "' + slug + '" into its folder in ' + F.name + '?\n\nThis uses the current editor and selected draft. Existing matching files are replaced. Automatic updates are then enabled ONLY for this generator while its editor is visible. Private chat data, credentials, HTTP cache and other origins are excluded.')) return;
+    F.projectBusy = true; F.projectError = ''; F.projectSlug = slug; F.projectCheck = Date.now();
+    F.projectStatus = 'Reading project and cached assets\u2026'; draw();
+    const handle = F.handle, revision = F.revision, cancel = F.projectCancel;
+    const active = () => {
+      folderCfg();
+      return H.slug() === slug && H.isEdit() && F.handle === handle && F.projectCancel === cancel && (F.cfg.revision || '') === revision &&
+        (manual || (!document.hidden && !!F.cfg.projectBackups[slug]));
+    };
+    const run = async () => {
+      if (!active()) throw new Error('Local project download paused or location changed');
+      const backup = await H.backup.collect(slug, D.folderPaths(slug), live, !manual);
+      const result = await window.WeldLocalBackup.save({ root: handle, slug, backup, crypto: H.backup.crypto, overwrite: manual, active,
+        progress: (n, total) => { F.projectStatus = 'Saving project files and assets ' + n + '/' + total; draw(); } });
+      if (!active()) throw new Error('Local project download paused or location changed');
+      if (manual) { folderCfg(); F.cfg.projectBackups = Object.assign({}, F.cfg.projectBackups, { [slug]: true }); saveFolderCfg(); }
+      const p = paths(slug), canonical = D.folderPaths(slug);
+      if (p.dsl === canonical.dsl && p.html === canonical.html) await kvSet(folderBaseKey(slug), { dsl: norm(live.dsl), html: norm(live.html || '') });
+      F.projectStatus = 'Saved ' + result.files + ' files (' + (result.bytes / 1048576).toFixed(1) + ' MiB); ' + result.written + ' updated.' +
+        (result.unavailable.length ? ' Unavailable: ' + result.unavailable.join('; ') : '');
+      if (manual) notice('Downloaded ' + slug + '. Automatic project and asset updates are on for this generator only.');
+    };
+    try {
+      const locks = win().navigator && win().navigator.locks;
+      if (locks) await locks.request('weld-local-project:' + revision + ':' + slug, { ifAvailable: true }, lock => {
+        if (!lock) throw new Error('Another tab is saving this generator; try again shortly');
+        return run();
+      });
+      else await run();
+    } catch (e) { F.projectError = (e && e.message) || String(e); F.projectStatus = 'Project download stopped.'; if (manual) notice(F.projectError); }
+    finally { F.projectBusy = false; F.projectCheck = Date.now(); draw(); }
+  }
+  function pauseProject() {
+    F.projectCancel++;
+    folderCfg(); F.cfg.projectBackups = Object.assign({}, F.cfg.projectBackups); delete F.cfg.projectBackups[H.slug()]; saveFolderCfg();
+    notice('Automatic project and asset updates paused for this generator.'); draw();
   }
   async function seedStarred() {
     const names = H.favorites().filter(n => D.safeSlug(n));
@@ -14945,6 +14996,14 @@
       if (state === 'unknown') kids.push(btn('Treat folder as latest', useFolderAsBase, { mini: true }), btn('Treat editor as latest', useEditorAsBase, { mini: true }));
       kids.push(btn('Download published copy', async () => { await seedFromPublished(slug); notice('Wrote the published copy of ' + slug + ' to the folder.'); await tick(true); }, { mini: true, title: 'Fetch the saved version from Perchance and write it to the folder.' }));
       row(parent, kids);
+      row(parent, [btn('Download all files and assets (this generator)', () => downloadProject(true), { mini: true, disabled: !H.isEdit() || F.projectBusy })]);
+      note(parent, 'Saves this editor, its selected src files and readable cached assets/models to ' + slug + '/ in the master folder. Models are saved as complete files. Selecting it also enables automatic updates for this generator only.');
+      if (F.cfg.projectBackups[slug]) {
+        row(parent, [btn('Pause project and asset updates (this generator)', pauseProject, { mini: true })]);
+        note(parent, 'Project and asset updates are on for this generator. Checks run once a minute while its editor is visible and folder access is allowed.');
+      }
+      if (F.projectSlug === slug && F.projectStatus) note(parent, F.projectStatus);
+      if (F.projectSlug === slug && F.projectError) note(parent, F.projectError, { color: '#e5534b' });
     }
     row(parent, [check('Write editors to the master folder automatically (all generators)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
       check('Watch the folder for changes', F.cfg.watch, v => { folderCfg(); F.cfg.watch = v; saveFolderCfg(); })]);
@@ -15073,7 +15132,7 @@
   }
   setTimeout(boot, 1200);
   window.weldDev = {
-    render, boot, state: { F, B, S }, exec, tick, startBridge, stopBridge,
+    render, boot, state: { F, B, S }, exec, tick, startBridge, stopBridge, downloadProject,
     // test hooks
     _folder: { connectWith(handle) { F.handle = handle; F.name = handle.name || 'folder'; F.perm = 'granted'; F.supported = true; F.bootDone = true; folderCfg(); return kvSet('handle', handle); } }
   };
@@ -18600,7 +18659,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   window.weldBackup = { render, _sync: syncToFolder, _state: F };
 })();
 
-/* Project files and model bytes for GitHub. No cookies, chat databases or credentials. */
+/* Shared collector: generator sources, with optional public cached/model bytes for local downloads. */
 (function (host) {
   'use strict';
   const PART = 4 * 1024 * 1024;
@@ -18723,16 +18782,18 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
         return base64(data.subarray(offset, offset + length));
       }, { kind: 'project' });
     }
-    const inventory = await evaluate('inventory');
+    const includeCache = opts.includeCache !== false;
+    const inventory = includeCache ? await evaluate('inventory') : { entries: [], unavailable: [], origin: null };
     for (const [i, item] of inventory.entries.entries()) {
       const label = item.kind === 'opfs' ? item.path.split('/').pop() : new URL(item.url).pathname.split('/').pop();
       asset(prefix + '.weld-backup/assets/' + i + '/' + encodeURIComponent(label), item.size,
         (offset, length) => evaluate('read', Object.assign({}, item, { offset, length })),
         item.kind === 'opfs' ? { kind: item.kind, originalPath: item.path } : { kind: item.kind, url: item.url });
     }
-    const manifest = { format: 'weld-project-backup', version: 1, generator: name, origin: inventory.origin, files: records,
+    const manifest = { format: 'weld-project-backup', version: 1, generator: name, origin: inventory.origin, includeCache, files: records,
       unavailable: inventory.unavailable,
-      coverage: 'Editor panels, complete selected src tree, readable public static/model Cache Storage responses, and browser-model OPFS files in the visible preview origin. HTTP cache, other origins, IndexedDB, cookies, credentials and private chat data are not exported.' };
+      coverage: includeCache ? 'Editor panels, complete selected src tree, readable public static/model Cache Storage responses, and browser-model OPFS files in the visible preview origin. HTTP cache, other origins, IndexedDB, cookies, credentials and private chat data are not exported.'
+        : 'Editor panels and complete selected src tree only. Browser caches, model downloads, OPFS, IndexedDB, cookies, credentials and private chat data are not exported.' };
     add({ path: prefix + '.weld-backup/manifest.json', read: () => JSON.stringify(manifest, null, 2) });
     add({ path: prefix + '.weld-backup/restore.py', content: restoreSource });
     return { files, manifest, bytes: records.reduce((sum, r) => sum + r.size, 0), validate: () => {
@@ -18788,6 +18849,119 @@ for rec in m['files']:
   const api = { collect, runtime, safePath, base64, PART, restoreSource };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else host.WeldGitHubBackup = api;
+})(typeof window === 'object' ? window : globalThis);
+
+/* Local project downloads share the GitHub collector, but store assembled files. */
+(function (host) {
+  'use strict';
+  const B = typeof module === 'object' && module.exports ? require('./github-backup') : host.WeldGitHubBackup;
+  const MANIFEST = '.weld-backup/local-manifest.json';
+  async function fileHandle(root, path, create) {
+    if (!B.safePath(path)) throw new Error('Unsafe local backup path');
+    const bits = path.split('/'), name = bits.pop();
+    for (const bit of bits) root = await root.getDirectoryHandle(bit, { create });
+    return root.getFileHandle(name, { create });
+  }
+  async function existing(root, path) {
+    try { return await (await fileHandle(root, path, false)).getFile(); }
+    catch (e) { if (e.name === 'NotFoundError') return null; throw e; }
+  }
+  const digest = async (crypto, bytes) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
+  const same = (a, b) => !!a && a.size === b.size && JSON.stringify(a.parts) === JSON.stringify(b.parts);
+  async function matches(file, record, crypto) {
+    if (!file || !record || file.size !== record.size) return false;
+    let offset = 0;
+    for (const part of record.parts) {
+      if (await digest(crypto, await file.slice(offset, offset + part.size).arrayBuffer()) !== part.sha256) return false;
+      offset += part.size;
+    }
+    return offset === file.size;
+  }
+  async function save({ root, slug, backup, crypto, overwrite = false, active = () => true, progress = () => {} }) {
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(slug)) throw new Error('Unsafe generator name');
+    const prefix = slug + '/', manifestPath = prefix + MANIFEST;
+    const previousFile = await existing(root, manifestPath);
+    let previous = null;
+    if (previousFile) {
+      try { previous = JSON.parse(await previousFile.text()); }
+      catch (e) { if (!overwrite) throw new Error('Local backup manifest is unreadable; download manually to replace it'); }
+      if (previous && (previous.format !== 'weld-local-project-backup' || previous.generator !== slug || !Array.isArray(previous.files))) {
+        if (!overwrite) throw new Error('Local backup manifest is not valid for this generator');
+        previous = null;
+      }
+    }
+    const prior = new Map((previous ? previous.files : []).map(r => [r.path, r]));
+    const byPath = new Map(backup.files.map(f => [f.path, f]));
+    const partPaths = new Set(backup.manifest.files.flatMap(r => r.parts.map(p => p.path)));
+    const records = backup.manifest.files.map(r => ({ path: r.path, parts: r.parts, kind: r.kind, url: r.url, originalPath: r.originalPath }));
+    for (const f of backup.files) {
+      if (!partPaths.has(f.path) && !f.path.includes('/.weld-backup/')) records.push({ path: f.path, kind: 'panel', parts: [{ path: f.path }] });
+    }
+    const manifest = { format: 'weld-local-project-backup', version: 1, generator: slug,
+      origin: backup.manifest.origin, coverage: backup.manifest.coverage, unavailable: backup.manifest.unavailable, files: [] };
+    let written = 0;
+    function check() {
+      if (!active()) throw new Error('Local backup paused or generator/location changed; download stopped');
+      backup.validate();
+    }
+    async function readPart(part) {
+      check();
+      const source = byPath.get(part.path);
+      if (!source) throw new Error('Missing local backup part');
+      const content = source.read ? await source.read() : source.content;
+      return source.encoding === 'base64' ? Uint8Array.from(atob(content), c => c.charCodeAt(0)) : new TextEncoder().encode(content);
+    }
+    const metadata = record => ({ path: record.path, kind: record.kind, url: record.url, originalPath: record.originalPath, size: 0, parts: [] });
+    check();
+    for (const [index, record] of records.entries()) {
+      if (!B.safePath(record.path) || !record.path.startsWith(prefix)) throw new Error('Backup file leaves the selected generator folder');
+      check(); progress(index + 1, records.length);
+      const before = await existing(root, record.path);
+      const old = prior.get(record.path);
+      let scanned = null;
+      if (!overwrite && old && before) {
+        // Read/hash first: unchanged models never create temporary disk writes.
+        scanned = metadata(record);
+        for (const part of record.parts) {
+          const bytes = await readPart(part);
+          scanned.parts.push({ size: bytes.length, sha256: await digest(crypto, bytes) }); scanned.size += bytes.length;
+        }
+        check();
+        if (same(old, scanned)) { manifest.files.push(scanned); continue; }
+        if (!await matches(before, old, crypto) && !await matches(before, scanned, crypto)) {
+          throw new Error('Computer copy changed: ' + record.path + '. Download manually to replace it.');
+        }
+      }
+      const target = await fileHandle(root, record.path, true), stream = await target.createWritable();
+      const next = metadata(record);
+      let closed = false;
+      try {
+        for (const part of record.parts) {
+          const bytes = await readPart(part);
+          next.parts.push({ size: bytes.length, sha256: await digest(crypto, bytes) }); next.size += bytes.length;
+          await stream.write(bytes);
+        }
+        check();
+        if (scanned && !same(scanned, next)) throw new Error('Cached file changed during local backup; retry');
+        const disk = await target.getFile();
+        if (!overwrite && before && !await matches(disk, old, crypto) && !await matches(disk, next, crypto)) {
+          throw new Error('Computer copy changed: ' + record.path + '. Download manually to replace it.');
+        } else { await stream.close(); written++; }
+        closed = true; manifest.files.push(next);
+      } finally { if (!closed) await stream.abort().catch(() => {}); }
+    }
+    check();
+    const text = JSON.stringify(manifest, null, 2);
+    if (!previousFile || await previousFile.text() !== text) {
+      const stream = await (await fileHandle(root, manifestPath, true)).createWritable();
+      try { await stream.write(text); check(); await stream.close(); }
+      catch (e) { await stream.abort().catch(() => {}); throw e; }
+    }
+    return { written, files: manifest.files.length, bytes: backup.bytes, unavailable: manifest.unavailable };
+  }
+  const api = { save };
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else host.WeldLocalBackup = api;
 })(typeof window === 'object' ? window : globalThis);
 /* END GENERATED BACKUP */
 

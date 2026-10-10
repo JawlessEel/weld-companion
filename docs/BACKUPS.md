@@ -1,23 +1,22 @@
 # Backups tab
 
-## GitHub project backup (Weld 1.78.0)
+## GitHub project backup (Weld 1.79.0)
 
-The GitHub tab's **Push** and **Push as pull request** include both editor panels,
-every file in the selected editor draft's `src` tree, readable public static/model
-responses in the visible generator preview's Cache Storage, and files in that
-origin's `browser-model` OPFS directory. The existing panel paths are preserved;
-project files are added as `src/<path>` beside them. Select the intended draft and
-load its preview first. An unresolved or unreadable file store aborts the backup.
+The GitHub tab's **Push** and **Push as pull request** include both editor panels and
+every file in the selected editor draft's `src` tree. They do not inspect or export
+browser caches, downloaded models or OPFS files. The existing panel paths are
+preserved; project files are added as `src/<path>` beside them. Select the intended
+draft first. An unresolved or unreadable file store aborts the backup.
 
 The confirmation shows the file count and bytes before upload. Binary data uses
-base64 Git blobs. Assets use 4 MiB parts when larger than that size, avoiding
+base64 Git blobs. Large source files use 4 MiB parts, avoiding
 GitHub's 100 MiB individual-file limit without Git LFS or a paid storage service.
 All files and `.weld-backup/manifest.json` reach the branch in one atomic commit;
 a failed read/upload or a changed editor/source manifest leaves the branch alone.
-Very large models still mean large repositories and many GitHub requests. The
+Large source files still mean large repositories and many GitHub requests. The
 manifest points to this backup's active parts; older backup files are preserved.
 
-To restore the exact source and model bytes from a downloaded/cloned backup,
+To restore the exact source bytes from a downloaded/cloned backup,
 run this inside the generator's folder (Python 3, standard library only):
 
 ```powershell
@@ -26,11 +25,16 @@ python .weld-backup/restore.py --output ..\restored-generator
 
 Use a new output directory outside the generator folder. The tool checks the size
 and SHA-256 of every part and refuses to overwrite existing files. Source files
-restore under `src/`; cached models restore under `.weld-backup/assets/`. This
-restores bytes to disk; browser cache reinstallation is not automated. The two
+restore under `src/`. Older backups containing cached models can still restore
+them under `.weld-backup/assets/`. Browser cache reinstallation is not automated. The two
 editor panel backups remain in the original generator folder.
 
-**Coverage limits:** a userscript cannot read the browser's ordinary HTTP disk
+For a local download that also captures readable cached assets/models, use Dev's
+**Download all files and assets (this generator)**. This saves assembled files to
+the computer save folder and enables automatic updates only for generators you
+explicitly select; see [Folder sync](DEV.md#folder-sync).
+
+**Local asset coverage limits:** a userscript cannot read the browser's ordinary HTTP disk
 cache or other origins' storage. Private chat databases, IndexedDB, cookies,
 credentials, `.env` and private-key files are excluded (a sensitive project path
 aborts the push). Public cache capture accepts recognized static/model file URLs

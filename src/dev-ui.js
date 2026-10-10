@@ -10,7 +10,8 @@
   const MARK_COLORS = { error: '#e5534b', warn: '#d29922', info: '#768390' };
 
   const F = { supported: false, handle: null, name: '', perm: 'none', cfg: { autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' },
-    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false, revision: null };
+    plan: null, slug: '', error: '', busy: false, lastCheck: 0, notified: '', seeding: '', folders: null, bootDone: false, revision: null,
+    projectBusy: false, projectCheck: 0, projectSlug: '', projectStatus: '', projectError: '', projectCancel: 0 };
   const B = { cfg: { url: 'http://127.0.0.1:8765', token: '', auto: false, allowSample: false, allowPropose: true }, state: 'off', error: '', running: false, calls: 0, last: '', backoff: 0,
     cid: 'w' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
   const S = { proposals: [], seq: 0, view: null, markers: false, markInfo: false, refactor: { name: '', to: '', usages: null, preview: null, error: '' },
@@ -47,7 +48,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '' }, c); return F.cfg; }
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); return F.cfg; }
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   function folderBaseKey(slug) { return 'base:' + (F.revision ? F.revision + ':' : '') + slug; }
   async function refreshMasterFolder() {
@@ -64,7 +65,8 @@
     armRegrant(); draw();
   }
   function pauseFolderWrites() {
-    folderCfg(); F.cfg.autoMirror = false; saveFolderCfg();
+    F.projectCancel++;
+    folderCfg(); F.cfg.autoMirror = false; F.cfg.projectBackups = {}; saveFolderCfg();
     notice('Automatic Dev folder writes paused for all generators and open tabs.'); draw();
   }
   async function dirFor(root, rel, create) {
@@ -114,7 +116,7 @@
       F.handle = h; F.name = h.name; F.perm = await permission(h, true); F.error = '';
       await kvSet('handle', h); folderCfg();
       F.cfg.revision = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-      F.cfg.autoMirror = false; saveFolderCfg(); F.revision = null;
+      F.cfg.autoMirror = false; F.cfg.projectBackups = {}; saveFolderCfg(); F.revision = null;
       await refreshMasterFolder();
       notice(F.perm === 'granted' ? 'Master Dev folder connected for all generators: ' + h.name + '. Automatic writes are off.' : 'Folder chosen, but write permission was not granted.');
       await tick(true);
@@ -152,7 +154,7 @@
   }
   async function disconnectFolder() {
     F.handle = null; F.name = ''; F.perm = 'none'; F.plan = null; F.folders = null;
-    await kvDel('handle'); folderCfg(); F.cfg.autoMirror = false;
+    await kvDel('handle'); folderCfg(); F.cfg.autoMirror = false; F.cfg.projectBackups = {};
     F.cfg.revision = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); saveFolderCfg(); F.revision = F.cfg.revision;
     notice('Master Dev folder disconnected for all generators. Nothing in it was deleted.'); draw();
   }
@@ -167,7 +169,7 @@
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
   async function tick(force) {
     await refreshMasterFolder();
-    if (!F.handle || F.perm !== 'granted' || F.busy || (!force && (!F.cfg.watch || (typeof document !== 'undefined' && document.hidden)))) return;
+    if (!F.handle || F.perm !== 'granted' || F.busy || (!force && ((!F.cfg.watch && !F.cfg.projectBackups[H.slug()]) || (typeof document !== 'undefined' && document.hidden)))) return;
     const slug = H.slug();
     if (!D.safeSlug(slug)) { F.plan = null; F.slug = ''; return; }
     F.busy = true;
@@ -188,6 +190,8 @@
       if ((plan.state === 'disk-ahead' || plan.state === 'conflict') && F.notified !== key) { F.notified = key; H.toast('The folder copy of "' + slug + '" changed. Open Weld, then the Dev tab, to review it.', 7000); }
       const changed = !F.plan || F.plan.state !== plan.state || F.slug !== slug;
       F.plan = plan; F.slug = slug; F.lastCheck = Date.now(); F.error = '';
+      if (!document.hidden && H.isEdit() && F.cfg.projectBackups[slug] && !F.projectBusy &&
+          (F.projectSlug !== slug || Date.now() - F.projectCheck >= 60000)) await downloadProject(false);
       if (changed || force) draw();
     } catch (e) { F.error = (e && e.message) || String(e); }
     F.busy = false;
@@ -236,6 +240,49 @@
     const proj = await window.weldProject.fetchPublished(slug);
     await writePair(slug, norm(proj.dsl), proj.html == null ? null : norm(proj.html));
     return proj;
+  }
+  async function downloadProject(manual = true) {
+    if (F.projectBusy) return;
+    const slug = H.slug(), live = H.isEdit() ? H.live() : null;
+    if (!D.safeSlug(slug) || !live || live.dsl == null) return notice('Open this generator\u2019s editor first.');
+    if (!H.backup || !window.WeldLocalBackup) return notice('The project backup module is unavailable.');
+    if (!F.handle || F.perm !== 'granted') return notice('Choose the computer save folder and allow access first.');
+    if (manual && !window.confirm('Download all project files and readable cached assets/models for "' + slug + '" into its folder in ' + F.name + '?\n\nThis uses the current editor and selected draft. Existing matching files are replaced. Automatic updates are then enabled ONLY for this generator while its editor is visible. Private chat data, credentials, HTTP cache and other origins are excluded.')) return;
+    F.projectBusy = true; F.projectError = ''; F.projectSlug = slug; F.projectCheck = Date.now();
+    F.projectStatus = 'Reading project and cached assets\u2026'; draw();
+    const handle = F.handle, revision = F.revision, cancel = F.projectCancel;
+    const active = () => {
+      folderCfg();
+      return H.slug() === slug && H.isEdit() && F.handle === handle && F.projectCancel === cancel && (F.cfg.revision || '') === revision &&
+        (manual || (!document.hidden && !!F.cfg.projectBackups[slug]));
+    };
+    const run = async () => {
+      if (!active()) throw new Error('Local project download paused or location changed');
+      const backup = await H.backup.collect(slug, D.folderPaths(slug), live, !manual);
+      const result = await window.WeldLocalBackup.save({ root: handle, slug, backup, crypto: H.backup.crypto, overwrite: manual, active,
+        progress: (n, total) => { F.projectStatus = 'Saving project files and assets ' + n + '/' + total; draw(); } });
+      if (!active()) throw new Error('Local project download paused or location changed');
+      if (manual) { folderCfg(); F.cfg.projectBackups = Object.assign({}, F.cfg.projectBackups, { [slug]: true }); saveFolderCfg(); }
+      const p = paths(slug), canonical = D.folderPaths(slug);
+      if (p.dsl === canonical.dsl && p.html === canonical.html) await kvSet(folderBaseKey(slug), { dsl: norm(live.dsl), html: norm(live.html || '') });
+      F.projectStatus = 'Saved ' + result.files + ' files (' + (result.bytes / 1048576).toFixed(1) + ' MiB); ' + result.written + ' updated.' +
+        (result.unavailable.length ? ' Unavailable: ' + result.unavailable.join('; ') : '');
+      if (manual) notice('Downloaded ' + slug + '. Automatic project and asset updates are on for this generator only.');
+    };
+    try {
+      const locks = win().navigator && win().navigator.locks;
+      if (locks) await locks.request('weld-local-project:' + revision + ':' + slug, { ifAvailable: true }, lock => {
+        if (!lock) throw new Error('Another tab is saving this generator; try again shortly');
+        return run();
+      });
+      else await run();
+    } catch (e) { F.projectError = (e && e.message) || String(e); F.projectStatus = 'Project download stopped.'; if (manual) notice(F.projectError); }
+    finally { F.projectBusy = false; F.projectCheck = Date.now(); draw(); }
+  }
+  function pauseProject() {
+    F.projectCancel++;
+    folderCfg(); F.cfg.projectBackups = Object.assign({}, F.cfg.projectBackups); delete F.cfg.projectBackups[H.slug()]; saveFolderCfg();
+    notice('Automatic project and asset updates paused for this generator.'); draw();
   }
   async function seedStarred() {
     const names = H.favorites().filter(n => D.safeSlug(n));
@@ -595,6 +642,14 @@
       if (state === 'unknown') kids.push(btn('Treat folder as latest', useFolderAsBase, { mini: true }), btn('Treat editor as latest', useEditorAsBase, { mini: true }));
       kids.push(btn('Download published copy', async () => { await seedFromPublished(slug); notice('Wrote the published copy of ' + slug + ' to the folder.'); await tick(true); }, { mini: true, title: 'Fetch the saved version from Perchance and write it to the folder.' }));
       row(parent, kids);
+      row(parent, [btn('Download all files and assets (this generator)', () => downloadProject(true), { mini: true, disabled: !H.isEdit() || F.projectBusy })]);
+      note(parent, 'Saves this editor, its selected src files and readable cached assets/models to ' + slug + '/ in the master folder. Models are saved as complete files. Selecting it also enables automatic updates for this generator only.');
+      if (F.cfg.projectBackups[slug]) {
+        row(parent, [btn('Pause project and asset updates (this generator)', pauseProject, { mini: true })]);
+        note(parent, 'Project and asset updates are on for this generator. Checks run once a minute while its editor is visible and folder access is allowed.');
+      }
+      if (F.projectSlug === slug && F.projectStatus) note(parent, F.projectStatus);
+      if (F.projectSlug === slug && F.projectError) note(parent, F.projectError, { color: '#e5534b' });
     }
     row(parent, [check('Write editors to the master folder automatically (all generators)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
       check('Watch the folder for changes', F.cfg.watch, v => { folderCfg(); F.cfg.watch = v; saveFolderCfg(); })]);
@@ -723,7 +778,7 @@
   }
   setTimeout(boot, 1200);
   window.weldDev = {
-    render, boot, state: { F, B, S }, exec, tick, startBridge, stopBridge,
+    render, boot, state: { F, B, S }, exec, tick, startBridge, stopBridge, downloadProject,
     // test hooks
     _folder: { connectWith(handle) { F.handle = handle; F.name = handle.name || 'folder'; F.perm = 'granted'; F.supported = true; F.bootDone = true; folderCfg(); return kvSet('handle', handle); } }
   };
