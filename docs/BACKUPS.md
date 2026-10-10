@@ -1,20 +1,22 @@
 # Backups tab
 
-## GitHub project backup (Weld 1.79.0)
+## GitHub backup (Weld 1.79.1)
 
-The GitHub tab's **Push** and **Push as pull request** include both editor panels and
-every file in the selected editor draft's `src` tree. They do not inspect or export
-browser caches, downloaded models or OPFS files. The existing panel paths are
-preserved; project files are added as `src/<path>` beside them. Select the intended
-draft first. An unresolved or unreadable file store aborts the backup.
+The GitHub tab's **Push** and **Push as pull request** have been restored to their
+earlier two-panel behavior: the DSL/top panel and HTML panel only. They do not
+collect `src/` files, browser caches, downloaded models or OPFS files. Existing
+repository mappings and the saved token are preserved. Each push still commits
+both panels atomically, so a failed upload cannot update only one panel.
 
-The confirmation shows the file count and bytes before upload. Binary data uses
-base64 Git blobs. Large source files use 4 MiB parts, avoiding
-GitHub's 100 MiB individual-file limit without Git LFS or a paid storage service.
-All files and `.weld-backup/manifest.json` reach the branch in one atomic commit;
-a failed read/upload or a changed editor/source manifest leaves the branch alone.
-Large source files still mean large repositories and many GitHub requests. The
-manifest points to this backup's active parts; older backup files are preserved.
+The earlier Tampermonkey request options are restored without a native timeout
+option; an explicit 35-second watchdog remains to stop requests that never call
+a handler. This rollback has not yet been verified in the installed manager.
+
+### Restoring older full-project backups
+
+Full-project backups made with earlier versions use `.weld-backup/manifest.json`
+and verified 4 MiB parts for large files. Existing backup files are retained by
+the restored two-panel Push; it does not delete older project or asset files.
 
 To restore the exact source bytes from a downloaded/cloned backup,
 run this inside the generator's folder (Python 3, standard library only):

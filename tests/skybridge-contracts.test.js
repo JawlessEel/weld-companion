@@ -229,7 +229,7 @@ agentBtn.listeners[0].fn({}); assert.equal(routed, 2);
   }
   for (const event of ['onerror', 'onabort', 'ontimeout']) {
     const t = transport();
-    assert.equal(t.options.timeout, 30000);
+    assert.equal(t.options.timeout, undefined, 'restored manager request options omit the native timeout; the watchdog still bounds requests');
     t.options[event]();
     assert.equal(t.responses.length, 1);
     assert.ok(t.responses[0].err);

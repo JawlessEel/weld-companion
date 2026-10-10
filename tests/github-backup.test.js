@@ -65,11 +65,25 @@ const B = require('../src/github-backup');
   vm.createContext(collectorContext);
   vm.runInContext(shipped.slice(shipped.indexOf('function ghCollectBackup('), shipped.indexOf('function ghBackupNote(')), collectorContext);
   await collectorContext.ghCollectBackup('dad', opts.dslPath, opts.htmlPath, opts.dsl, opts.html);
-  assert.equal(collected[0].includeCache, false, 'installed GitHub Push/PR collector disables cache capture by default');
+  assert.equal(collected[0].includeCache, false, 'shared collector disables cache capture unless requested');
   const localAdapter = shipped.match(/backup:\s*\{\s*collect:\s*(function[^\n]+),\s*\n\s*crypto:/)[1];
   vm.runInContext('var localCollect = ' + localAdapter, collectorContext);
   await collectorContext.localCollect('dad', { dsl: opts.dslPath, html: opts.htmlPath }, { dsl: opts.dsl, html: opts.html }, true);
   assert.equal(collected[1].includeCache, true, 'local download continues to capture requested assets');
+  const panelPushes = [];
+  const rollbackContext = { console, genName: () => 'dad', ghToken: () => 'test-token',
+    dslView: () => ({ state: { doc: { toString: () => 'output' } } }), htmlView: () => ({ state: { doc: { toString: () => '<p>hi</p>' } } }),
+    ghResolve: () => ({ cfg: { owner: 'o', repo: 'r', branch: 'main', dslPath: '{name}/{name}-top-panel.txt', htmlPath: '{name}/{name}-html-panel.html' } }),
+    window: {}, Date, confirm: () => true, toast() {}, lintHtmlScripts: () => [], ghGateNote: () => '',
+    ghCollectBackup: () => { throw new Error('Restored Push must not collect src or cache'); },
+    ghPushFilesAtomic: (owner, repo, branch, files) => panelPushes.push(files) };
+  vm.createContext(rollbackContext);
+  vm.runInContext(shipped.slice(shipped.indexOf('function pushAsPullRequest('), shipped.indexOf('function ghConfigure(')), rollbackContext);
+  rollbackContext.pushToGitHub(); rollbackContext.pushAsPullRequest();
+  assert.equal(panelPushes.length, 2);
+  for (const files of panelPushes) assert.deepEqual(JSON.parse(JSON.stringify(files)), [
+    { path: 'dad/dad-top-panel.txt', content: 'output' }, { path: 'dad/dad-html-panel.html', content: '<p>hi</p>' }
+  ], 'restored Push and PR contain exactly the two editor panels');
   const uploader = shipped.slice(shipped.indexOf('function ghApiError('), shipped.indexOf('function ghGateNote('));
   async function push(file, validate) {
     const calls = [];

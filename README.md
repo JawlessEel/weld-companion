@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.79.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.79.1-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -255,7 +255,7 @@ See [the Skills guide](docs/SKILLS.md). No separate model configuration is requi
 The **🧩 Dev** tab connects the generator you are editing to files, to AI coding agents and to GitHub, with one rule: **nothing changes your editor without showing you a diff and getting your click.**
 
 - **Folder sync** uses one master Dev folder for all generators in the same browser profile (Chromium browsers). Choose or change it once in the Dev tab; open tabs pick up the change within a few seconds. Each generator lives in its own subfolder. Choosing a new master folder turns automatic writes off; **Pause automatic writes in all tabs** stops automatic mirroring globally. GitHub Push remains a separate operation. Folder sync mirrors the open generator to plain files in that folder. Work on them with any editor or agent; Weld notices changes, shows a diff, and applies it only when you say so. Conflicts are flagged, never overwritten.
-- **Download all files and assets (this generator)** saves the current editor, its selected `src/` files and readable cached assets/models to the master folder, then enables updates only for that explicitly selected generator. Model files are assembled locally; automatic updates protect computer-side edits. GitHub Push and Push as PR include the editor panels and `src/` files only, without browser caches or downloaded models.
+- **Download all files and assets (this generator)** saves the current editor, its selected `src/` files and readable cached assets/models to the master folder, then enables updates only for that explicitly selected generator. Model files are assembled locally; automatic updates protect computer-side edits. GitHub Push and Push as PR use the earlier two-panel backup behavior; full project files and assets remain available through this local download option.
 - **Agent bridge (MCP)**: run `npm run bridge`, and agents such as Claude Code, Codex, Gemini CLI, Antigravity and Copilot's agent mode can read the live editor, run Weld's analysis, and **propose** edits that you review. Local only, behind a secret token.
 - **GitHub agents**: hand a task to Copilot's cloud agent, Claude or Codex through an issue in your backup repo, and get a pull request back. **Push as PR** opens a pull request instead of writing to your branch, and Push shows Weld's findings first.
 - **AI helper upgrades**: a Perchance syntax primer in every request, a "look things up first" mode, OpenRouter and GitHub Models providers, and prompt caching for Claude.

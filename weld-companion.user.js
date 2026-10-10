@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.79.0
+// @version      1.79.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.79.0';
+  var WC_VERSION = '1.79.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -964,7 +964,7 @@
     watchdog = setTimeout(timedOut, 35000);
     try {
       request = GM_xmlhttpRequest({
-        method: method, url: 'https://api.github.com' + apiPath, timeout: 30000,
+        method: method, url: 'https://api.github.com' + apiPath,
         headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
         data: body ? JSON.stringify(body) : null,
         onload: function (r) { var j = null; try { j = JSON.parse(r.responseText); } catch (e) {} finish(null, r.status, j); },
@@ -1110,23 +1110,21 @@
     var branch = DC ? DC.pushBranchName(name) : ('weld/' + name + '-' + Date.now());
     var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
     var dslP = R.cfg.dslPath.replace(/\{name\}/g, function () { return name; }), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, function () { return name; });
-    ghCollectBackup(name, dslP, htmlP, dsl, html).then(function (backup) {
     var msg = 'Open a pull request for “' + name + '”?\n\nrepo: ' + R.cfg.owner + '/' + R.cfg.repo + '\nnew branch: ' + branch + '  →  into ' + base + '\nDSL  → ' + dslP + '\nHTML → ' + htmlP
-      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghBackupNote(backup) + ghGateNote(name, dsl, html);
+      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghGateNote(name, dsl, html);
     if (!confirm(msg)) { toast('Cancelled'); return; }
     toast('Creating branch and pull request…');
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, backup.files, token, 'Update ' + name + ' via Weld Companion', function (err) {
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err) {
       if (err) { console.error('[weld pr]', err.message); toast('Could not create the branch: ' + err.message, 6000); return; }
       ghApi('POST', '/repos/' + R.cfg.owner + '/' + R.cfg.repo + '/pulls', token, { title: 'Update ' + name + ' via Weld Companion', head: branch, base: base,
-        body: 'Created by Weld Companion from the editor with project assets and a cache/model manifest.\n\n' + backup.files.length + ' files; see `.weld-backup/manifest.json` for coverage.' }, function (e2, st, pr) {
+        body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`.' }, function (e2, st, pr) {
         if (e2 || (st !== 201 && st !== 200) || !pr || !pr.html_url) {
           toast('Branch ' + branch + ' was created, but the pull request failed (' + ((pr && pr.message) || e2 && e2.message || st) + '). Open it on GitHub.', 8000); return;
         }
         try { copyText(pr.html_url); } catch (e) {}
         toast('Pull request opened (link copied): ' + pr.html_url, 8000);
       });
-    }, { newBranch: branch, validate: backup.validate });
-    }).catch(function () { toast('Backup inventory failed. Select the correct editor draft and ensure its preview and files are readable; nothing pushed.', 10000); });
+    }, { newBranch: branch });
   }
   function pushToGitHub(over) {
     var name = genName();
@@ -1144,29 +1142,22 @@
     var branch = R.cfg.branch || 'main';
     var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
     var dslP = R.cfg.dslPath.replace(/\{name\}/g, name), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, name);
-    ghCollectBackup(name, dslP, htmlP, dsl, html).then(function (backup) {
     var confirmMsg = 'Push \u201C' + name + '\u201D to GitHub?' + (R.overridden ? '  [custom mapping]' : '') + '\n\n'
       + 'repo: ' + R.cfg.owner + '/' + R.cfg.repo + '@' + branch + '\n'
       + 'DSL  \u2192 ' + dslP + '   (' + dsl.length + ' chars)\n'
       + 'HTML \u2192 ' + htmlP + '   (' + html.length + ' chars)\n\n'
-      + 'This COMMITS the editor panels, project files and captured assets.' + ghBackupNote(backup);
+      + 'This COMMITS over the GitHub copies of these two files.';
     var pushLint = lintHtmlScripts();
     if (pushLint.length) { console.warn('[weld lint]', pushLint); confirmMsg += '\n\n\u26A0 ' + pushLint.length + ' JavaScript problem(s) in the HTML pane (see console) \u2014 pushing commits them as-is.'; }
     confirmMsg += ghGateNote(name, dsl, html);
     if (!confirm(confirmMsg)) { toast('Cancelled'); return; }
-    // Persistent progress toast: a push is several sequential requests, so a 2s toast looked like "nothing happened".
-    var prog = el('div', { class: 'wc-root wc-toast wc-toast-in', role: 'status', 'aria-live': 'polite', text: 'Pushing ' + name + ' to GitHub\u2026' });
-    document.body.appendChild(prog);
-    var steps = 0;
-    function endProg() { try { prog.remove(); } catch (e) {} }
+    toast('Pushing ' + name + ' to GitHub\u2026');
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, backup.files, token, commitMsg, function (err, result) {
-      endProg();
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result) {
       if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message, 10000); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
-      toast('Pushed ' + name + ' (' + backup.files.length + ' files, one atomic commit)', 5000);
-    }, { validate: backup.validate, onStep: function (s) { steps++; prog.textContent = 'Pushing ' + name + ' to GitHub\u2026 step ' + steps + '/' + (backup.files.length + 5) + ' (' + s + ')'; console.log('[weld push] step', steps, s); } });
-    }).catch(function () { toast('Backup inventory failed. Select the correct editor draft and ensure its preview and files are readable; nothing pushed.', 10000); });
+      toast('Pushed ' + name + ' (one atomic commit)');
+    });
   }
   function ghConfigure() {
     var cfg = ghCfg();
