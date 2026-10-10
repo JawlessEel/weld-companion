@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.77.4
+// @version      1.78.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.77.4';
+  var WC_VERSION = '1.78.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -978,6 +978,40 @@
   }
   function ghApiError(action, status, json) { return new Error(action + ' ' + status + (json && json.message ? ' ' + json.message : '')); }
   function ghBranchPath(branch) { return String(branch || '').replace(/^refs\/heads\//, '').split('/').map(encodeURIComponent).join('/'); }
+  function ghBackupEval(op, arg) {
+    var iframe = document.querySelector('#outputIframeEl'), id = pageProp('generatorPublicId');
+    if (!iframe || !iframe.contentWindow || !/^[\w-]+$/.test(String(id || ''))) return Promise.reject(new Error('Load the generator preview before pushing'));
+    var win = iframe.contentWindow, origin = 'https://' + id + '.perchance.org';
+    return new Promise(function (resolve, reject) {
+      var callerId = 'weld-backup-' + Date.now() + '-' + Math.random();
+      var timer = setTimeout(function () { finish(new Error('Preview backup timed out; branch not updated')); }, 60000);
+      function finish(err, value) { clearTimeout(timer); window.removeEventListener('message', onMessage); err ? reject(err) : resolve(value); }
+      function onMessage(e) {
+        if (e.source !== win || e.origin !== origin || !e.data || e.data.type !== 'evaluateJsResponse' || e.data.callerId !== callerId) return;
+        finish(e.data.error ? new Error('Preview could not read backup assets') : null, e.data.result);
+      }
+      window.addEventListener('message', onMessage);
+      try { win.postMessage({ command: 'evaluateJs', callerId: callerId,
+        js: 'return await (' + window.WeldGitHubBackup.runtime.toString() + ')(' + JSON.stringify(op) + ',' + JSON.stringify(arg || null) + ');' }, origin); }
+      catch (e) { finish(new Error('Could not contact the generator preview')); }
+    });
+  }
+  function ghCollectBackup(name, dslP, htmlP, dsl, html) {
+    toast('Reading project files and cached model inventory…');
+    var timer;
+    return Promise.race([window.WeldGitHubBackup.collect({ name: name, dslPath: dslP, htmlPath: htmlP, dsl: dsl, html: html,
+      state: pageProp('srcState'), evaluate: ghBackupEval, crypto: window.crypto,
+      panels: function (d, h) { return dslView().state.doc.toString() === d && htmlView().state.doc.toString() === h; }
+    }), new Promise(function (_, reject) { timer = setTimeout(function () { reject(new Error('Project inventory timed out; choose the correct editor draft and retry')); }, 90000); })])
+      .finally(function () { clearTimeout(timer); });
+  }
+  function ghBackupNote(backup) {
+    return '\n\nProject backup: ' + backup.manifest.files.length + ' asset(s), ' + (backup.bytes / 1048576).toFixed(1) + ' MiB, ' + backup.files.length + ' GitHub file(s).'
+      + '\nLarge assets use verified 4 MiB parts; .weld-backup/restore.py restores their bytes.'
+      + '\nIncludes selected src files and readable public cached assets/models in the preview origin.'
+      + '\nHTTP cache, other origins, cookies, credentials and private chat databases are not included.'
+      + (backup.manifest.unavailable.length ? '\nUnavailable: ' + backup.manifest.unavailable.join('; ') : '');
+  }
   // Commit both editor panes through Git's blob/tree/commit/ref APIs, rather than
   // two Contents-API PUTs. If any request fails before the final ref update, the
   // branch stays exactly as it was; it can never contain just one pane's update.
@@ -1014,13 +1048,16 @@
         function putBlob() {
           if (i >= files.length) return putTree();
           var f = files[i++];
-          api('POST', 'blobs', { content: f.content, encoding: 'utf-8' }, function (eBlob, sBlob, blob) {
+          function send(content) { api('POST', 'blobs', { content: content, encoding: f.encoding || 'utf-8' }, function (eBlob, sBlob, blob) {
             if (eBlob || (sBlob !== 201 && sBlob !== 200) || !blob || !blob.sha) return fail('POST blob', eBlob, sBlob, blob);
             blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
             putBlob();
-          });
+          }); }
+          if (f.read) Promise.resolve().then(f.read).then(send).catch(function () { cb(new Error('Backup asset read failed; branch not updated')); });
+          else send(f.content);
         }
         function putTree() {
+          try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
           api('POST', 'trees', { base_tree: parentCommit.tree.sha, tree: blobs }, function (eTree, sTree, tree) {
             if (eTree || (sTree !== 201 && sTree !== 200) || !tree || !tree.sha) return fail('POST tree', eTree, sTree, tree);
             api('POST', 'commits', { message: msg, tree: tree.sha, parents: [parent] }, function (eNew, sNew, commit) {
@@ -1073,21 +1110,23 @@
     var branch = DC ? DC.pushBranchName(name) : ('weld/' + name + '-' + Date.now());
     var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
     var dslP = R.cfg.dslPath.replace(/\{name\}/g, function () { return name; }), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, function () { return name; });
+    ghCollectBackup(name, dslP, htmlP, dsl, html).then(function (backup) {
     var msg = 'Open a pull request for “' + name + '”?\n\nrepo: ' + R.cfg.owner + '/' + R.cfg.repo + '\nnew branch: ' + branch + '  →  into ' + base + '\nDSL  → ' + dslP + '\nHTML → ' + htmlP
-      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghGateNote(name, dsl, html);
+      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghBackupNote(backup) + ghGateNote(name, dsl, html);
     if (!confirm(msg)) { toast('Cancelled'); return; }
     toast('Creating branch and pull request…');
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err) {
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, backup.files, token, 'Update ' + name + ' via Weld Companion', function (err) {
       if (err) { console.error('[weld pr]', err.message); toast('Could not create the branch: ' + err.message, 6000); return; }
       ghApi('POST', '/repos/' + R.cfg.owner + '/' + R.cfg.repo + '/pulls', token, { title: 'Update ' + name + ' via Weld Companion', head: branch, base: base,
-        body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`.' }, function (e2, st, pr) {
+        body: 'Created by Weld Companion from the editor with project assets and a cache/model manifest.\n\n' + backup.files.length + ' files; see `.weld-backup/manifest.json` for coverage.' }, function (e2, st, pr) {
         if (e2 || (st !== 201 && st !== 200) || !pr || !pr.html_url) {
           toast('Branch ' + branch + ' was created, but the pull request failed (' + ((pr && pr.message) || e2 && e2.message || st) + '). Open it on GitHub.', 8000); return;
         }
         try { copyText(pr.html_url); } catch (e) {}
         toast('Pull request opened (link copied): ' + pr.html_url, 8000);
       });
-    }, { newBranch: branch });
+    }, { newBranch: branch, validate: backup.validate });
+    }).catch(function () { toast('Backup inventory failed. Select the correct editor draft and ensure its preview and files are readable; nothing pushed.', 10000); });
   }
   function pushToGitHub(over) {
     var name = genName();
@@ -1105,11 +1144,12 @@
     var branch = R.cfg.branch || 'main';
     var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
     var dslP = R.cfg.dslPath.replace(/\{name\}/g, name), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, name);
+    ghCollectBackup(name, dslP, htmlP, dsl, html).then(function (backup) {
     var confirmMsg = 'Push \u201C' + name + '\u201D to GitHub?' + (R.overridden ? '  [custom mapping]' : '') + '\n\n'
       + 'repo: ' + R.cfg.owner + '/' + R.cfg.repo + '@' + branch + '\n'
       + 'DSL  \u2192 ' + dslP + '   (' + dsl.length + ' chars)\n'
       + 'HTML \u2192 ' + htmlP + '   (' + html.length + ' chars)\n\n'
-      + 'This COMMITS over the GitHub copies of these two files.';
+      + 'This COMMITS the editor panels, project files and captured assets.' + ghBackupNote(backup);
     var pushLint = lintHtmlScripts();
     if (pushLint.length) { console.warn('[weld lint]', pushLint); confirmMsg += '\n\n\u26A0 ' + pushLint.length + ' JavaScript problem(s) in the HTML pane (see console) \u2014 pushing commits them as-is.'; }
     confirmMsg += ghGateNote(name, dsl, html);
@@ -1120,12 +1160,13 @@
     var steps = 0;
     function endProg() { try { prog.remove(); } catch (e) {} }
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result) {
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, backup.files, token, commitMsg, function (err, result) {
       endProg();
       if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message, 10000); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
-      toast('Pushed ' + name + ' (one atomic commit)', 5000);
-    }, { onStep: function (s) { steps++; prog.textContent = 'Pushing ' + name + ' to GitHub\u2026 step ' + steps + ' (' + s + ')'; console.log('[weld push] step', steps, s); } });
+      toast('Pushed ' + name + ' (' + backup.files.length + ' files, one atomic commit)', 5000);
+    }, { validate: backup.validate, onStep: function (s) { steps++; prog.textContent = 'Pushing ' + name + ' to GitHub\u2026 step ' + steps + '/' + (backup.files.length + 5) + ' (' + s + ')'; console.log('[weld push] step', steps, s); } });
+    }).catch(function () { toast('Backup inventory failed. Select the correct editor draft and ensure its preview and files are readable; nothing pushed.', 10000); });
   }
   function ghConfigure() {
     var cfg = ghCfg();
@@ -18558,6 +18599,196 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   bootFolder().catch(() => {});
   window.weldBackup = { render, _sync: syncToFolder, _state: F };
 })();
+
+/* Project files and model bytes for GitHub. No cookies, chat databases or credentials. */
+(function (host) {
+  'use strict';
+  const PART = 4 * 1024 * 1024;
+  function safePath(path) {
+    return typeof path === 'string' && path.length > 0 && path.length < 1024 &&
+      !/[\\\x00-\x1f:]/.test(path) && path.split('/').every(p => p && p !== '.' && p !== '..' && p !== '.git' &&
+        !/^\.env(?:\.|$)|\.(pem|key|p12|pfx)$/i.test(p));
+  }
+  function base64(bytes) {
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+    return btoa(text);
+  }
+  // Runs only in the generator preview via Perchance's existing evaluateJs channel.
+  // Read operations are stateless, so a timed-out request never leaves retained model buffers.
+  async function runtime(op, arg) {
+    const staticUrl = value => {
+      const u = new URL(value);
+      return u.protocol === 'https:' && !u.username && !u.password && (!u.search || u.search === '?download=true') &&
+        /(^|\.)(huggingface\.co|cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|user\.uploads\.dev|perchance\.org)$/.test(u.hostname) &&
+        /\.(gguf|onnx|bin|safetensors|wasm|json|js|css|woff2?|ttf|png|jpe?g|svg|webp)$/i.test(u.pathname) &&
+        !/\/(api|chat|session|user|account)(\/|\.)/i.test(u.pathname);
+    };
+    async function opfs(path) {
+      let dir = await navigator.storage.getDirectory();
+      const bits = path.split('/'), name = bits.pop();
+      for (const bit of bits) dir = await dir.getDirectoryHandle(bit);
+      return (await dir.getFileHandle(name)).getFile();
+    }
+    if (op === 'inventory') {
+      const entries = [], unavailable = [];
+      if (typeof caches === 'undefined') unavailable.push('Cache Storage unavailable');
+      else {
+        for (const name of await caches.keys()) {
+          const cache = await caches.open(name);
+          for (const req of await cache.keys()) {
+            if (!staticUrl(req.url) || req.method !== 'GET' || req.headers.has('authorization')) continue;
+            const res = await cache.match(req);
+            if (!res || !res.ok || res.type === 'opaque') throw new Error('Cached asset unreadable');
+            const blob = await res.blob();
+            entries.push({ kind: 'cache', cache: name, url: req.url, size: blob.size,
+              version: res.headers.get('etag') || res.headers.get('last-modified') || '' });
+          }
+        }
+      }
+      // Perchance's on-device GGUF runtime uses browser-model in origin-private storage.
+      if (!navigator.storage || !navigator.storage.getDirectory) unavailable.push('OPFS unavailable');
+      else {
+        const root = await navigator.storage.getDirectory();
+        let models;
+        try { models = await root.getDirectoryHandle('browser-model'); }
+        catch (e) { if (e.name !== 'NotFoundError') throw e; }
+        async function walk(dir, prefix) {
+          for await (const [name, handle] of dir.entries()) {
+            const path = prefix + '/' + name;
+            if (handle.kind === 'directory') await walk(handle, path);
+            else { const f = await handle.getFile(); entries.push({ kind: 'opfs', path, size: f.size, modified: f.lastModified }); }
+          }
+        }
+        if (models) await walk(models, 'browser-model');
+      }
+      return { entries, unavailable, origin: location.origin };
+    }
+    let blob;
+    if (arg.kind === 'cache') {
+      if (!staticUrl(arg.url)) throw new Error('Unsafe cached URL');
+      const res = await (await caches.open(arg.cache)).match(arg.url);
+      if (!res || !res.ok) throw new Error('Cached file disappeared');
+      if ((res.headers.get('etag') || res.headers.get('last-modified') || '') !== arg.version) throw new Error('Cached file changed during backup');
+      blob = await res.blob();
+    } else if (arg.kind === 'opfs' && arg.path.startsWith('browser-model/') && !arg.path.split('/').includes('..')) {
+      blob = await opfs(arg.path);
+      if (blob.lastModified !== arg.modified) throw new Error('Model changed during backup');
+    } else throw new Error('Unknown backup asset');
+    if (blob.size !== arg.size) throw new Error('Asset size changed during backup');
+    if (!Number.isSafeInteger(arg.offset) || arg.offset < 0 || !Number.isSafeInteger(arg.length) || arg.length < 0 || arg.length > 4 * 1024 * 1024) throw new Error('Invalid asset range');
+    const bytes = new Uint8Array(await blob.slice(arg.offset, arg.offset + arg.length).arrayBuffer());
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+    return btoa(text);
+  }
+  async function collect(opts) {
+    const { name, dslPath, htmlPath, dsl, html, state, evaluate, crypto } = opts;
+    if (!safePath(dslPath) || !safePath(htmlPath) || dslPath === htmlPath) throw new Error('Unsafe or duplicate GitHub panel paths');
+    const slash = dslPath.lastIndexOf('/'), prefix = slash < 0 ? name + '/' : dslPath.slice(0, slash + 1);
+    const files = [{ path: dslPath, content: dsl }, { path: htmlPath, content: html }];
+    const seen = new Set(files.map(f => f.path)), records = [];
+    function add(file) { if (!safePath(file.path) || seen.has(file.path)) throw new Error('Unsafe or duplicate backup path'); seen.add(file.path); files.push(file); }
+    let listing = {};
+    if (state) { await state.ready(); listing = state.list(); }
+    else if (/\bsrc\//.test(html)) throw new Error('Project file store unavailable; select the correct editor draft first');
+    if (!Object.keys(listing).length && /\bsrc\//.test(html)) throw new Error('Project manifest empty; select the correct editor draft first');
+    const fingerprint = JSON.stringify(listing);
+    function asset(path, size, read, metadata) {
+      if (!safePath(path) || !Number.isSafeInteger(size) || size < 0) throw new Error('Invalid project file metadata');
+      const rec = Object.assign({ path, size, parts: [] }, metadata); records.push(rec);
+      const count = Math.max(1, Math.ceil(size / PART));
+      for (let n = 0; n < count; n++) {
+        const offset = n * PART, length = Math.min(PART, size - offset);
+        const target = count === 1 ? path : prefix + '.weld-backup/parts/' + (records.length - 1) + '/' + String(n).padStart(6, '0');
+        const part = { path: target, size: length }; rec.parts.push(part);
+        add({ path: target, encoding: 'base64', read: async () => {
+          const content = await read(offset, length);
+          const binary = atob(content), bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+          if (bytes.length !== length) throw new Error('Incomplete backup read');
+          part.sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
+          return content;
+        } });
+      }
+    }
+    for (const path of Object.keys(listing).sort()) {
+      const entry = listing[path];
+      // A project source file is small enough for the platform's readFile API; models use slices below.
+      asset(prefix + 'src/' + path, entry.size, async (offset, length) => {
+        if (JSON.stringify(state.list()) !== fingerprint) throw new Error('Project changed during backup; retry after editing finishes');
+        const data = new Uint8Array(await state.readFile(path));
+        if (data.byteLength !== entry.size) throw new Error('Project file size mismatch');
+        const text = new TextDecoder().decode(data);
+        if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:gh[opusr]_|github_pat_|sk-proj-|sk-ant-api)[A-Za-z0-9_-]{20,}|hf_[A-Za-z0-9]{30,}/.test(text)) throw new Error('Secret-shaped project content detected; branch not updated');
+        return base64(data.subarray(offset, offset + length));
+      }, { kind: 'project' });
+    }
+    const inventory = await evaluate('inventory');
+    for (const [i, item] of inventory.entries.entries()) {
+      const label = item.kind === 'opfs' ? item.path.split('/').pop() : new URL(item.url).pathname.split('/').pop();
+      asset(prefix + '.weld-backup/assets/' + i + '/' + encodeURIComponent(label), item.size,
+        (offset, length) => evaluate('read', Object.assign({}, item, { offset, length })),
+        item.kind === 'opfs' ? { kind: item.kind, originalPath: item.path } : { kind: item.kind, url: item.url });
+    }
+    const manifest = { format: 'weld-project-backup', version: 1, generator: name, origin: inventory.origin, files: records,
+      unavailable: inventory.unavailable,
+      coverage: 'Editor panels, complete selected src tree, readable public static/model Cache Storage responses, and browser-model OPFS files in the visible preview origin. HTTP cache, other origins, IndexedDB, cookies, credentials and private chat data are not exported.' };
+    add({ path: prefix + '.weld-backup/manifest.json', read: () => JSON.stringify(manifest, null, 2) });
+    add({ path: prefix + '.weld-backup/restore.py', content: restoreSource });
+    return { files, manifest, bytes: records.reduce((sum, r) => sum + r.size, 0), validate: () => {
+      if (state && JSON.stringify(state.list()) !== fingerprint) throw new Error('Project changed during backup; branch not updated');
+      if (opts.panels && !opts.panels(dsl, html)) throw new Error('Editor panels changed during backup; branch not updated');
+    } };
+  }
+  const restoreSource = `"""Restore chunked files to a separate directory; verify every part before writing.
+Run: python .weld-backup/restore.py --output restored
+Cache/model files are restored to disk, not inserted into browser storage.
+"""
+import argparse, hashlib, json, pathlib, os, tempfile
+p = argparse.ArgumentParser()
+p.add_argument('--output', required=True)
+a = p.parse_args()
+root = pathlib.Path(__file__).resolve().parent.parent
+out = pathlib.Path(a.output).resolve()
+if out == root or root in out.parents:
+    raise SystemExit('Choose an output directory outside the generator backup')
+m = json.loads((root / '.weld-backup/manifest.json').read_text(encoding='utf-8'))
+def safe(base, path):
+    bits = pathlib.PurePosixPath(path).parts
+    if not bits or '..' in bits or pathlib.PurePosixPath(path).is_absolute() or ':' in path or '\\\\' in path:
+        raise ValueError('Unsafe manifest path')
+    dest = base.joinpath(*bits).resolve()
+    if base not in dest.parents: raise ValueError('Path leaves backup directory')
+    return dest
+# Stored paths are repository-relative. Resolve using the generator directory's suffix.
+for rec in m['files']:
+    marker = '/src/' if rec['kind'] == 'project' else '/.weld-backup/'
+    rel = ('src/' if rec['kind'] == 'project' else '.weld-backup/') + rec['path'].split(marker, 1)[1]
+    dest = safe(out, rel)
+    if dest.exists(): raise FileExistsError(str(dest))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as f:
+            tmp = pathlib.Path(f.name)
+            total = 0
+            for part in rec['parts']:
+                part_marker = '/.weld-backup/' if '/.weld-backup/' in part['path'] else '/src/'
+                part_rel = part_marker[1:] + part['path'].split(part_marker, 1)[1]
+                data = safe(root, part_rel).read_bytes()
+                if len(data) != part['size'] or hashlib.sha256(data).hexdigest() != part['sha256']:
+                    raise ValueError('Part integrity check failed')
+                f.write(data); total += len(data)
+            if total != rec['size']: raise ValueError('File size mismatch')
+        os.link(tmp, dest)  # fails if another process created the destination
+    finally:
+        if tmp is not None: tmp.unlink(missing_ok=True)
+    print(rel, rec['size'])
+`;
+  const api = { collect, runtime, safePath, base64, PART, restoreSource };
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else host.WeldGitHubBackup = api;
+})(typeof window === 'object' ? window : globalThis);
 /* END GENERATED BACKUP */
 
 /* BEGIN GENERATED EXTRAS */

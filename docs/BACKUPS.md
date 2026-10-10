@@ -1,5 +1,45 @@
 # Backups tab
 
+## GitHub project backup (Weld 1.78.0)
+
+The GitHub tab's **Push** and **Push as pull request** include both editor panels,
+every file in the selected editor draft's `src` tree, readable public static/model
+responses in the visible generator preview's Cache Storage, and files in that
+origin's `browser-model` OPFS directory. The existing panel paths are preserved;
+project files are added as `src/<path>` beside them. Select the intended draft and
+load its preview first. An unresolved or unreadable file store aborts the backup.
+
+The confirmation shows the file count and bytes before upload. Binary data uses
+base64 Git blobs. Assets use 4 MiB parts when larger than that size, avoiding
+GitHub's 100 MiB individual-file limit without Git LFS or a paid storage service.
+All files and `.weld-backup/manifest.json` reach the branch in one atomic commit;
+a failed read/upload or a changed editor/source manifest leaves the branch alone.
+Very large models still mean large repositories and many GitHub requests. The
+manifest points to this backup's active parts; older backup files are preserved.
+
+To restore the exact source and model bytes from a downloaded/cloned backup,
+run this inside the generator's folder (Python 3, standard library only):
+
+```powershell
+python .weld-backup/restore.py --output ..\restored-generator
+```
+
+Use a new output directory outside the generator folder. The tool checks the size
+and SHA-256 of every part and refuses to overwrite existing files. Source files
+restore under `src/`; cached models restore under `.weld-backup/assets/`. This
+restores bytes to disk; browser cache reinstallation is not automated. The two
+editor panel backups remain in the original generator folder.
+
+**Coverage limits:** a userscript cannot read the browser's ordinary HTTP disk
+cache or other origins' storage. Private chat databases, IndexedDB, cookies,
+credentials, `.env` and private-key files are excluded (a sensitive project path
+aborts the push). Public cache capture accepts recognized static/model file URLs
+on Perchance, Hugging Face, uploads and the supported library CDNs; API responses,
+authenticated requests and signed URLs are excluded. This is a project/model
+backup, not a browser-profile export. The manifest and confirmation report these
+limits and unavailable storage APIs. Loading a model into a remote server does
+not make its weights available in this browser.
+
 Shows the generator backup copies that generators store in Weld through Skybridge storage, and saves them to a folder you choose.
 
 ## Where copies live
