@@ -239,7 +239,7 @@ agentBtn.listeners[0].fn({}); assert.equal(routed, 2);
   }
   const hung = transport();
   const watchdog = [...hung.timers.values()][0];
-  assert.equal(watchdog.ms, 35000);
+  assert.equal(watchdog.ms, 90000);
   watchdog.fn();
   assert.match(hung.responses[0].err.message, /timed out/);
   assert.equal(hung.aborted, 1);
