@@ -129,6 +129,7 @@ const norm = t => t.replace(/\r\n?/g, '\n');
   render(); click('Write editor to folder'); await until(() => root.read('zoo/zoo-top-panel.txt'), 2000, 'file written');
   assert.equal(root.read('zoo/zoo-top-panel.txt'), live.dsl);
   assert.equal(root.read('zoo/zoo-html-panel.html'), live.html);
+  await until(() => !dev.state.F.busy && dev.state.F.plan?.state === 'in-sync', 2000, 'folder write and sync completion');
   await dev.tick(true); assert.equal(dev.state.F.plan.state, 'in-sync');
 
   // An agent edits the file on disk: Weld flags it, shows a diff, and applies it only on request.
@@ -147,6 +148,7 @@ const norm = t => t.replace(/\r\n?/g, '\n');
   assert.match(confirms[0], /Ctrl\+Z undoes it/);
   assert.deepEqual(applied.map(a => a[0]), ['dsl', 'html']);
   assert.equal(norm(applied[0][1]), agentDsl, 'CRLF from the folder is normalized');
+  await until(() => !dev.state.S.view && !dev.state.F.busy && dev.state.F.plan?.state === 'in-sync', 2000, 'folder apply and sync completion');
   await dev.tick(true); assert.equal(dev.state.F.plan.state, 'in-sync');
 
   // Declining the confirmation applies nothing.
