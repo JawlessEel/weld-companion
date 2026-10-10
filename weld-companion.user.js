@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.80.0
+// @version      1.81.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.80.0';
+  var WC_VERSION = '1.81.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -10244,6 +10244,20 @@
       return { id: id(), text: v.trim() };
     });
   }
+  function memoriesText(s) {
+    const lines = ['# Memories: ' + text(s.name), '', '## Approved (' + s.memories.length + ')', ''];
+    s.memories.forEach(m => lines.push('- ' + text(m.text).replace(/\r?\n/g, '\n  ')));
+    if (s.proposals.length) {
+      lines.push('', '## Pending proposals, not used by the model (' + s.proposals.length + ')', '');
+      s.proposals.forEach(m => lines.push('- ' + text(m.text).replace(/\r?\n/g, '\n  ')));
+    }
+    return lines.join('\n') + '\n';
+  }
+  function clearMemories(s) {
+    const cleared = { memories: s.memories.length, proposals: s.proposals.length };
+    s.memories = []; s.proposals = [];
+    return cleared;
+  }
   function approve(s, proposalId, edited) {
     if (!s.proposals.some(m => m.id === proposalId)) throw new Error('Memory proposal no longer exists.');
     if (!text(edited).trim() || edited.length > 2000) throw new Error('Memory must contain 1–2000 characters.');
@@ -10649,7 +10663,7 @@
   }
 
   return { VERSION, templates, id, copy, project, character, loreEntry, session, validate, migrate, visible, audit, context, lorePreview, recordLore,
-    parseMemories, approve, addVariant, pickVariant, setVariantText, expand, unresolvedMacros, applyRegex, riskyPattern, bundle, importBundle,
+    parseMemories, memoriesText, clearMemories, approve, addVariant, pickVariant, setVariantText, expand, unresolvedMacros, applyRegex, riskyPattern, bundle, importBundle,
     characterFromAICC, characterToAICC, toV2Card, fromCard, toV2Book, fromV2Book, toWorldInfo, fromWorldInfo,
     pngReadCard, pngWriteCard, crc32, bytesToB64, b64ToBytes, toChatJsonl, fromChatJsonl, transcriptMarkdown, worldBible, stats, assist, sample, estTokens };
 });
@@ -11933,6 +11947,14 @@
             s.proposals.push(...suggestions); if (!save()) throw new Error('Memory proposals were not saved.');
           });
       })]);
+    row(parent, [button('Download memories (.md)', () => {
+      if (!s.memories.length && !s.proposals.length) throw new Error('This playthrough has no memories to download.');
+      download(s.name + '.memories.md', C.memoriesText(s));
+    }), button('Clear all memories', () => {
+      if (!s.memories.length && !s.proposals.length) throw new Error('This playthrough has no memories to clear.');
+      if (!window.confirm('Clear ' + s.memories.length + ' approved memories and ' + s.proposals.length + ' pending proposals from this playthrough? Download them first if you want a copy. Messages and world canon are not touched.')) return;
+      C.clearMemories(s); save(); draw();
+    })]);
     s.proposals.forEach(m => {
       area(parent, 'Proposed memory (not yet used)', m.text, value => { m.text = value; save(); });
       row(parent, [button('Approve', () => { C.approve(s, m.id, m.text); save(); draw(); }),

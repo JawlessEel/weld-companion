@@ -528,6 +528,14 @@
             s.proposals.push(...suggestions); if (!save()) throw new Error('Memory proposals were not saved.');
           });
       })]);
+    row(parent, [button('Download memories (.md)', () => {
+      if (!s.memories.length && !s.proposals.length) throw new Error('This playthrough has no memories to download.');
+      download(s.name + '.memories.md', C.memoriesText(s));
+    }), button('Clear all memories', () => {
+      if (!s.memories.length && !s.proposals.length) throw new Error('This playthrough has no memories to clear.');
+      if (!window.confirm('Clear ' + s.memories.length + ' approved memories and ' + s.proposals.length + ' pending proposals from this playthrough? Download them first if you want a copy. Messages and world canon are not touched.')) return;
+      C.clearMemories(s); save(); draw();
+    })]);
     s.proposals.forEach(m => {
       area(parent, 'Proposed memory (not yet used)', m.text, value => { m.text = value; save(); });
       row(parent, [button('Approve', () => { C.approve(s, m.id, m.text); save(); draw(); }),
