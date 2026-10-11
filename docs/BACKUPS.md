@@ -50,7 +50,7 @@ Weld keeps no backups of its own (1.88.0). Generator vault saves pass straight t
 
 ## Where copies live
 
-A generator's vault save (`weld:genvault:<generator>/snapshot`, `chat/index`, `chat/snap-*`) is written straight into the **Backup location** folder and never into Weld's storage. When the generator reads or lists its vault, Weld answers from that folder (an older copy still in browser storage is used only for a key the folder does not have). With no folder chosen, or folder access not allowed, the save is refused with code `no-backup-folder` and the generator keeps its own copy. Chat copies still need **Settings > Skybridge > Let generators send chat copies** turned on.
+A generator's vault save (`weld:genvault:<generator>/snapshot`, `chat/index`, `chat/snap-*`) is written straight into the **Backup location** folder and never into Weld's storage. When the generator reads or lists its vault, Weld answers from that folder (an older copy still in browser storage is used only for a key the folder does not have). With no folder chosen, or folder access not allowed, the save is refused with code `no-backup-folder` and the generator keeps its own copy. Chat copies still need **Settings > Skybridge > Let generators send chat copies** turned on. Each generator may write at most 30 files per 10 minutes and 500 files per folder (codes rate-limited, folder-full), and reads only accept files that generator stored itself.
 
 ## Backup location
 

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.88.0
+// @version      1.88.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.88.0';
+  var WC_VERSION = '1.88.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -18777,17 +18777,32 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     return out;
   }
   async function ptDir(gen, sub) { try { return await dirAt(F.handle, [gen, sub], false); } catch (e) { return null; } }
+  // A folder file is trusted for a generator only if that generator stored it and the record names no other owner.
+  // (The folder also holds older copies from browser storage, where one generator may have written another's key.)
+  const ownDoc = (doc, key, caller) => !!(doc && doc.record.key === key && doc.record.storedBy === caller && doc.record.stale !== true && C.checkStoreWrite(key, doc.record.value).ok);
+  // Disk guard: the folder never rotates files out, so a generator gets a write budget and a per-folder file cap.
+  const PT_RATE_MAX = 30, PT_RATE_MS = 10 * 60000, PT_MAX_FILES = 500, ptWrites = new Map();
+  function ptBudget(caller, now) {
+    const recent = (ptWrites.get(caller) || []).filter(t => now - t < PT_RATE_MS);
+    ptWrites.set(caller, recent);
+    if (recent.length >= PT_RATE_MAX) return false;
+    recent.push(now); return true;
+  }
   async function ptSet(caller, key, value) {
     if (!ptReady()) return { ok: false, code: 'no-backup-folder', reason: NO_FOLDER };
     const p = C.parseKey(key);
     if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return { ok: false, code: 'bad-key', reason: 'bad-key' };
     if (value === null || value === undefined) return { ok: true, where: 'folder', note: 'the backup folder only gains files; nothing was deleted from it' };
+    if (C.checkStoreWrite(key, value).ok !== true) return { ok: false, code: 'owner-mismatch', reason: 'owner-mismatch' };
     if (p.kind === 'chat-copy' && C.secretScan(value && value.data).length) return { ok: false, code: 'secret-shaped', reason: 'this chat copy holds a plaintext secret-shaped value, so it was not written to the backup folder' };
     const rec = { key, caller, size: 0, stale: false, value };
     try { rec.size = JSON.stringify(value).length; } catch (e) {}
     try {
       const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, true);
-      if (p.kind !== 'chat-index' && await exists(dir, t.name)) return { ok: true, where: 'folder' };
+      const there = await exists(dir, t.name);
+      if (p.kind !== 'chat-index' && there) return { ok: true, where: 'folder' };
+      if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
+      if (!there && (await ptNames(dir)).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' files in its backup folder; move or delete some there first' };
       const w = await (await dir.getFileHandle(t.name, { create: true })).createWritable();
       await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close();
       if (host) scheduleDraw();
@@ -18803,12 +18818,12 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     const p = C.parseKey(key); if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return undefined;
     if (p.kind === 'chat-copy') {
       const dir = await ptDir(p.gen, 'chat'), doc = dir && await ptDoc(dir, C.backupTarget({ key, value: null }).name);
-      return doc && doc.record.key === key ? doc.record.value : undefined;
+      return ownDoc(doc, key, caller) ? doc.record.value : undefined;
     }
     const dir = await ptDir(p.gen, p.kind === 'snapshot' ? 'snapshot' : 'chat'), re = p.kind === 'snapshot' ? /^snapshot-/ : /^index-/;
     let best = null;
     for (const name of (await ptNames(dir)).filter(n => re.test(n))) {
-      const doc = await ptDoc(dir, name); if (!doc || doc.record.key !== key) continue;
+      const doc = await ptDoc(dir, name); if (!ownDoc(doc, key, caller)) continue;
       const v = doc.record.value, score = [p.kind === 'snapshot' && v && typeof v.at === 'number' ? v.at : 0, Number(doc.exportedAt) || 0];
       if (!best || score[0] > best.score[0] || (score[0] === best.score[0] && score[1] > best.score[1])) best = { score, value: v };
     }

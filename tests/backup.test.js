@@ -280,6 +280,25 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-11-secret', chat('zeta', 11))).code, 'secret-shaped');
     assert.equal((await PV.set('other', 'weld:genvault:zeta/snapshot', snapV)).code, 'bad-key');
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', null)).ok, true); assert.ok(pickedDir.files().includes('zeta/chat/snap-9-abcdef.json'), 'a null save never deletes a file');
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/snapshot', Object.assign({}, snapV, { generator: 'alpha' }))).code, 'owner-mismatch');
+    // a folder file another generator stored under this key, or one naming another owner, is never served
+    const zchat = pickedDir.items.get('zeta').items.get('chat'), plant = (name, rec) => { const f = new FakeFile(name); f.text = JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now() + 99999, record: rec }); zchat.items.set(name, f); };
+    plant('snap-12-planted.json', { key: 'weld:genvault:zeta/chat/snap-12-planted', storedBy: 'alpha', value: copy });
+    plant('snap-13-owner.json', { key: 'weld:genvault:zeta/chat/snap-13-owner', storedBy: 'zeta', value: Object.assign({}, copy, { generator: 'alpha' }) });
+    plant('index-planted.json', { key: 'weld:genvault:zeta/chat/index', storedBy: 'alpha', value: [{ key: 'snap-12-planted' }] });
+    assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-12-planted'), undefined);
+    assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-13-owner'), undefined);
+    assert.equal((await PV.get('zeta', 'weld:genvault:zeta/chat/index')).length, 2, 'a newer index planted by another generator is ignored');
+    ['snap-12-planted.json', 'snap-13-owner.json', 'index-planted.json'].forEach(n => zchat.items.delete(n));
+    // disk guard: a write budget per generator, and a file cap per folder
+    const omega = at => ({ v: 1, at, protocol: 1, generator: 'omega', folder: 'omega', savedBy: 'omega', title: 'O', modelText: 'm' + at });
+    for (let i = 0; i < 30; i++) assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(1000 + i))).ok, true);
+    assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(2000))).code, 'rate-limited');
+    assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(1000))).ok, true, 'an unchanged copy already on disk costs nothing');
+    const psiChat = await (await pickedDir.getDirectoryHandle('psi', { create: true })).getDirectoryHandle('chat', { create: true });
+    for (let i = 0; i < 500; i++) psiChat.items.set('snap-' + i + '-filler.json', new FakeFile('snap-' + i + '-filler.json'));
+    assert.equal((await PV.set('psi', 'weld:genvault:psi/chat/snap-9999-newone', chat('psi', 9999, { data: { threads: [], config: {} } }))).code, 'folder-full');
+    pickedDir.items.delete('psi'); pickedDir.items.delete('omega');
   }
   // purge: one click; what is not provably in the folder is downloaded first; operational and out-of-scope keys stay
   {
