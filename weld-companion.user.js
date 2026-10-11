@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.86.0
+// @version      1.87.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.86.0';
+  var WC_VERSION = '1.87.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -2260,6 +2260,13 @@
       asChk,
       el('label', { class: 'wc-section-note', for: 'wc-autosave', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Save automatically into Weld storage (clipboard history, time tracking, generator saves). Off by default so storage does not fill up; manual Save, Pin, Push and Backups still work.' })
     ]));
+    var vcChk = el('input', { type: 'checkbox', id: 'wc-vault-chats', style: { margin: '0 8px 0 0' } });
+    vcChk.checked = sbVaultChatsOn();
+    vcChk.onchange = function () { gset('vaultChats', !!vcChk.checked); toast('Chat copies in the Weld vault: ' + (vcChk.checked ? 'ON' : 'OFF')); };
+    cardSb.appendChild(el('div', { class: 'wc-row', style: { alignItems: 'center', marginTop: '4px' } }, [
+      vcChk,
+      el('label', { class: 'wc-section-note', for: 'wc-vault-chats', style: { flex: '1', margin: '0', cursor: 'pointer' }, text: 'Let generators save chat copies into the Weld vault. Off by default; copies already saved stay in the Backups tab.' })
+    ]));
     cardSb.appendChild(row([ el('button', { class: 'wc-btn', text: 'Reset permissions', title: 'Forget every saved allow/deny answer (only used when asking is on)', onclick: function () { gset('sb:perm', {}); toast('Skybridge: permissions reset'); } }) ]));
     colB.appendChild(cardSb);
 
@@ -3433,6 +3440,8 @@
 
   // per-generator storage namespace, so one generator can't read another's keys
   function sbStoreKey(gen, key) { return 'sbk:' + gen + ':' + key; }
+  // Generator chat copies in the vault (weld:genvault:<gen>/chat/*) are refused unless this is turned on (Settings > Skybridge).
+  function sbVaultChatsOn() { return gget('vaultChats', false) === true; }
 
   function sbReply(source, origin, nonce, result) {
     try { source.postMessage({ channel: SB, type: 'reply', nonce: nonce, result: result }, origin && origin !== 'null' ? origin : '*'); } catch (e) {}
@@ -3447,6 +3456,7 @@
         var sbVault = false;
         if (typeof payload.key === 'string' && payload.key.indexOf('weld:genvault:') === 0 && window.WeldBackupCore && window.WeldBackupCore.parseKey) {
           var sbPk = window.WeldBackupCore.parseKey(payload.key);   // only the caller's own snapshot / chat-index / chat copies (max 10 chat copies)
+          if ((sbPk.kind === 'chat-index' || sbPk.kind === 'chat-copy') && !sbVaultChatsOn()) return resolve({ ok: false, code: 'vault-chats-off', reason: 'saving chat copies into the Weld vault is off (Settings > Skybridge)' });
           sbVault = sbPk.gen === gen && (sbPk.kind === 'snapshot' || sbPk.kind === 'chat-index' || sbPk.kind === 'chat-copy');
           if (sbVault && sbPk.kind === 'chat-copy') {
             try {

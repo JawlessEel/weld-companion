@@ -89,7 +89,7 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
 // Automatic saving into Weld storage is off by default: a generator write is refused and nothing is stored; reads still work.
 {
   const store = new Map();
-  const gget = () => undefined, gset = (k, v) => { store.set(k, v); return true; };
+  const gget = (k, d) => (store.has(k) ? store.get(k) : d), gset = (k, v) => { store.set(k, v); return true; };
   const off = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS: 'weldCompanion', autoSaveOn: () => false, gget, gset, GM_listValues: () => [], Promise, window: { WeldBackupCore: require('../src/backup-core.js') } });
   off.sbServiceStorage('gen-a', { op: 'set', key: 'slot', value: 1 }).then((r) => {
     assert.equal(r.ok, false);
@@ -102,7 +102,18 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
   }).then((r) => {
     assert.equal(r.ok, false);   // another generator's vault key is still refused
     assert.equal(r.code, 'autosave-off');
-    console.log('Skybridge storage writes are refused while automatic saving is off (vault copies still allowed)');
+    return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/chat/snap-1720000000000-abc123', value: { v: 1, generator: 'gen-a' } });
+  }).then((r) => {
+    assert.deepEqual([r.ok, r.code], [false, 'vault-chats-off'], 'chat copies are refused while vault chat saving is off');
+    return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/chat/index', value: [] });
+  }).then((r) => {
+    assert.deepEqual([r.ok, r.code], [false, 'vault-chats-off'], 'the chat index is refused too');
+    assert.equal(store.has('sbk:gen-a:weld:genvault:gen-a/chat/index'), false);
+    store.set('vaultChats', true);
+    return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/chat/index', value: [] });
+  }).then((r) => {
+    assert.equal(r.ok, true, 'turning vault chat saving on allows the chat index again');
+    console.log('Skybridge storage writes are refused while automatic saving is off (vault snapshots still allowed, chat copies only when enabled)');
   }).catch((e) => { console.error(e); process.exit(1); });
 }
 // Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
