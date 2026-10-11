@@ -98,6 +98,10 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/snapshot', value: { v: 1, generator: 'gen-a' } });
   }).then((r) => {
     assert.equal(r.ok, true);   // vault copies for Backups / GitHub sync are not blocked
+    return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-b/snapshot', value: { v: 1, generator: 'gen-b' } });
+  }).then((r) => {
+    assert.equal(r.ok, false);   // another generator's vault key is still refused
+    assert.equal(r.code, 'autosave-off');
     console.log('Skybridge storage writes are refused while automatic saving is off (vault copies still allowed)');
   }).catch((e) => { console.error(e); process.exit(1); });
 }

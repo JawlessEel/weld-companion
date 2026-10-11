@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.82.1
+// @version      1.82.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.82.1';
+  var WC_VERSION = '1.82.2';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -3198,7 +3198,18 @@
       if (op === 'get') {
         resolve({ ok: true, value: gget(sbStoreKey(gen, payload.key), null) });
       } else if (op === 'set') {
-        var sbVault = typeof payload.key === 'string' && payload.key.indexOf('weld:genvault:') === 0;   // deliberate Backups/GitHub-sync copies (as in 1.74.0); only passive auto-saves are gated
+        var sbVault = false;
+        if (typeof payload.key === 'string' && payload.key.indexOf('weld:genvault:') === 0 && window.WeldBackupCore && window.WeldBackupCore.parseKey) {
+          var sbPk = window.WeldBackupCore.parseKey(payload.key);   // only the caller's own snapshot / chat-index / chat copies (max 10 chat copies)
+          sbVault = sbPk.gen === gen && (sbPk.kind === 'snapshot' || sbPk.kind === 'chat-index' || sbPk.kind === 'chat-copy');
+          if (sbVault && sbPk.kind === 'chat-copy') {
+            try {
+              var sbCopyBase = NS + ':' + sbStoreKey(gen, 'weld:genvault:' + gen + '/chat/snap-'), sbCopies = 0, sbAll = (typeof GM_listValues === 'function') ? GM_listValues() : [];
+              for (var sbi = 0; sbi < sbAll.length; sbi++) if (typeof sbAll[sbi] === 'string' && sbAll[sbi].indexOf(sbCopyBase) === 0 && sbAll[sbi] !== NS + ':' + sbStoreKey(gen, payload.key)) sbCopies++;
+              if (sbCopies >= 10) sbVault = false;
+            } catch (e) {}
+          }
+        }   // deliberate Backups/GitHub-sync copies (as in 1.74.0); only passive auto-saves are gated
         if (!autoSaveOn() && !sbVault) return resolve({ ok: false, code: 'autosave-off', reason: 'automatic saving into Weld storage is off (Settings > Skybridge)' });
         var BC = window.WeldBackupCore, chk = (BC && BC.checkStoreWrite) ? BC.checkStoreWrite(payload.key, payload.value) : { ok: true };   // refuses a vault record whose generator field names another owner
         if (!chk.ok) return resolve({ ok: false, code: chk.reason, reason: chk.reason });
