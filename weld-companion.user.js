@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.84.0
+// @version      1.85.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.84.0';
+  var WC_VERSION = '1.85.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1054,7 +1054,10 @@
     // objects (content-addressed; an unused extra is harmless). Branch moves/creates are sent once and re-read instead.
     function api(method, path, body, done) {
       if (opts && typeof opts.onStep === 'function') { try { opts.onStep(method + ' ' + path.split('/')[0]); } catch (e) {} }
-      var tries = (method === 'GET' || (method === 'POST' && path !== 'refs')) ? 2 : 1, attempt = 0, label = lastStep.replace(/…$/, '');
+      call(method, base + path, body, done, (method === 'GET' || (method === 'POST' && path !== 'refs')) ? 2 : 1);
+    }
+    function call(method, fullPath, body, done, tries) {
+      var attempt = 0, label = lastStep.replace(/…$/, '');
       (function go() {
         attempt++;
         var started = Date.now();
@@ -1064,7 +1067,7 @@
           emit(label + ' — waiting ' + s + 's' + (attempt > 1 ? ' (second try)' : '') + '…'
             + (s >= 20 ? ' Tampermonkey is slow to relay this (GitHub itself is fast). Usually oversized Weld storage: afterwards run Tampermonkey menu → “Weld: Check storage size / free space”.' : ''));
         }, 1000);
-        ghApi(method, base + path, token, body, function (err, st, json) {
+        ghApi(method, fullPath, token, body, function (err, st, json) {
           clearInterval(tick);
           if (err && err.stalled && attempt < tries) { emit(label + ' — no reply in 90s, sending again…'); return go(); }
           if (err && err.stalled && tries > 1) {
@@ -1076,10 +1079,19 @@
       })();
     }
     function info(sha, htmlUrl) { return { sha: sha, url: htmlUrl || ('https://github.com/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/commit/' + sha) }; }
-    progress('Checking ' + o + '/' + repo + '@' + branch + '…');
     function fail(action, err, st, json) { cb(err ? new Error(action + ': ' + err.message) : ghApiError(action, st, json)); }
     var branchPath = ghBranchPath(branch);
     if (!branchPath) return cb(new Error('Branch is required'));
+    // Fast path for a plain push of text files: GraphQL does it in 2 requests (1 when nothing changed) instead of
+    // ~7 REST ones. Each request through Tampermonkey can take a long time, so the count matters far more than size.
+    // Pull requests, binary/lazy files and browsers without hashing use the REST path below; so does any GraphQL
+    // failure before the commit request is sent.
+    var fastOk = !(opts && (opts.newBranch || opts.transport === 'rest')) && files.length > 0 && ghBlobShaAvailable() && typeof btoa === 'function'
+      && files.every(function (f) { return !f.read && (!f.encoding || f.encoding === 'utf-8') && typeof f.content === 'string'; });
+    if (fastOk) return ghPushGraphQL(rest);
+    rest();
+    function rest() {
+    progress('Checking ' + o + '/' + repo + '@' + branch + '…');
     api('GET', 'ref/heads/' + branchPath, null, function (err, st, ref) {
       if (!err && st === 404) {
         // A 404 can mean "repo hidden from this token" or "no such branch"; ask GitHub which, and who the token is.
@@ -1175,6 +1187,56 @@
         listExisting(putBlob);
       });
     });
+    }
+    function ghPushGraphQL(fallback) {
+      var head = null, names = files.map(function (f, n) { return 'f' + n; });
+      function gql(query, variables, done, tries) { call('POST', '/graphql', { query: query, variables: variables }, done, tries); }
+      function gqlErr(st, json) { return (json && json.errors && json.errors.length) ? json.errors.map(function (e) { return e.message; }).join('; ') : (json && json.message) || ('HTTP ' + st); }
+      // One read: the branch head plus the current blob hash of every target path (null when the file is new).
+      var q = 'query($owner:String!,$name:String!,$ref:String!' + names.map(function (n) { return ',$' + n + ':String!'; }).join('') + '){repository(owner:$owner,name:$name){'
+        + 'ref(qualifiedName:$ref){target{oid ...on Commit{url}}}'
+        + names.map(function (n) { return n + ':object(expression:$' + n + '){...on Blob{oid}}'; }).join('') + '}}';
+      function readState(done) {
+        var vars = { owner: o, name: repo, ref: 'refs/heads/' + branch };
+        files.forEach(function (f, n) { vars[names[n]] = branch + ':' + f.path; });
+        gql(q, vars, function (err, st, json) {
+          var r = !err && st === 200 && json && !json.errors && json.data && json.data.repository;
+          if (!r || !r.ref || !r.ref.target || !r.ref.target.oid) return done(null);
+          done({ head: r.ref.target.oid, url: r.ref.target.url, oids: names.map(function (n) { return r[n] && r[n].oid || null; }) });
+        }, 2);
+      }
+      progress('Checking ' + o + '/' + repo + '@' + branch + '…');
+      readState(function (s) {
+        if (!s) return fallback();   // branch missing, no access, or GraphQL unavailable: REST explains it properly
+        head = s.head;
+        Promise.all(files.map(function (f) { return ghBlobSha(f.content); })).then(function (shas) {
+          var changed = files.filter(function (f, n) { return !shas[n] || shas[n] !== s.oids[n]; });
+          try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
+          if (!changed.length) return cb(null, 'unchanged', info(head, s.url));
+          progress('Committing ' + changed.map(function (f) { return f.path; }).join(' + ') + '…');
+          var input = { branch: { repositoryNameWithOwner: o + '/' + repo, branchName: branch }, message: { headline: msg }, expectedHeadOid: head,
+            fileChanges: { additions: changed.map(function (f) { return { path: f.path, contents: ghB64(f.content) }; }) } };
+          gql('mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid url}}}', { input: input }, function (err, st, json) {
+            var c = !err && st === 200 && json && !json.errors && json.data && json.data.createCommitOnBranch && json.data.createCommitOnBranch.commit;
+            if (c && c.oid) return cb(null, 'updated', info(c.oid, c.url));
+            if (!err) return fallback();   // GitHub refused it (permission, branch moved...): nothing was written; REST retries cleanly
+            // No reply to the commit request: it may still have landed. Re-read before reporting anything.
+            progress('No reply from GitHub; checking whether ' + branch + ' was updated…');
+            readState(function (now) {
+              if (now && now.head !== head && changed.every(function (f) { var n = files.indexOf(f); return now.oids[n] === shas[n]; })) return cb(null, 'updated', info(now.head, now.url));
+              if (now && now.head === head) return cb(new Error('Commit: ' + err.message + ' (' + gqlErr(st, json) + '). The branch was not changed.'));
+              cb(new Error('Commit: ' + err.message + ' GitHub could not confirm whether the push landed; open the repo to check before retrying.'));
+            });
+          }, 1);
+        });
+      });
+    }
+  }
+  // UTF-8 text -> base64 (GraphQL file contents), chunked so large panels don't overflow the argument limit.
+  function ghB64(text) {
+    var b = new TextEncoder().encode(String(text)), s = '', CH = 0x8000;
+    for (var i = 0; i < b.length; i += CH) s += String.fromCharCode.apply(null, b.subarray(i, i + CH));
+    return btoa(s);
   }
   // Pre-push check with Weld's own analyzer (undefined names, silent no-ops, id collisions, ...). It only
   // adds lines to the confirmation you already see, never blocks, and can be switched off in Code checks.
@@ -1275,12 +1337,14 @@
     if (!confirm(confirmMsg)) { toast('Cancelled'); return; }
     var where = R.cfg.owner + '/' + R.cfg.repo + '@' + branch;
     var status = ghPushStatus('Pushing ' + name + ' to ' + where + '\u2026');
+    var t0 = Date.now();
+    function took() { var s = Math.round((Date.now() - t0) / 1000); return s < 5 ? '' : ' Took ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's') + '.'; }
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
     ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result, info) {
-      if (err) { console.error('[weld push]', err.message); status.end('\u2717 Push failed: ' + err.message); return; }
+      if (err) { console.error('[weld push]', err.message); status.end('\u2717 Push failed: ' + err.message + took()); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
-      if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.', info && info.url, 'View latest commit'); return; }
-      status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.', info && info.url, 'View commit');
+      if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.' + took(), info && info.url, 'View latest commit'); return; }
+      status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.' + took(), info && info.url, 'View commit');
     }, { onProgress: function (t) { status.step(t); } });
   }
   function ghConfigure() {

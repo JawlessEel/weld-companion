@@ -144,7 +144,7 @@ const B = require('../src/github-backup');
         cb(null, method === 'POST' ? 201 : 200, { sha: 'new' });
       } };
       vm.createContext(context); vm.runInContext(uploader, context);
-      const [error, result] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'm', (e, res) => r([e, res])));
+      const [error, result] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'm', (e, res) => r([e, res]), { transport: 'rest' }));
       return { error, result, calls, blobs: calls.filter(c => c.url.endsWith('/blobs')).map(c => c.body.content) };
     }
     const pair = [{ path: 'dad/a.txt', content: 'top ü' }, { path: 'dad/b.html', content: '<p>big</p>' }];
@@ -157,6 +157,54 @@ const B = require('../src/github-backup');
     assert.equal(tree.length, 2); assert.equal(tree[0].sha, gitSha('top ü'));
     const fresh = await hashedPush(pair, {});
     assert.equal(fresh.result, 'updated'); assert.equal(fresh.blobs.length, 2);
+  }
+  // GraphQL fast path: one read (head + blob hashes), one commit; unchanged = one request; failures before the commit fall back to REST.
+  {
+    const gitSha = s => require('crypto').createHash('sha1').update(Buffer.concat([Buffer.from('blob ' + Buffer.byteLength(s) + '\0'), Buffer.from(s)])).digest('hex');
+    async function gqlPush(files, onGitHub, mock = {}) {
+      const calls = []; let reads = 0;
+      const context = { console, Promise, setInterval, clearInterval, crypto: webcrypto, TextEncoder, btoa, ghApi(method, url, token, body, cb) {
+        calls.push({ method, url, body });
+        if (url === '/graphql' && /^query/.test(body.query)) {
+          reads++;
+          if (mock.noBranch) return cb(null, 200, { data: { repository: { ref: null } } });
+          const landed = reads > 1 && mock.landed, repo = { ref: { target: { oid: landed ? 'head2' : 'head1', url: 'https://github.com/o/r/commit/x' } } };
+          files.forEach((f, n) => { const c = landed ? f.content : onGitHub[f.path]; repo['f' + n] = c == null ? null : { oid: gitSha(c) }; });
+          return cb(null, 200, { data: { repository: repo } });
+        }
+        if (url === '/graphql') {
+          if (mock.stallCommit) return cb(Object.assign(new Error('GitHub request timed out.'), { stalled: true }), 0, null);
+          if (mock.refuse) return cb(null, 200, { errors: [{ message: 'Expected branch to point to head1' }] });
+          return cb(null, 200, { data: { createCommitOnBranch: { commit: { oid: 'c0ffee', url: 'https://github.com/o/r/commit/c0ffee' } } } });
+        }
+        if (method === 'GET' && url.includes('/ref/')) return cb(null, 200, { object: { sha: 'parent' } });
+        if (method === 'GET' && url.includes('/commits/')) return cb(null, 200, { tree: { sha: 'tree' } });
+        if (method === 'POST' && url.endsWith('/trees')) return cb(null, 201, { sha: 'tree2' });
+        cb(null, method === 'POST' ? 201 : 200, { sha: 'new' });
+      } };
+      vm.createContext(context); vm.runInContext(uploader, context);
+      const [error, result, info] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'm', (e, res, i) => r([e, res, i])));
+      return { error, result, info, calls, gql: calls.filter(c => c.url === '/graphql'), rest: calls.filter(c => c.url.includes('/git/')) };
+    }
+    const pair = [{ path: 'dad/a.txt', content: 'top ü' }, { path: 'dad/b.html', content: '<p>big</p>' }];
+    const same = await gqlPush(pair, { 'dad/a.txt': 'top ü', 'dad/b.html': '<p>big</p>' });
+    assert.equal(same.result, 'unchanged'); assert.equal(same.calls.length, 1, 'unchanged push is a single request');
+    assert.equal(same.gql[0].body.variables.f1, 'main:dad/b.html');
+    const one = await gqlPush(pair, { 'dad/a.txt': 'top ü', 'dad/b.html': '<p>old</p>' });
+    assert.equal(one.error, null); assert.equal(one.result, 'updated'); assert.equal(one.info.sha, 'c0ffee'); assert.equal(one.calls.length, 2);
+    const input = one.gql[1].body.variables.input;
+    assert.equal(input.expectedHeadOid, 'head1'); assert.equal(input.branch.branchName, 'main');
+    assert.deepEqual(input.fileChanges.additions.map(a => [a.path, Buffer.from(a.contents, 'base64').toString('utf8')]), [['dad/b.html', '<p>big</p>']]);
+    const utf = await gqlPush([{ path: 'dad/a.txt', content: 'top ü ✓' }], {});
+    assert.equal(Buffer.from(utf.gql[1].body.variables.input.fileChanges.additions[0].contents, 'base64').toString('utf8'), 'top ü ✓');
+    const noBranch = await gqlPush(pair, {}, { noBranch: true });
+    assert.ok(noBranch.rest.length > 0, 'missing branch falls back to REST for its diagnostics');
+    const refused = await gqlPush(pair, {}, { refuse: true });
+    assert.equal(refused.result, 'updated'); assert.equal(refused.gql.length, 2); assert.ok(refused.rest.some(c => c.method === 'PATCH'), 'refused commit retried via REST');
+    const landedLate = await gqlPush(pair, {}, { stallCommit: true, landed: true });
+    assert.equal(landedLate.error, null); assert.equal(landedLate.result, 'updated'); assert.equal(landedLate.rest.length, 0);
+    const lostCommit = await gqlPush(pair, {}, { stallCommit: true });
+    assert.match(lostCommit.error.message, /branch was not changed/); assert.equal(lostCommit.rest.length, 0, 'a commit that may have landed is never resent');
   }
   // A read that gets no reply at all is sent once more, then the push carries on.
   const retried = await push({ path: 'dad/x', content: 'x' }, null, { stallFirst: true });
