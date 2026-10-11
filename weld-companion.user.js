@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.82.0
+// @version      1.82.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.82.0';
+  var WC_VERSION = '1.82.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -3198,7 +3198,8 @@
       if (op === 'get') {
         resolve({ ok: true, value: gget(sbStoreKey(gen, payload.key), null) });
       } else if (op === 'set') {
-        if (!autoSaveOn()) return resolve({ ok: false, code: 'autosave-off', reason: 'automatic saving into Weld storage is off (Settings > Skybridge)' });
+        var sbVault = typeof payload.key === 'string' && payload.key.indexOf('weld:genvault:') === 0;   // deliberate Backups/GitHub-sync copies (as in 1.74.0); only passive auto-saves are gated
+        if (!autoSaveOn() && !sbVault) return resolve({ ok: false, code: 'autosave-off', reason: 'automatic saving into Weld storage is off (Settings > Skybridge)' });
         var BC = window.WeldBackupCore, chk = (BC && BC.checkStoreWrite) ? BC.checkStoreWrite(payload.key, payload.value) : { ok: true };   // refuses a vault record whose generator field names another owner
         if (!chk.ok) return resolve({ ok: false, code: chk.reason, reason: chk.reason });
         var sbSize = 0; try { sbSize = JSON.stringify(payload.value === undefined ? null : payload.value).length; } catch (e) {}

@@ -95,7 +95,10 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     assert.equal(r.ok, false);
     assert.equal(r.code, 'autosave-off');
     assert.equal(store.size, 0);
-    console.log('Skybridge storage writes are refused while automatic saving is off');
+    return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/snapshot', value: { v: 1, generator: 'gen-a' } });
+  }).then((r) => {
+    assert.equal(r.ok, true);   // vault copies for Backups / GitHub sync are not blocked
+    console.log('Skybridge storage writes are refused while automatic saving is off (vault copies still allowed)');
   }).catch((e) => { console.error(e); process.exit(1); });
 }
 // Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
