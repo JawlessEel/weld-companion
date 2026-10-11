@@ -13,7 +13,7 @@ function between(start, end) {
 }
 
 function load(names, code, extras) {
-  const context = { URL, Number, isFinite, Array, console, ...extras };
+  const context = { URL, Number, isFinite, Array, console, setInterval() { return 0; }, clearInterval() {}, ...extras };
   vm.createContext(context);
   vm.runInContext(code, context);
   return Object.fromEntries(names.map((name) => [name, context[name]]));
@@ -281,6 +281,7 @@ agentBtn.listeners[0].fn({}); assert.equal(routed, 2);
   const push = load(['ghPushFilesAtomic'], between('function ghApi(', 'function ghGateNote('), {
     setTimeout(fn) { timers.set(++id, fn); return id; },
     clearTimeout(key) { timers.delete(key); },
+    setInterval() { return 0; }, clearInterval() {},
     GM_xmlhttpRequest(o) {
       requests.push(o);
       if (o.url.endsWith('/ref/heads/main')) o.onload({ status: 200, responseText: '{"object":{"sha":"parent"}}' });
@@ -292,10 +293,13 @@ agentBtn.listeners[0].fn({}); assert.equal(routed, 2);
   push.ghPushFilesAtomic('owner', 'repo', 'main', [{ path: 'a.txt', content: 'dsl' }], 'private-token', 'msg',
     (err, result) => { outcome = { err, result }; });
   assert.equal(timers.size, 1);
+  [...timers.values()][0]();   // no reply in 90s: the blob is sent once more
+  assert.equal(outcome, undefined);
+  assert.equal(timers.size, 1);
   [...timers.values()][0]();
-  assert.match(outcome.err.message, /^POST blob:.*timed out/);
+  assert.match(outcome.err.message, /^POST blob:.*no reply after two 90s tries.*Nothing was changed/);
   hanging.onload({ status: 201, responseText: '{"sha":"late-blob"}' });
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
   assert.ok(!requests.some(r => r.method === 'PATCH'));
   assert.equal(timers.size, 0);
 }

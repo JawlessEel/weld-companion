@@ -88,9 +88,12 @@ const B = require('../src/github-backup');
   const uploader = shipped.slice(shipped.indexOf('function ghApiError('), shipped.indexOf('function ghGateNote('));
   async function push(file, validate, mock = {}) {
     const calls = [], progress = [];
-    const context = { console, Promise, ghApi(method, url, token, body, cb) {
+    const stalled = () => Object.assign(new Error('GitHub request timed out.'), { stalled: true });
+    const context = { console, Promise, setInterval, clearInterval, ghApi(method, url, token, body, cb) {
       calls.push({ method, url, body });
-      if (method === 'PATCH' && mock.patchTimeout) return cb(new Error('GitHub request timed out.'), 0, null);
+      if (mock.stallFirst && calls.length === 1) return cb(stalled(), 0, null);
+      if (mock.stallAll) return cb(stalled(), 0, null);
+      if (method === 'PATCH' && mock.patchTimeout) return cb(stalled(), 0, null);
       if (method === 'GET' && url.includes('/ref/')) {
         const recheck = calls.filter(c => c.method === 'GET' && c.url.includes('/ref/')).length > 1;
         return cb(null, 200, { object: { sha: recheck && mock.landed ? 'new' : 'parent' } });
@@ -126,5 +129,42 @@ const B = require('../src/github-backup');
   // Final step times out and the branch did not move: still a failure.
   const lost = await push({ path: 'dad/x', content: 'x' }, null, { patchTimeout: true });
   assert.ok(lost.error); assert.match(lost.error.message, /PATCH branch/);
+  // Files already on the branch with the same git hash are not re-uploaded; all unchanged -> no tree, no commit.
+  {
+    const gitSha = s => require('crypto').createHash('sha1').update(Buffer.concat([Buffer.from('blob ' + Buffer.byteLength(s) + '\0'), Buffer.from(s)])).digest('hex');
+    assert.equal(gitSha('hello\n'), 'ce013625030ba8dba906f756967f9e9ca394464a', 'git blob hash formula');
+    async function hashedPush(files, onGitHub) {
+      const calls = [];
+      const context = { console, Promise, setInterval, clearInterval, crypto: webcrypto, TextEncoder, ghApi(method, url, token, body, cb) {
+        calls.push({ method, url, body });
+        if (method === 'GET' && url.includes('/ref/')) return cb(null, 200, { object: { sha: 'parent' } });
+        if (method === 'GET' && url.includes('/commits/')) return cb(null, 200, { tree: { sha: 'tree' } });
+        if (method === 'GET' && url.includes('/trees/parent:dad')) return cb(null, 200, { tree: Object.entries(onGitHub).map(([p, c]) => ({ path: p, type: 'blob', sha: gitSha(c) })) });
+        if (method === 'POST' && url.endsWith('/trees')) return cb(null, 201, { sha: 'tree2' });
+        cb(null, method === 'POST' ? 201 : 200, { sha: 'new' });
+      } };
+      vm.createContext(context); vm.runInContext(uploader, context);
+      const [error, result] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'm', (e, res) => r([e, res])));
+      return { error, result, calls, blobs: calls.filter(c => c.url.endsWith('/blobs')).map(c => c.body.content) };
+    }
+    const pair = [{ path: 'dad/a.txt', content: 'top ü' }, { path: 'dad/b.html', content: '<p>big</p>' }];
+    const same = await hashedPush(pair, { 'a.txt': 'top ü', 'b.html': '<p>big</p>' });
+    assert.equal(same.error, null); assert.equal(same.result, 'unchanged');
+    assert.equal(same.blobs.length, 0); assert.equal(same.calls.filter(c => c.method === 'POST' || c.method === 'PATCH').length, 0);
+    const oneChanged = await hashedPush(pair, { 'a.txt': 'top ü', 'b.html': '<p>old</p>' });
+    assert.equal(oneChanged.result, 'updated'); assert.deepEqual(oneChanged.blobs, ['<p>big</p>']);
+    const tree = oneChanged.calls.find(c => c.method === 'POST' && c.url.endsWith('/trees')).body.tree;
+    assert.equal(tree.length, 2); assert.equal(tree[0].sha, gitSha('top ü'));
+    const fresh = await hashedPush(pair, {});
+    assert.equal(fresh.result, 'updated'); assert.equal(fresh.blobs.length, 2);
+  }
+  // A read that gets no reply at all is sent once more, then the push carries on.
+  const retried = await push({ path: 'dad/x', content: 'x' }, null, { stallFirst: true });
+  assert.equal(retried.error, null); assert.equal(retried.result, 'updated');
+  assert.equal(retried.calls.filter(c => c.method === 'GET' && c.url.includes('/ref/')).length, 2);
+  // Never any reply: two tries, then a plain failure that says nothing changed; no ref move.
+  const dead = await push({ path: 'dad/x', content: 'x' }, null, { stallAll: true });
+  assert.ok(dead.error); assert.match(dead.error.message, /Nothing was changed on GitHub/);
+  assert.equal(dead.calls.length, 2); assert.equal(dead.calls.filter(c => c.method === 'PATCH').length, 0);
   console.log('GitHub backup binary, chunk restore, integrity, mutation and cache privacy tests passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

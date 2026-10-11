@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.83.1
+// @version      1.84.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.83.1';
+  var WC_VERSION = '1.84.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -951,7 +951,8 @@
   // stored locally and sent ONLY to api.github.com in the Authorization header --
   // never logged, never put in commit messages.
   function ghToken() { return gget('ghToken', '') || ''; }
-  function ghApi(method, apiPath, token, body, cb) {
+  // opt.timeoutMs (optional): per-request watchdog; default 90s. A timeout error carries err.stalled = true.
+  function ghApi(method, apiPath, token, body, cb, opt) {
     var settled = false, request = null, watchdog = null;
     function finish(err, status, json) {
       if (settled) return;
@@ -960,11 +961,13 @@
       cb(err, status, json);
     }
     function timedOut() {
-      finish(new Error('GitHub request timed out. Check your connection and Tampermonkey access to api.github.com; check GitHub before retrying.'), 0, null);
-      try { if (request && typeof request.abort === 'function') request.abort(); } catch (e) {}
+      var e = new Error('GitHub request timed out. Check your connection and Tampermonkey access to api.github.com; check GitHub before retrying.');
+      e.stalled = true;
+      finish(e, 0, null);
+      try { if (request && typeof request.abort === 'function') request.abort(); } catch (e2) {}
     }
     // The watchdog also covers userscript-manager requests that never call a handler.
-    watchdog = setTimeout(timedOut, 90000);
+    watchdog = setTimeout(timedOut, (opt && opt.timeoutMs) || 90000);
     try {
       request = GM_xmlhttpRequest({
         method: method, url: 'https://api.github.com' + apiPath,
@@ -981,6 +984,19 @@
   }
   function ghApiError(action, status, json) { return new Error(action + ' ' + status + (json && json.message ? ' ' + json.message : '')); }
   function ghBranchPath(branch) { return String(branch || '').replace(/^refs\/heads\//, '').split('/').map(encodeURIComponent).join('/'); }
+  // Git's blob hash of a UTF-8 text: SHA-1 over "blob <bytes>\0<bytes>". Matches the sha GitHub lists for that file,
+  // so a push can tell an unchanged file without uploading it. Resolves null when hashing is unavailable.
+  function ghBlobShaAvailable() { try { return typeof crypto !== 'undefined' && !!crypto.subtle && typeof TextEncoder !== 'undefined'; } catch (e) { return false; } }
+  function ghBlobSha(text) {
+    try {
+      if (!ghBlobShaAvailable()) return Promise.resolve(null);
+      var enc = new TextEncoder(), body = enc.encode(String(text)), head = enc.encode('blob ' + body.length + '\0');
+      var all = new Uint8Array(head.length + body.length); all.set(head); all.set(body, head.length);
+      return crypto.subtle.digest('SHA-1', all).then(function (buf) {
+        return Array.prototype.map.call(new Uint8Array(buf), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
   function ghBackupEval(op, arg) {
     var iframe = document.querySelector('#outputIframeEl'), id = pageProp('generatorPublicId');
     if (!iframe || !iframe.contentWindow || !/^[\w-]+$/.test(String(id || ''))) return Promise.reject(new Error('Load the generator preview before pushing'));
@@ -1028,11 +1044,37 @@
     function clean(v, label) { return String(v || '').replace(new RegExp('^\\s*' + label + '\\s*[=:]\\s*', 'i'), '').trim(); }
     o = clean(o, 'owner'); repo = clean(repo, 'repo'); branch = clean(branch, 'branch');
     var base = '/repos/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/git/';
+    var lastStep = '';
+    function emit(text) { if (opts && typeof opts.onProgress === 'function') { try { opts.onProgress(text); } catch (e) {} } }
+    function progress(text) { lastStep = text; emit(text); }
+    // Live seconds counter after 5s, so a slow step never looks frozen. GitHub answers in well under a second; a
+    // long wait is Tampermonkey being slow to relay the request (most often oversized stored values), not GitHub.
+    // Slow replies are waited for (90s watchdog), never cut short. A request that gets NO reply in 90s (Tampermonkey's
+    // background worker restarting can drop one) is sent once more when that is safe: reads, and blob/tree/commit
+    // objects (content-addressed; an unused extra is harmless). Branch moves/creates are sent once and re-read instead.
     function api(method, path, body, done) {
       if (opts && typeof opts.onStep === 'function') { try { opts.onStep(method + ' ' + path.split('/')[0]); } catch (e) {} }
-      ghApi(method, base + path, token, body, done);
+      var tries = (method === 'GET' || (method === 'POST' && path !== 'refs')) ? 2 : 1, attempt = 0, label = lastStep.replace(/…$/, '');
+      (function go() {
+        attempt++;
+        var started = Date.now();
+        var tick = setInterval(function () {
+          var s = Math.round((Date.now() - started) / 1000);
+          if (s < 5) return;
+          emit(label + ' — waiting ' + s + 's' + (attempt > 1 ? ' (second try)' : '') + '…'
+            + (s >= 20 ? ' Tampermonkey is slow to relay this (GitHub itself is fast). Usually oversized Weld storage: afterwards run Tampermonkey menu → “Weld: Check storage size / free space”.' : ''));
+        }, 1000);
+        ghApi(method, base + path, token, body, function (err, st, json) {
+          clearInterval(tick);
+          if (err && err.stalled && attempt < tries) { emit(label + ' — no reply in 90s, sending again…'); return go(); }
+          if (err && err.stalled && tries > 1) {
+            var e2 = new Error('no reply after two 90s tries (Tampermonkey never delivered the request). Nothing was changed on GitHub. Reload this Perchance tab (or turn Tampermonkey off and on), run “Weld: Check storage size / free space” from the Tampermonkey menu, then push again.');
+            e2.stalled = true; err = e2;
+          }
+          done(err, st, json);
+        });
+      })();
     }
-    function progress(text) { if (opts && typeof opts.onProgress === 'function') { try { opts.onProgress(text); } catch (e) {} } }
     function info(sha, htmlUrl) { return { sha: sha, url: htmlUrl || ('https://github.com/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/commit/' + sha) }; }
     progress('Checking ' + o + '/' + repo + '@' + branch + '…');
     function fail(action, err, st, json) { cb(err ? new Error(action + ': ' + err.message) : ghApiError(action, st, json)); }
@@ -1053,21 +1095,48 @@
       var parent = ref.object.sha;
       api('GET', 'commits/' + encodeURIComponent(parent), null, function (eCommit, sCommit, parentCommit) {
         if (eCommit || sCommit !== 200 || !parentCommit || !parentCommit.tree || !parentCommit.tree.sha) return fail('GET commit', eCommit, sCommit, parentCommit);
-        var blobs = [], i = 0;
+        var blobs = [], i = 0, skipped = 0, have = {};
         function putBlob() {
           if (i >= files.length) return putTree();
           var f = files[i++];
-          progress('Uploading ' + f.path + ' (' + i + ' of ' + files.length + ')…');
-          function send(content) { api('POST', 'blobs', { content: content, encoding: f.encoding || 'utf-8' }, function (eBlob, sBlob, blob) {
+          function send(content) {
+            progress('Uploading ' + f.path + ' (' + i + ' of ' + files.length + ')…');
+            api('POST', 'blobs', { content: content, encoding: f.encoding || 'utf-8' }, function (eBlob, sBlob, blob) {
             if (eBlob || (sBlob !== 201 && sBlob !== 200) || !blob || !blob.sha) return fail('POST blob', eBlob, sBlob, blob);
             blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
             putBlob();
           }); }
           if (f.read) Promise.resolve().then(f.read).then(send).catch(function () { cb(new Error('Backup asset read failed; branch not updated')); });
-          else send(f.content);
+          else if (!have[f.path] || (f.encoding && f.encoding !== 'utf-8')) send(f.content);
+          // GitHub already holds a file at this path: upload only if its git hash differs from ours.
+          else ghBlobSha(f.content).then(function (sha) {
+            if (sha && sha === have[f.path]) { skipped++; progress('Unchanged: ' + f.path + ' (' + i + ' of ' + files.length + ')'); blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: sha }); putBlob(); }
+            else send(f.content);
+          });
+        }
+        // Read the existing hashes of the target folders (one small listing per folder) so unchanged files are not
+        // re-uploaded; a large unchanged HTML panel was the slowest part of a push. Any failure here just means
+        // "upload everything", as before. Skipped when the browser cannot hash (no crypto.subtle).
+        function listExisting(next) {
+          if (!ghBlobShaAvailable()) return next();
+          var dirs = [];
+          files.forEach(function (f) { if (f.read || (f.encoding && f.encoding !== 'utf-8')) return; var d = f.path.indexOf('/') === -1 ? '' : f.path.slice(0, f.path.lastIndexOf('/')); if (dirs.indexOf(d) === -1) dirs.push(d); });
+          if (!dirs.length) return next();
+          progress('Comparing with ' + branch + '…');
+          var k = 0;
+          (function one() {
+            if (k >= dirs.length) return next();
+            var d = dirs[k++], ref = d ? parent + ':' + d.split('/').map(encodeURIComponent).join('/') : parentCommit.tree.sha;
+            api('GET', 'trees/' + ref, null, function (eT, sT, t) {
+              if (!eT && sT === 200 && t && t.tree && t.tree.forEach) t.tree.forEach(function (x) { if (x && x.type === 'blob' && x.sha) have[(d ? d + '/' : '') + x.path] = x.sha; });
+              one();
+            });
+          })();
         }
         function putTree() {
           try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
+          // Every file matched what is already on the branch: nothing to commit.
+          if (files.length && skipped === files.length) return cb(null, 'unchanged', info(parent, parentCommit.html_url));
           api('POST', 'trees', { base_tree: parentCommit.tree.sha, tree: blobs }, function (eTree, sTree, tree) {
             if (eTree || (sTree !== 201 && sTree !== 200) || !tree || !tree.sha) return fail('POST tree', eTree, sTree, tree);
             // Same tree as the branch head: GitHub already has these exact files. Skip the empty commit.
@@ -1079,8 +1148,13 @@
                 if (!/^[\w.\/-]{1,120}$/.test(opts.newBranch) || /\.\.|\/\/|\.lock$|^\/|\/$/.test(opts.newBranch)) return fail('POST branch', new Error('Unsafe branch name'));
                 progress('Creating branch ' + opts.newBranch + '…');
                 return api('POST', 'refs', { ref: 'refs/heads/' + opts.newBranch, sha: commit.sha }, function (eNew2, sNew2, made) {
-                  if (eNew2 || sNew2 !== 201) return fail('POST branch', eNew2, sNew2, made);
-                  cb(null, 'created', info(commit.sha, commit.html_url));
+                  if (!eNew2 && sNew2 === 201) return cb(null, 'created', info(commit.sha, commit.html_url));
+                  if (!eNew2) return fail('POST branch', eNew2, sNew2, made);
+                  // No answer: the branch may still have been created. Re-read it before reporting failure.
+                  api('GET', 'ref/heads/' + ghBranchPath(opts.newBranch), null, function (eChk, sChk, now) {
+                    if (!eChk && sChk === 200 && now && now.object && now.object.sha === commit.sha) return cb(null, 'created', info(commit.sha, commit.html_url));
+                    fail('POST branch', eNew2, sNew2, made);
+                  });
                 });
               }
               progress('Moving ' + branch + ' to the new commit…');
@@ -1098,7 +1172,7 @@
             });
           });
         }
-        putBlob();
+        listExisting(putBlob);
       });
     });
   }
@@ -1116,19 +1190,23 @@
   // On-screen push status. A push is ~6 sequential GitHub requests, so a 2s toast read as "nothing happened"
   // and a finished push looked like a failure. This box stays up for every step, then shows the outcome
   // (with a link to the commit) until it times out or is closed. Failures stay until closed.
+  // The outcome stays until Close is clicked, and if the page removes the box it is put back (a box that vanished
+  // mid-push read as "no success or failure message").
   function ghPushStatus(text) {
     var line = el('span', { text: text });
     var box = el('div', { class: 'wc-root wc-toast wc-toast-in wc-gh-status', role: 'status', 'aria-live': 'polite' }, [line]);
     document.body.appendChild(box);
-    var timer = null, ended = false;
-    function close() { clearTimeout(timer); try { box.remove(); } catch (e) {} }
+    var ended = false, closed = false;
+    var keep = setInterval(function () { try { if (!closed && !box.isConnected && document.body) document.body.appendChild(box); } catch (e) {} }, 1000);
+    function close() { closed = true; clearInterval(keep); try { box.remove(); } catch (e) {} }
     return {
       step: function (t) { if (!ended) line.textContent = t; },
-      end: function (t, link, linkText, ms) {
+      end: function (t, link, linkText) {
         ended = true; line.textContent = t;
+        try { console.log('[weld github] ' + t); } catch (e) {}
+        try { if (!box.isConnected && document.body) document.body.appendChild(box); } catch (e) {}
         if (link) box.appendChild(el('a', { class: 'wc-gh-status-link', href: link, target: '_blank', rel: 'noopener noreferrer', text: linkText || 'View on GitHub' }));
         box.appendChild(el('button', { class: 'wc-btn wc-mini', text: 'Close', onclick: close }));
-        if (ms) timer = setTimeout(close, ms);
       }
     };
   }
@@ -1157,7 +1235,7 @@
     var status = ghPushStatus('Creating branch and pull request for ' + name + '…');
     ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err, result) {
       if (err) { console.error('[weld pr]', err.message); status.end('✗ Could not create the branch: ' + err.message + ' ' + base + ' was not changed.'); return; }
-      if (result === 'unchanged') { status.end('✓ Nothing to propose: ' + base + ' already has this exact version of ' + name + '. No branch or pull request was made.', null, null, 12000); return; }
+      if (result === 'unchanged') { status.end('✓ Nothing to propose: ' + base + ' already has this exact version of ' + name + '. No branch or pull request was made.', null, null); return; }
       status.step('Opening the pull request…');
       ghApi('POST', '/repos/' + R.cfg.owner + '/' + R.cfg.repo + '/pulls', token, { title: 'Update ' + name + ' via Weld Companion', head: branch, base: base,
         body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`.' }, function (e2, st, pr) {
@@ -1166,7 +1244,7 @@
             'https://github.com/' + R.cfg.owner + '/' + R.cfg.repo + '/compare/' + base + '...' + branch, 'Open on GitHub'); return;
         }
         try { copyText(pr.html_url); } catch (e) {}
-        status.end('✓ Pull request opened for ' + name + ' (link copied).', pr.html_url, 'View pull request', 20000);
+        status.end('✓ Pull request opened for ' + name + ' (link copied).', pr.html_url, 'View pull request');
       });
     }, { newBranch: branch, onProgress: function (t) { status.step(t); } });
   }
@@ -1201,8 +1279,8 @@
     ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result, info) {
       if (err) { console.error('[weld push]', err.message); status.end('\u2717 Push failed: ' + err.message); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
-      if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.', info && info.url, 'View latest commit', 12000); return; }
-      status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.', info && info.url, 'View commit', 20000);
+      if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.', info && info.url, 'View latest commit'); return; }
+      status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.', info && info.url, 'View commit');
     }, { onProgress: function (t) { status.step(t); } });
   }
   function ghConfigure() {
