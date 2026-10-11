@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.82.2
+// @version      1.83.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.82.2';
+  var WC_VERSION = '1.83.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -14598,6 +14598,8 @@
   }
   let watchTimer = null;
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
+  // Automatic writes to the master folder are limited to starred generators; the Mirror button works on any.
+  function isStarred(slug) { try { return (H.favorites() || []).indexOf(slug) !== -1; } catch (e) { return false; } }
   async function tick(force) {
     await refreshMasterFolder();
     if (!F.handle || F.perm !== 'granted' || F.busy || (!force && ((!F.cfg.watch && !F.cfg.projectBackups[H.slug()]) || (typeof document !== 'undefined' && document.hidden)))) return;
@@ -14612,7 +14614,7 @@
         // both sides agree: remember this as the last sync point (only when it actually moved)
         const bk = slug + ':' + P.hash(D.normForCompare(editor.dsl)) + P.hash(D.normForCompare(editor.html || ''));
         if (F.baseKey !== bk) { F.baseKey = bk; await kvSet(folderBaseKey(slug), { dsl: editor.dsl, html: editor.html }); }
-      } else if ((plan.state === 'editor-ahead' || plan.state === 'no-disk') && editor && F.cfg.autoMirror) {
+      } else if ((plan.state === 'editor-ahead' || plan.state === 'no-disk') && editor && F.cfg.autoMirror && isStarred(slug)) {
         if (await writePair(slug, editor.dsl, editor.html, revision)) {
           await kvSet(folderBaseKey(slug), { dsl: editor.dsl, html: editor.html }); plan = { state: 'in-sync', mirrored: true };
         }
@@ -15082,7 +15084,7 @@
       if (F.projectSlug === slug && F.projectStatus) note(parent, F.projectStatus);
       if (F.projectSlug === slug && F.projectError) note(parent, F.projectError, { color: '#e5534b' });
     }
-    row(parent, [check('Write editors to the master folder automatically (all generators)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
+    row(parent, [check('Write editors to the master folder automatically (starred generators only)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
       check('Watch the folder for changes', F.cfg.watch, v => { folderCfg(); F.cfg.watch = v; saveFolderCfg(); })]);
     row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\u2019s prompt to stop it forgetting at all.')]);
     note(parent, 'Files: ' + (safe ? paths(slug).dsl + ' and ' + paths(slug).html : '{name}/{name}-top-panel.txt and {name}/{name}-html-panel.html') + '. Checked ' + (F.lastCheck ? ago(F.lastCheck) : 'not yet') + '.');
@@ -18487,12 +18489,15 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     try { await dir.getFileHandle(name); return true; } catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return false; throw e; }
   }
   // Copy every readable, non-stale record into the folder. Records holding plaintext secret-shaped values are held back.
-  async function syncToFolder(manual) {
+  // onlyStarred: automatic saves cover starred generators only; manual and pre-restore saves cover everything.
+  async function syncToFolder(manual, onlyStarred) {
     if (F.busy) return; if (!F.handle || F.perm !== 'granted') { if (manual) { F.error = 'Choose a backup folder and allow access first.'; draw(); } return; }
     F.busy = true; const res = { at: Date.now(), written: 0, skipped: 0, held: [], failed: 0 };
     try {
       load();
+      let stars = null; if (onlyStarred) { try { stars = H.favorites() || []; } catch (e) { stars = []; } }
       for (const row of (S.rows || [])) {
+        if (stars && stars.indexOf(C.parseKey(row.key).gen || row.caller) === -1) { res.skipped++; continue; }
         const rec = full(row.gmKey);
         if (!rec || rec.unreadable || rec.parseError) { res.failed++; continue; }
         if (rec.stale) { res.skipped++; continue; }
@@ -18640,7 +18645,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     return card;
   }
   let syncTimer = null;
-  function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
+  function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false, true).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
     F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
@@ -18665,7 +18670,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     card.appendChild(row);
     const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
     auto.addEventListener('change', () => setAuto(auto.checked));
-    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups of starred generators to the folder automatically while Weld is open (needs access allowed; unstarred ones use the button above)' })]));
     const keep = E('input', { type: 'checkbox', 'aria-label': 'Keep folder access allowed' }); keep.checked = F.keep;
     keep.addEventListener('change', () => setKeep(keep.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' }, title: 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\'s prompt to stop it forgetting at all.' }, [keep, E('span', { text: 'Keep access allowed (re-ask on my next click after a browser restart)' })]));

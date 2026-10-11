@@ -167,6 +167,8 @@
   }
   let watchTimer = null;
   function startWatch() { if (watchTimer) return; watchTimer = setInterval(() => { tick(false).catch(() => {}); }, 2500); }
+  // Automatic writes to the master folder are limited to starred generators; the Mirror button works on any.
+  function isStarred(slug) { try { return (H.favorites() || []).indexOf(slug) !== -1; } catch (e) { return false; } }
   async function tick(force) {
     await refreshMasterFolder();
     if (!F.handle || F.perm !== 'granted' || F.busy || (!force && ((!F.cfg.watch && !F.cfg.projectBackups[H.slug()]) || (typeof document !== 'undefined' && document.hidden)))) return;
@@ -181,7 +183,7 @@
         // both sides agree: remember this as the last sync point (only when it actually moved)
         const bk = slug + ':' + P.hash(D.normForCompare(editor.dsl)) + P.hash(D.normForCompare(editor.html || ''));
         if (F.baseKey !== bk) { F.baseKey = bk; await kvSet(folderBaseKey(slug), { dsl: editor.dsl, html: editor.html }); }
-      } else if ((plan.state === 'editor-ahead' || plan.state === 'no-disk') && editor && F.cfg.autoMirror) {
+      } else if ((plan.state === 'editor-ahead' || plan.state === 'no-disk') && editor && F.cfg.autoMirror && isStarred(slug)) {
         if (await writePair(slug, editor.dsl, editor.html, revision)) {
           await kvSet(folderBaseKey(slug), { dsl: editor.dsl, html: editor.html }); plan = { state: 'in-sync', mirrored: true };
         }
@@ -651,7 +653,7 @@
       if (F.projectSlug === slug && F.projectStatus) note(parent, F.projectStatus);
       if (F.projectSlug === slug && F.projectError) note(parent, F.projectError, { color: '#e5534b' });
     }
-    row(parent, [check('Write editors to the master folder automatically (all generators)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
+    row(parent, [check('Write editors to the master folder automatically (starred generators only)', F.cfg.autoMirror, v => { folderCfg(); F.cfg.autoMirror = v; saveFolderCfg(); tick(true); }, 'Local file writes only. The other direction always needs your review.'),
       check('Watch the folder for changes', F.cfg.watch, v => { folderCfg(); F.cfg.watch = v; saveFolderCfg(); })]);
     row(parent, [check('Keep access allowed (re-ask on my next click after a restart)', F.cfg.keepAccess, setKeepAccess, 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\u2019s prompt to stop it forgetting at all.')]);
     note(parent, 'Files: ' + (safe ? paths(slug).dsl + ' and ' + paths(slug).html : '{name}/{name}-top-panel.txt and {name}/{name}-html-panel.html') + '. Checked ' + (F.lastCheck ? ago(F.lastCheck) : 'not yet') + '.');

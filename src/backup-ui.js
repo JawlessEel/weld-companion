@@ -240,12 +240,15 @@
     try { await dir.getFileHandle(name); return true; } catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return false; throw e; }
   }
   // Copy every readable, non-stale record into the folder. Records holding plaintext secret-shaped values are held back.
-  async function syncToFolder(manual) {
+  // onlyStarred: automatic saves cover starred generators only; manual and pre-restore saves cover everything.
+  async function syncToFolder(manual, onlyStarred) {
     if (F.busy) return; if (!F.handle || F.perm !== 'granted') { if (manual) { F.error = 'Choose a backup folder and allow access first.'; draw(); } return; }
     F.busy = true; const res = { at: Date.now(), written: 0, skipped: 0, held: [], failed: 0 };
     try {
       load();
+      let stars = null; if (onlyStarred) { try { stars = H.favorites() || []; } catch (e) { stars = []; } }
       for (const row of (S.rows || [])) {
+        if (stars && stars.indexOf(C.parseKey(row.key).gen || row.caller) === -1) { res.skipped++; continue; }
         const rec = full(row.gmKey);
         if (!rec || rec.unreadable || rec.parseError) { res.failed++; continue; }
         if (rec.stale) { res.skipped++; continue; }
@@ -393,7 +396,7 @@
     return card;
   }
   let syncTimer = null;
-  function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false).catch(() => {}); }, ms || 1500); }
+  function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false, true).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
     F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
@@ -418,7 +421,7 @@
     card.appendChild(row);
     const auto = E('input', { type: 'checkbox', 'aria-label': 'Save new backups to the folder automatically' }); auto.checked = F.auto;
     auto.addEventListener('change', () => setAuto(auto.checked));
-    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups to the folder automatically while Weld is open (needs access allowed)' })]));
+    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [auto, E('span', { text: 'Save new backups of starred generators to the folder automatically while Weld is open (needs access allowed; unstarred ones use the button above)' })]));
     const keep = E('input', { type: 'checkbox', 'aria-label': 'Keep folder access allowed' }); keep.checked = F.keep;
     keep.addEventListener('change', () => setKeep(keep.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' }, title: 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\'s prompt to stop it forgetting at all.' }, [keep, E('span', { text: 'Keep access allowed (re-ask on my next click after a browser restart)' })]));

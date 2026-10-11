@@ -137,7 +137,7 @@ const settings = new Map();
 const host = {
   get: (k, d) => settings.has(k) ? settings.get(k) : d, set: (k, v) => { settings.set(k, v); return true; },
   pageWindow: () => ({ showDirectoryPicker: async () => { pickerCalls++; return pickedDir; } }),
-  slug: () => 'alpha',
+  slug: () => 'alpha', favorites: () => ['delta'],
   el: (t, a, c) => new Element(t, a, c),
   vault: {
     list: () => listFail ? { ok: false, reason: 'consent-denied' } : { ok: true, items: [...store.keys()].map(g => { const r = g.slice(SBK.length), i = r.indexOf(':'); return { gmKey: g, caller: r.slice(0, i), key: r.slice(i + 1) }; }) },
@@ -249,6 +249,11 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
   assert.equal(settings.get('backupFolderAuto'), true);
   await until(() => pickedDir.files().length === after.length, 'auto settled'); put('delta', 'weld:genvault:delta/snapshot', { v: 1, at: 5, protocol: 1, generator: 'delta', folder: 'delta', savedBy: 'delta', title: 'D', modelText: 'm' });
   listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'delta' })); await until(() => pickedDir.files().some(f => f.startsWith('delta/snapshot/')), 'auto mirror');
+  // only starred generators are saved automatically; an unstarred one waits for the manual button
+  put('echo', 'weld:genvault:echo/snapshot', { v: 1, at: 6, protocol: 1, generator: 'echo', folder: 'echo', savedBy: 'echo', title: 'E', modelText: 'm' });
+  listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'echo' })); await new Promise(r => setTimeout(r, 1800));
+  assert.ok(!pickedDir.files().some(f => f.startsWith('echo/')), 'unstarred generator is not auto-saved');
+  click('Save all to folder now'); await until(() => pickedDir.files().some(f => f.startsWith('echo/snapshot/')), 'manual save still covers everything');
   // disconnect never deletes
   const kept = pickedDir.files().length; click('Disconnect folder (nothing in it is deleted)'); await until(() => btn('Choose folder...'), 'disconnected'); assert.equal(pickedDir.files().length, kept);
   // load from folder: plan only; never overwrites chat copies, replaces a snapshot only with a newer one, merges indexes safely
