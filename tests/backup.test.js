@@ -124,19 +124,21 @@ assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkS
 // ---- UI against a fake host
 const bytes = () => JSON.stringify([...store].sort());
 const listeners = [], downloads = []; let listFail = false, removed = [];
-class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += x; }, close: async () => { this.text = b; } }; } }
+class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += x; }, close: async () => { this.text = b; } }; } async getFile() { const t = this.text; return { size: t.length, text: async () => t }; } }
 class FakeDir {
   constructor(n) { this.name = n; this.kind = 'directory'; this.items = new Map(); this.perm = 'granted'; }
   async getDirectoryHandle(n, o = {}) { let d = this.items.get(n); if (!d) { if (!o.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); d = new FakeDir(n); this.items.set(n, d); } return d; }
   async getFileHandle(n, o = {}) { let f = this.items.get(n); if (!f) { if (!o.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); f = new FakeFile(n); this.items.set(n, f); } return f; }
+  async *entries() { for (const e of this.items) yield e; }
   async queryPermission() { return this.perm; } async requestPermission() { this.perm = 'granted'; return 'granted'; }
   files(prefix = '') { return [...this.items].flatMap(([n, x]) => x.kind === 'directory' ? x.files(prefix + n + '/') : [prefix + n]); }
 }
-const pickedDir = new FakeDir('MyDrive'); let pickerCalls = 0;
+const pickedDir = new FakeDir('MyDrive'); let pickerCalls = 0; const droppedDbs = [];
+const fakeIdb = { deleteDatabase: n => { droppedDbs.push(n); const r = {}; setTimeout(() => r.onsuccess && r.onsuccess(), 0); return r; } };
 const settings = new Map();
 const host = {
   get: (k, d) => settings.has(k) ? settings.get(k) : d, set: (k, v) => { settings.set(k, v); return true; },
-  pageWindow: () => ({ showDirectoryPicker: async () => { pickerCalls++; return pickedDir; } }),
+  pageWindow: () => ({ showDirectoryPicker: async () => { pickerCalls++; return pickedDir; }, indexedDB: fakeIdb }),
   slug: () => 'alpha', favorites: () => ['delta'],
   el: (t, a, c) => new Element(t, a, c),
   vault: {
@@ -160,7 +162,7 @@ assert.match(t0, /Fake GM/); assert.ok(!t0.includes('unrelated'), 'out-of-scope 
 assert.ok(walk(parent).some(n => n.attrs['data-gen'] === 'alpha') && walk(parent).some(n => n.attrs['data-gen'] === 'beta'));
 assert.match(txt(walk(parent).find(n => n.attrs['data-gen'] === 'alpha')), /2 chat copies/);
 assert.match(t0, /Legacy \(dadchat:vault\)/); assert.match(t0, /STALE/);
-assert.ok(!btn('Delete dadchat:vault:index') && !btn('Delete weld:link-record'), 'legacy and operational keys cannot be deleted');
+assert.ok(btn('Delete dadchat:vault:index') && !btn('Delete weld:link-record'), 'legacy keys can be deleted; operational keys cannot');
 
 // inspect: anomaly for owner mismatch + dangling index
 click('Inspect weld:genvault:beta/chat/snap-1700000006000-aaaaaa');
@@ -192,13 +194,15 @@ assert.ok(b1.records.every(r => /^weld:genvault:alpha\//.test(r.key))); assert.e
 click('Export all'); const all = JSON.parse(downloads.pop().t); assert.equal(all.count, 10 /* every key but the out-of-scope one */);
 click('Download weld:genvault:beta/snapshot'); assert.equal(JSON.parse(downloads.pop().t).record.value.title, 'Beta');
 
-// delete: confirm gate, exact key only, siblings byte-identical
+// delete: one click, no confirmation, exact key only, siblings byte-identical; the opened section stays open
 const before = new Map(store), target = 'weld:genvault:beta/chat/snap-1700000007000-bbbbbb';
-click('Delete ' + target); assert.ok(btn('Confirm delete'), 'confirm gate shown'); assert.equal(removed.length, 0);
-assert.match(txt(parent), /generator "beta" key weld:genvault:beta\/chat\/snap-1700000007000-bbbbbb/); assert.match(txt(parent), /Index cleanup is the generator/);
-click('Cancel'); assert.equal(removed.length, 0);
-click('Delete ' + target); click('Confirm delete');
+const betaD = () => walk(parent).find(n => n.attrs['data-gen'] === 'beta');
+betaD().open = true; betaD().events.toggle();
+click('Delete ' + target);
+assert.ok(!btn('Confirm delete') && !btn('Cancel'), 'no confirmation step');
 assert.deepEqual(removed, [SBK + 'beta:' + target]);
+assert.equal(betaD().open, true, 'the generator section stays open after a delete');
+assert.match(txt(parent), /Deleted chat\/snap-1700000007000-bbbbbb\./);
 for (const [k, v] of before) { if (k === SBK + 'beta:' + target) assert.equal(store.has(k), false); else assert.equal(store.get(k), v, 'untouched: ' + k); }
 assert.equal(store.size, before.size - 1);
 
@@ -254,8 +258,55 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
   listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'echo' })); await new Promise(r => setTimeout(r, 1800));
   assert.ok(!pickedDir.files().some(f => f.startsWith('echo/')), 'unstarred generator is not auto-saved');
   click('Save all to folder now'); await until(() => pickedDir.files().some(f => f.startsWith('echo/snapshot/')), 'manual save still covers everything');
+  // pass-through vault: a generator save goes to the folder, never into Weld storage, and reads back from it
+  {
+    const PV = window.weldBackup.vault, n0 = store.size, J = x => JSON.parse(JSON.stringify(x));   // values come from the vm realm
+    assert.equal(PV.ready(), true);
+    const snapV = { v: 1, at: Date.UTC(2026, 9, 11), protocol: 1, generator: 'zeta', folder: 'zeta', savedBy: 'zeta', title: 'Z', modelText: 'm' };
+    assert.deepEqual(J(await PV.set('zeta', 'weld:genvault:zeta/snapshot', snapV)), { ok: true, where: 'folder' });
+    const copy = chat('zeta', 9, { data: { threads: [], config: { model: 'x' } } });
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', copy)).ok, true);
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/index', [{ key: 'snap-9-abcdef' }])).ok, true);
+    await sleep(5);
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/index', [{ key: 'snap-9-abcdef' }, { key: 'snap-10-xxxxxx' }])).ok, true);
+    assert.equal(store.size, n0, 'nothing stored in Weld');
+    assert.ok(pickedDir.files().some(f => /^zeta\/snapshot\/snapshot-20261011-/.test(f)) && pickedDir.files().includes('zeta/chat/snap-9-abcdef.json'));
+    assert.deepEqual(J(await PV.get('zeta', 'weld:genvault:zeta/snapshot')), snapV);
+    assert.deepEqual(J(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef')), copy);
+    assert.equal((await PV.get('zeta', 'weld:genvault:zeta/chat/index')).length, 2, 'the newest index wins');
+    assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-404-zzzzzz'), undefined);
+    assert.deepEqual(J(await PV.list('zeta', 'weld:genvault:zeta/chat/')), ['weld:genvault:zeta/chat/index', 'weld:genvault:zeta/chat/snap-9-abcdef']);
+    assert.deepEqual(J(await PV.list('zeta', '')), ['weld:genvault:zeta/snapshot', 'weld:genvault:zeta/chat/index', 'weld:genvault:zeta/chat/snap-9-abcdef']);
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-11-secret', chat('zeta', 11))).code, 'secret-shaped');
+    assert.equal((await PV.set('other', 'weld:genvault:zeta/snapshot', snapV)).code, 'bad-key');
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', null)).ok, true); assert.ok(pickedDir.files().includes('zeta/chat/snap-9-abcdef.json'), 'a null save never deletes a file');
+  }
+  // purge: one click; what is not provably in the folder is downloaded first; operational and out-of-scope keys stay
+  {
+    window.weldBackup.render(parent);
+    const keys0 = [...store.keys()], dl0 = downloads.length;
+    const keep = keys0.filter(k => /:weld:link-record$|:unrelated:key$/.test(k));
+    click('Purge all Weld-stored backups'); await until(() => /Purged \d+ backup key/.test(txt(parent)), 'purge');
+    assert.deepEqual([...store.keys()].sort(), keep.sort(), 'only operational and out-of-scope keys remain');
+    assert.equal(downloads.length, dl0 + 1, 'one file for the copies the folder holds back');
+    const held = JSON.parse(downloads[downloads.length - 1].t);
+    assert.equal(held.format, 'weld-backup-bundle'); assert.ok(held.records.length > 0 && held.records.every(r => C.parseKey(r.key).kind === 'chat-copy' && C.secretScan(r.value.data).length), 'only secret-shaped chat copies needed a download');
+    assert.ok(droppedDbs.includes('weldCompanionProjects'), 'Project tab database removed');
+    assert.match(txt(parent), /Project tab copies and snapshots removed/);
+    assert.ok(!walk(parent).some(n => n.attrs['data-gen']), 'nothing left to list');
+  }
   // disconnect never deletes
   const kept = pickedDir.files().length; click('Disconnect folder (nothing in it is deleted)'); await until(() => btn('Choose folder...'), 'disconnected'); assert.equal(pickedDir.files().length, kept);
+  assert.equal(window.weldBackup.vault.ready(), false);
+  assert.equal((await window.weldBackup.vault.set('zeta', 'weld:genvault:zeta/snapshot', { generator: 'zeta' })).code, 'no-backup-folder');
+  // purge with no folder: everything is downloaded first
+  {
+    put('kappa', 'weld:genvault:kappa/snapshot', { v: 1, at: 7, protocol: 1, generator: 'kappa', folder: 'kappa', savedBy: 'kappa', title: 'K', modelText: 'm' });
+    window.weldBackup.render(parent); const dl0 = downloads.length;
+    click('Purge all Weld-stored backups'); await until(() => /Purged 1 backup key/.test(txt(parent)), 'purge without folder');
+    assert.equal(downloads.length, dl0 + 1); assert.deepEqual(JSON.parse(downloads[downloads.length - 1].t).records.map(r => r.key), ['weld:genvault:kappa/snapshot']);
+    assert.ok(![...store.keys()].some(k => k.includes('kappa')));
+  }
   // load from folder: plan only; never overwrites chat copies, replaces a snapshot only with a newer one, merges indexes safely
   {
     const rec = (key, value, ex, caller) => ({ format: 'weld-backup-record', v: 1, exportedAt: ex || 1, record: { key, storedBy: caller || key.split('/')[0].slice('weld:genvault:'.length), stale: false, value } });

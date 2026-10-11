@@ -97,7 +97,8 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     assert.equal(store.size, 0);
     return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/snapshot', value: { v: 1, generator: 'gen-a' } });
   }).then((r) => {
-    assert.equal(r.ok, true);   // vault copies for Backups / GitHub sync are not blocked
+    assert.deepEqual([r.ok, r.code], [false, 'no-backup-folder'], 'Weld keeps no vault copy: with no backup folder the save is refused');
+    assert.equal(store.size, 0);
     return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-b/snapshot', value: { v: 1, generator: 'gen-b' } });
   }).then((r) => {
     assert.equal(r.ok, false);   // another generator's vault key is still refused
@@ -112,8 +113,44 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     store.set('vaultChats', true);
     return off.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/chat/index', value: [] });
   }).then((r) => {
-    assert.equal(r.ok, true, 'turning vault chat saving on allows the chat index again');
-    console.log('Skybridge storage writes are refused while automatic saving is off (vault snapshots still allowed, chat copies only when enabled)');
+    assert.equal(r.code, 'no-backup-folder', 'turning chat saving on passes the gate; still no folder');
+    console.log('Skybridge storage writes are refused while automatic saving is off (vault saves need a backup folder, chat copies only when enabled)');
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
+// Pass-through vault: with a backup folder ready, vault saves go to the folder and never into Weld storage; reads and
+// lists come back from the folder, and an older copy still in storage is the fallback for keys the folder lacks.
+{
+  const store = new Map([['vaultChats', true], ['sbk:gen-a:weld:genvault:gen-a/chat/snap-1-old', { old: true }]]);
+  const folder = new Map(), calls = [];
+  const gget = (k, d) => (store.has(k) ? store.get(k) : d), gset = (k, v) => { store.set(k, v); return true; };
+  const pt = {
+    ready: () => true, noFolder: 'nf',
+    set: async (gen, key, value) => { calls.push(['set', gen, key]); folder.set(key, value); return { ok: true, where: 'folder' }; },
+    get: async (gen, key) => (folder.has(key) ? folder.get(key) : undefined),
+    list: async (gen, prefix) => Array.from(folder.keys()).filter((k) => k.indexOf(prefix) === 0)
+  };
+  const GM_listValues = () => Array.from(store.keys()).map((k) => 'weldCompanion:' + k);
+  const m = load(['sbServiceStorage'], between('function sbStoreKey(', 'function sbServiceAI('), { NS: 'weldCompanion', autoSaveOn: () => false, gget, gset, GM_listValues, Promise, String, window: { WeldBackupCore: require('../src/backup-core.js'), weldBackup: { vault: pt } } });
+  const before = store.size, snap = { v: 1, at: 5, generator: 'gen-a', title: 'A' };
+  m.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/snapshot', value: snap }).then((r) => {
+    assert.deepEqual([r.ok, r.where], [true, 'folder']);
+    assert.equal(store.size, before, 'nothing written to Weld storage');
+    return m.sbServiceStorage('gen-a', { op: 'set', key: 'weld:genvault:gen-a/snapshot', value: { v: 1, generator: 'gen-b' } });
+  }).then((r) => {
+    assert.equal(r.code, 'owner-mismatch'); assert.equal(calls.length, 1, 'a mismatched owner never reaches the folder');
+    return m.sbServiceStorage('gen-a', { op: 'get', key: 'weld:genvault:gen-a/snapshot' });
+  }).then((r) => {
+    assert.deepEqual(r.value, snap);
+    return m.sbServiceStorage('gen-a', { op: 'get', key: 'weld:genvault:gen-a/chat/snap-1-old' });
+  }).then((r) => {
+    assert.deepEqual(r.value, { old: true }, 'older stored copy still readable');
+    return m.sbServiceStorage('gen-a', { op: 'list', prefix: 'weld:genvault:gen-a/' });
+  }).then((r) => {
+    assert.deepEqual(Array.from(r.value).sort(), ['weld:genvault:gen-a/chat/snap-1-old', 'weld:genvault:gen-a/snapshot']);
+    return m.sbServiceStorage('gen-a', { op: 'list', prefix: 'slot' });
+  }).then((r) => {
+    assert.deepEqual(Array.from(r.value), [], 'a non-vault prefix does not touch the folder');
+    console.log('Skybridge vault saves pass through to the backup folder');
   }).catch((e) => { console.error(e); process.exit(1); });
 }
 // Anchor storage: list must see keys that set wrote, using the real NS-prefixed names (it returned [] before 1.65.3).
@@ -150,7 +187,7 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
       assert.equal(r.value, null, 'nothing was stored by the refused write');
       return call('alpha', { op: 'set', key: 'weld:genvault:alpha/snapshot', value: { generator: 'alpha' } });
     })
-    .then((r) => { assert.equal(r.ok, true); return call('alpha', { op: 'set', key: '', value: 1 }); })
+    .then((r) => { assert.deepEqual([r.ok, r.code], [false, 'no-backup-folder'], 'vault saves never land in Weld storage'); assert.equal(store.has(NS + ':sbk:alpha:weld:genvault:alpha/snapshot'), false); return call('alpha', { op: 'set', key: '', value: 1 }); })
     .then((r) => { assert.deepEqual([r.ok, r.reason], [false, 'bad-key']); console.log('Skybridge anchor storage set/get/list tests passed'); })
     .catch((e) => { console.error(e); process.exit(1); });
 }

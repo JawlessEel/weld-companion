@@ -46,28 +46,27 @@ backup, not a browser-profile export. The manifest and confirmation report these
 limits and unavailable storage APIs. Loading a model into a remote server does
 not make its weights available in this browser.
 
-Shows the generator backup copies that generators store in Weld through Skybridge storage, and saves them to a folder you choose.
+Weld keeps no backups of its own (1.88.0). Generator vault saves pass straight through to a backup folder you choose; this tab shows, downloads, deletes and purges anything older that is still held in browser storage.
 
 ## Where copies live
 
-Generators write to Weld's storage, which is the userscript manager's own storage inside the browser profile. That is convenient but fragile: clearing site data or removing the script removes it. The **Backup location** card exists so a second copy lives somewhere you control.
+A generator's vault save (`weld:genvault:<generator>/snapshot`, `chat/index`, `chat/snap-*`) is written straight into the **Backup location** folder and never into Weld's storage. When the generator reads or lists its vault, Weld answers from that folder (an older copy still in browser storage is used only for a key the folder does not have). With no folder chosen, or folder access not allowed, the save is refused with code `no-backup-folder` and the generator keeps its own copy. Chat copies still need **Settings > Skybridge > Let generators send chat copies** turned on.
 
 ## Backup location
 
 1. Open Weld, **Backups**, **Backup location**, then **Choose folder...**. Pick any folder: a local drive, an external disk, or a folder inside Google Drive, OneDrive, iCloud Drive or Dropbox (the sync client uploads it).
-2. Press **Save all to folder now**, or tick **Save new backups to the folder automatically** to copy each new save while Weld is open.
-3. After a browser restart press **Allow access** once; browsers require a click to re-grant folder access.
+2. After a browser restart press **Allow access** once (or leave **Keep access allowed** on and click anywhere); browsers require a click to re-grant folder access.
+3. **Save all to folder now** (or the automatic option) copies anything older still in browser storage into the folder.
 
 Needs Chrome or Edge (other browsers cannot open folders). The folder choice is remembered in the browser's IndexedDB (`weldCompanionBackupFolder`); the automatic setting is stored as `backupFolderAuto`.
 
-### Sharing between computers (Load from folder)
+Several computers can point at the same synced folder: each one's generators read the vault saves that are there. (The old **Check folder for new saves** import was removed in 1.88.0 because it copied records into Weld storage.)
 
-Point Weld on every computer at the same synced folder (for example `Google Drive\My Drive\Weld_shared_saves`) and turn on the automatic save. Each Weld then adds its saves to the folder, and **Check folder for new saves** reads the other computers' saves back:
+## Delete and Purge
 
-1. Press **Check folder for new saves**. Weld reads the `weld-backup-record` / `weld-backup-bundle` files in the folder (up to 5 levels deep) and lists what would change. Nothing is written yet.
-2. Press **Apply**. Weld first saves its own current copies to the folder, then writes the listed records into its storage. Reload the generator tab afterwards so it reads them.
-
-What it will and won't do: a record missing here is added; a chat copy that already exists is never overwritten; a source (snapshot) copy is replaced only by one with a strictly newer saved time; a chat index only gains entries whose chat copy is present; keys you deleted here on purpose stay deleted; `_operational` (link and self-test) and `_legacy` records are skipped because they belong to one computer; chat copies holding secret-shaped values are held back.
+- **Delete** on a key removes that one key at once, with no confirmation. The opened sections and scroll position stay where they were. A generator's chat index is not edited.
+- **Purge all Weld-stored backups** removes every backup Weld still holds in browser storage, in one click: all vault keys (including legacy `dadchat:vault:*`) and the Project tab's old `weldCompanionProjects` database (saved generator copies and snapshots). Small operational link and self-test records are kept. Anything not provably in the backup folder is saved first: into the folder when one is connected (chat copies with secret-shaped values, which never go to a folder, are downloaded instead), otherwise everything is downloaded as one `weld-backup-purged-<date>.json` file.
+- The Project tab now keeps generator copies and snapshots for the open tab only; reloading clears them. Use its Download buttons to keep one.
 
 ### Layout
 
@@ -87,7 +86,7 @@ Each file is `{ "format": "weld-backup-record", "v": 1, "exportedAt", "record": 
 - **Add-only.** A file is written only if its name does not exist yet. A changed record gets a new file (the name includes its time or a content hash), so an older copy is never overwritten. Weld never deletes anything in the folder, and **Disconnect folder** leaves it untouched.
 - **Secrets stay out.** A chat copy whose config holds a plaintext secret-shaped value (api key, secret, token, webhook) is held back and listed in the card instead of being copied to a drive or cloud folder.
 - Stale (null) records are skipped; unreadable ones are counted as failed.
-- Nothing is restored from the folder automatically. Generators own applying copies.
+- A generator deleting a copy (a null save) never deletes a file from the folder.
 
 ## Cleanup duplicates
 

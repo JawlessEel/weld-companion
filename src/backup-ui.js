@@ -1,12 +1,13 @@
-/* Backups tab: manage, examine, extract and maintain generator backup copies held in companion storage.
-   Read-only except the exact-key Delete action. Record contents are never logged or sent anywhere. */
+/* Backups tab: Weld keeps no backups of its own. Generator vault saves pass straight through to the backup folder
+   (a drive or cloud-synced folder); this tab shows, exports, deletes and purges anything older still held in browser
+   storage. Record contents are never logged or sent anywhere. */
 (function () {
   'use strict';
   if (window.top !== window) return;
   const C = window.WeldBackupCore, H = window.weldProjectHost;
   if (!C || !H) return;
   const E = H.el;
-  const S = { pick: '', rows: null, inv: null, error: '', selected: null, inspected: null, pendingDelete: null, secrets: null, msg: '', stamp: 0 };
+  const S = { pick: '', rows: null, inv: null, error: '', selected: null, inspected: null, secrets: null, msg: '', stamp: 0, openGens: new Set(), busy: false };
   let host = null, unsub = null;
   const note = t => E('div', { class: 'wc-section-note', text: t });
   const small = { fontSize: '12px', opacity: '.75' };
@@ -41,7 +42,6 @@
     });
     S.rows = rows; S.inv = C.buildInventory(rows);
     if (S.selected && !rows.some(r => r.gmKey === S.selected)) { S.selected = null; S.inspected = null; }
-    S.pendingDelete = null;
   }
   function full(gmKey) {   // fresh read of a single record for inspect / export
     const row = (S.rows || []).find(r => r.gmKey === gmKey); if (!row) return null;
@@ -54,7 +54,7 @@
     const rec = row && full(row.gmKey); return rec && !rec.parseError && !rec.stale ? rec.value : undefined;
   }
   function inspectRow(gmKey) {
-    const rec = full(gmKey); S.selected = gmKey; S.pendingDelete = null; S.secrets = null;
+    const rec = full(gmKey); S.selected = gmKey; S.secrets = null;
     if (!rec) { S.inspected = null; return; }
     const keys = (S.rows || []).map(r => r.key), gen = C.parseKey(rec.key).gen;
     S.inspected = rec.unreadable ? { rec, report: { meta: [['Key', rec.key]], anomalies: ['The value could not be read.'], chat: null } }
@@ -70,12 +70,15 @@
     if (!recs.length) { say('Nothing to export.', true); return; }
     saveFile(C.exportBundle(label, recs, stamp()));
   }
+  // One click, no confirmation. Only that exact key is removed; the open sections and scroll position stay put.
   function runDelete(gmKey) {
     const row = (S.rows || []).find(r => r.gmKey === gmKey);
     if (!row) { say('That key no longer exists.', true); return; }
     let res; try { res = V().remove(gmKey); } catch (e) { res = { ok: false, reason: 'error' }; }
-    say(res && res.ok ? 'Deleted ' + row.key + '. Only that key was removed.' : 'Delete failed: ' + ((res && res.reason) || 'unknown') + '.', !(res && res.ok));
-    S.selected = null; S.inspected = null; load();
+    const ok = !!(res && res.ok), t = ok ? 'Deleted ' + (C.parseKey(row.key).sub || row.key) + '.' : 'Delete failed: ' + ((res && res.reason) || 'unknown') + '.';
+    say(t, !ok); try { H.toast(t); } catch (e) {}
+    if (S.selected === gmKey) { S.selected = null; S.inspected = null; }
+    load();
   }
   function scanSecrets() {
     const hits = [];
@@ -100,20 +103,8 @@
       btn('Inspect', () => { inspectRow(r.gmKey); rerender(); }, { 'aria-label': 'Inspect ' + r.key }),
       btn('Download', () => { const rec = full(r.gmKey); if (rec) saveFile(C.exportRecord(rec, stamp())); rerender(); }, { 'aria-label': 'Download ' + r.key })
     ]);
-    if (canDelete) line.appendChild(btn('Delete', () => { S.pendingDelete = r.gmKey; rerender(); }, { 'aria-label': 'Delete ' + r.key }));
+    if (canDelete) line.appendChild(btn('Delete', () => { runDelete(r.gmKey); rerender(); }, { 'aria-label': 'Delete ' + r.key }));
     return line;
-  }
-  function confirmBar(rerender) {
-    const row = (S.rows || []).find(r => r.gmKey === S.pendingDelete); if (!row) return null;
-    const p = C.parseKey(row.key);
-    return E('div', { role: 'alertdialog', 'aria-label': 'Confirm delete', style: { border: '1px solid #c0392b', borderRadius: '8px', padding: '10px', margin: '8px 0' } }, [
-      E('div', { text: 'Delete ' + (p.gen ? 'generator "' + p.gen + '"' : 'record') + ' key ' + row.key + '? This removes only that one key and cannot be undone.' }),
-      E('div', { style: Object.assign({ marginTop: '4px' }, small), text: 'If this is a chat copy, its generator\'s chat index is not edited. Index cleanup is the generator\'s job.' }),
-      E('div', { style: { display: 'flex', gap: '8px', marginTop: '8px' } }, [
-        btn('Confirm delete', () => runDelete(row.gmKey)),
-        btn('Cancel', () => { S.pendingDelete = null; rerender(); })
-      ])
-    ]);
   }
   function inspector(rerender) {
     const i = S.inspected; if (!i) return note('Select Inspect on a record to see its details.');
@@ -243,7 +234,7 @@
   // onlyStarred: automatic saves cover starred generators only; manual and pre-restore saves cover everything.
   async function syncToFolder(manual, onlyStarred) {
     if (F.busy) return; if (!F.handle || F.perm !== 'granted') { if (manual) { F.error = 'Choose a backup folder and allow access first.'; draw(); } return; }
-    F.busy = true; const res = { at: Date.now(), written: 0, skipped: 0, held: [], failed: 0 };
+    F.busy = true; const res = { at: Date.now(), written: 0, skipped: 0, held: [], failed: 0, saved: [] };   // saved: keys provably in the folder
     try {
       load();
       let stars = null; if (onlyStarred) { try { stars = H.favorites() || []; } catch (e) { stars = []; } }
@@ -255,9 +246,9 @@
         if (C.parseKey(rec.key).kind === 'chat-copy' && rec.value && C.secretScan(rec.value.data).length) { res.held.push(rec.key); continue; }
         try {
           const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, true);
-          if (await exists(dir, t.name)) { res.skipped++; continue; }
+          if (await exists(dir, t.name)) { res.skipped++; res.saved.push(row.gmKey); continue; }
           const w = await (await dir.getFileHandle(t.name, { create: true })).createWritable();
-          await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close(); res.written++;
+          await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close(); res.written++; res.saved.push(row.gmKey);
         } catch (e) { res.failed++; if (e && e.name === 'NotAllowedError') { F.perm = 'prompt'; break; } }
       }
       F.last = res; F.error = '';
@@ -265,62 +256,110 @@
     } catch (e) { F.error = 'Save to folder failed: ' + ((e && e.message) || e); }
     F.busy = false; if (manual || host) draw();
   }
-  // ---- load from folder: the other direction. Reads weld-backup files already in the folder (for example saved by
-  // Weld on another computer into a shared Google Drive folder), shows what would change, and writes only after Apply.
-  const L = { busy: false, plan: null, files: 0, unreadable: 0, msg: '' };
-  async function readJsonFiles(dir, depth, out) {
-    for await (const entry of dir.entries()) {
-      const name = entry[0], h = entry[1];
-      if (out.length + L.unreadable > 5000) return;
-      if (h.kind === 'directory') { if (depth < 5) await readJsonFiles(h, depth + 1, out); continue; }
-      if (!/\.json$/i.test(name)) continue;
-      try { const f = await h.getFile(); if (f.size > 64 * 1048576) { L.unreadable++; continue; } out.push(JSON.parse(await f.text())); } catch (e) { L.unreadable++; }
+  // ---- pass-through vault: a generator's vault save (source copy, chat index, chat copy) is written straight into the
+  // backup folder and never kept in Weld storage; reads come back from the folder. Files are only ever added, except a
+  // chat index file, which is re-stamped when the same list is saved again so the newest list wins.
+  const NO_FOLDER = 'Weld keeps no backups. Choose a backup folder in Weld > Backups (a drive or a cloud-synced folder) and allow access to receive vault saves.';
+  const VAULT_KINDS = ['snapshot', 'chat-index', 'chat-copy'];
+  const ptReady = () => !!(F.handle && F.perm === 'granted');
+  async function ptDoc(dir, name) {
+    try { const doc = JSON.parse(await (await (await dir.getFileHandle(name)).getFile()).text()); return doc && doc.format === 'weld-backup-record' && doc.record ? doc : null; } catch (e) { return null; }
+  }
+  async function ptNames(dir) {
+    const out = []; if (!dir) return out;
+    try { for await (const entry of dir.entries()) if (entry[1].kind === 'file' && /\.json$/i.test(entry[0])) out.push(entry[0]); } catch (e) {}
+    return out;
+  }
+  async function ptDir(gen, sub) { try { return await dirAt(F.handle, [gen, sub], false); } catch (e) { return null; } }
+  async function ptSet(caller, key, value) {
+    if (!ptReady()) return { ok: false, code: 'no-backup-folder', reason: NO_FOLDER };
+    const p = C.parseKey(key);
+    if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return { ok: false, code: 'bad-key', reason: 'bad-key' };
+    if (value === null || value === undefined) return { ok: true, where: 'folder', note: 'the backup folder only gains files; nothing was deleted from it' };
+    if (p.kind === 'chat-copy' && C.secretScan(value && value.data).length) return { ok: false, code: 'secret-shaped', reason: 'this chat copy holds a plaintext secret-shaped value, so it was not written to the backup folder' };
+    const rec = { key, caller, size: 0, stale: false, value };
+    try { rec.size = JSON.stringify(value).length; } catch (e) {}
+    try {
+      const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, true);
+      if (p.kind !== 'chat-index' && await exists(dir, t.name)) return { ok: true, where: 'folder' };
+      const w = await (await dir.getFileHandle(t.name, { create: true })).createWritable();
+      await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close();
+      if (host) scheduleDraw();
+      return { ok: true, where: 'folder' };
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') { F.perm = 'prompt'; armRegrant(); }
+      return { ok: false, code: 'folder-write-failed', reason: 'could not write to the backup folder' };
     }
   }
-  async function scanFolder() {
-    if (L.busy) return;
-    if (!F.handle || F.perm !== 'granted') { F.error = 'Choose a backup folder and allow access first.'; draw(); return; }
-    L.busy = true; L.plan = null; L.unreadable = 0; L.msg = ''; draw();
+  // -> the stored value, or undefined when the folder has no copy of that key
+  async function ptGet(caller, key) {
+    if (!ptReady()) return undefined;
+    const p = C.parseKey(key); if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return undefined;
+    if (p.kind === 'chat-copy') {
+      const dir = await ptDir(p.gen, 'chat'), doc = dir && await ptDoc(dir, C.backupTarget({ key, value: null }).name);
+      return doc && doc.record.key === key ? doc.record.value : undefined;
+    }
+    const dir = await ptDir(p.gen, p.kind === 'snapshot' ? 'snapshot' : 'chat'), re = p.kind === 'snapshot' ? /^snapshot-/ : /^index-/;
+    let best = null;
+    for (const name of (await ptNames(dir)).filter(n => re.test(n))) {
+      const doc = await ptDoc(dir, name); if (!doc || doc.record.key !== key) continue;
+      const v = doc.record.value, score = [p.kind === 'snapshot' && v && typeof v.at === 'number' ? v.at : 0, Number(doc.exportedAt) || 0];
+      if (!best || score[0] > best.score[0] || (score[0] === best.score[0] && score[1] > best.score[1])) best = { score, value: v };
+    }
+    return best ? best.value : undefined;
+  }
+  async function ptList(caller, prefix) {
+    if (!ptReady() || !C.GEN_RE.test(String(caller || ''))) return [];
+    const base = 'weld:genvault:' + caller + '/', out = [];
+    if ((await ptNames(await ptDir(caller, 'snapshot'))).some(n => /^snapshot-/.test(n))) out.push(base + 'snapshot');
+    const chat = await ptNames(await ptDir(caller, 'chat'));
+    if (chat.some(n => /^index-/.test(n))) out.push(base + 'chat/index');
+    chat.filter(n => /^snap-/.test(n)).sort().forEach(n => out.push(base + 'chat/' + n.slice(0, -5)));
+    return out.filter(k => k.indexOf(String(prefix || '')) === 0);
+  }
+  let drawTimer = null;
+  function scheduleDraw() { if (drawTimer) return; drawTimer = setTimeout(() => { drawTimer = null; if (host) draw(); }, 400); }
+
+  // ---- purge: remove every backup Weld still holds in browser storage, in one click with no confirmation: vault keys
+  // (including legacy dadchat:vault keys) and the Project tab's saved generator copies and snapshots. What is not yet
+  // on disk goes there first: into the backup folder when one is connected (secret-shaped chat copies, which never go
+  // to a folder, are downloaded instead), otherwise as one downloaded file. Small operational link records are kept.
+  const PROJECT_DB = 'weldCompanionProjects';
+  function dropProjectDb() {
+    return new Promise(resolve => {
+      try {
+        const idb = pageWin().indexedDB || indexedDB, r = idb.deleteDatabase(PROJECT_DB);
+        r.onsuccess = () => resolve('ok'); r.onerror = () => resolve('failed'); r.onblocked = () => resolve('blocked');
+      } catch (e) { resolve('unavailable'); }
+    });
+  }
+  async function purgeAll() {
+    if (S.busy) return;
+    S.busy = true; draw();
+    let gone = 0, bad = 0, keptNote = '';
     try {
+      let saved = new Set();
+      if (ptReady()) {
+        while (F.busy) await new Promise(r => setTimeout(r, 100));   // an automatic save is running: let it finish, then save everything
+        F.last = null; await syncToFolder(false); if (F.last && F.last.saved) saved = new Set(F.last.saved);
+      }
       load();
-      const byId = new Map(), keys = new Set();
-      (S.rows || []).forEach(r => { byId.set(r.caller + '\u0000' + r.key, r); keys.add(r.key); });
-      const docs = []; await readJsonFiles(F.handle, 0, docs); L.files = docs.length;
-      L.plan = C.planImport(docs, {
-        has: k => keys.has(k),
-        get: (c, k) => { const r = byId.get(c + '\u0000' + k); if (!r) return undefined; if (r.stale || r.parseError) return null; const rec = full(r.gmKey); return rec && !rec.unreadable && !rec.parseError ? rec.value : null; }
-      });
-      F.error = '';
-    } catch (e) { F.error = 'Could not read the folder: ' + ((e && e.message) || e); }
-    L.busy = false; draw();
-  }
-  async function applyImport() {
-    const plan = L.plan; if (!plan || L.busy) return;
-    L.busy = true; draw();
-    try {
-      await syncToFolder(false);   // first save what is here, so a replaced snapshot still exists as a file in the folder
-      let ok = 0, bad = 0;
-      plan.add.concat(plan.update).forEach(it => { let r; try { r = V().write(it.caller, it.key, it.value); } catch (e) { r = { ok: false }; } if (r && r.ok) ok++; else bad++; });
-      L.plan = null; load();
-      L.msg = 'Loaded ' + ok + ' record' + (ok === 1 ? '' : 's') + ' from ' + F.name + (bad ? ' (' + bad + ' failed)' : '') + '. Reload the generator tab so it reads them.';
-      say(L.msg, bad > 0);
-    } catch (e) { F.error = 'Load failed: ' + ((e && e.message) || e); }
-    L.busy = false; draw();
-  }
-  function importCard() {
-    const wrap = E('div', { 'data-import': '1', style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--wc-line,#555)' } });
-    wrap.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Load copies that other computers saved into this folder. You see what would change first. Chat copies already here are never overwritten; a source copy is replaced only by a newer one.' }));
-    wrap.appendChild(btn(L.busy ? 'Working...' : 'Check folder for new saves', () => { scanFolder(); }, { disabled: !F.handle || F.perm !== 'granted' || L.busy || F.busy }));
-    const p = L.plan;
-    if (p) {
-      const n = p.add.length + p.update.length, sk = p.skipped;
-      wrap.appendChild(E('div', { 'data-import-summary': '1', style: { fontSize: '12px', margin: '6px 0' }, text: 'Read ' + L.files + ' file' + (L.files === 1 ? '' : 's') + (L.unreadable ? ' (' + L.unreadable + ' unreadable)' : '') + ': ' + p.add.length + ' new, ' + p.update.length + ' updated. Left alone: ' + (sk.present + sk.unchanged + sk.older) + ' already here or older, ' + (sk.operational + sk.legacy) + ' device-specific or legacy' + (sk.held ? ', ' + sk.held + ' held back for secret-shaped values' : '') + (sk.tombstoned ? ', ' + sk.tombstoned + ' deleted here on purpose' : '') + '.' }));
-      p.add.concat(p.update).slice(0, 60).forEach(it => wrap.appendChild(E('div', { style: { fontSize: '12px', wordBreak: 'break-all' }, text: (it.action === 'new' ? 'NEW ' : it.action === 'newer' ? 'NEWER ' : 'MERGE ') + it.key + ' · ' + C.fmtBytes(it.bytes) + ' · ' + it.note })));
-      if (n > 60) wrap.appendChild(E('div', { style: small, text: '...and ' + (n - 60) + ' more.' }));
-      if (!n) wrap.appendChild(E('div', { style: { fontSize: '12px' }, text: 'Everything in the folder is already here.' }));
-      else wrap.appendChild(E('div', { style: { display: 'flex', gap: '8px', marginTop: '6px' } }, [btn('Apply ' + n + ' change' + (n === 1 ? '' : 's'), () => { applyImport(); }, { disabled: L.busy }), btn('Cancel', () => { L.plan = null; draw(); })]));
-    }
-    return wrap;
+      const rows = (S.rows || []).filter(r => C.parseKey(r.key).kind !== 'operational');
+      const toFile = rows.filter(r => !r.stale && !saved.has(r.gmKey));   // not provably on disk yet (held back, failed, or no folder)
+      if (toFile.length) {
+        const recs = toFile.map(r => full(r.gmKey)).filter(Boolean), file = C.exportBundle('purged', recs, stamp());
+        V().download(file.filename, file.text);
+        keptNote = ' ' + recs.length + ' record' + (recs.length === 1 ? ' was' : 's were') + ' downloaded first as ' + file.filename + '.';
+      } else if (saved.size) keptNote = ' Every record is in ' + F.name + '.';
+      for (const r of rows) { let res; try { res = V().remove(r.gmKey); } catch (e) { res = null; } if (res && res.ok) gone++; else bad++; }
+      const proj = await dropProjectDb();
+      S.selected = null; S.inspected = null; S.secrets = null; D.found = null; D.sel = new Set();
+      load();
+      const t = 'Purged ' + gone + ' backup key' + (gone === 1 ? '' : 's') + ' from Weld storage' + (bad ? ' (' + bad + ' failed)' : '') + '.' + keptNote +
+        (proj === 'ok' ? ' Project tab copies and snapshots removed.' : proj === 'blocked' ? ' Project tab copies are removed once other Perchance tabs are closed.' : proj === 'failed' ? ' Project tab copies could not be removed.' : '');
+      say(t, bad > 0 || proj === 'failed'); try { H.toast(t, 8000); } catch (e) {}
+    } catch (e) { say('Purge stopped: ' + ((e && e.message) || e), true); }
+    S.busy = false; draw();
   }
   // ---- cleanup: duplicates. Exact duplicates can be removed in one step (after they are safely in the folder);
   // near duplicates are only listed and can be sent to the AI helper for a second opinion.
@@ -409,7 +448,7 @@
   function folderCard() {
     const card = E('div', { 'data-folder': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
     card.appendChild(E('div', { text: 'Backup location', style: { fontWeight: '600' } }));
-    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Choose any folder on a drive or inside a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox). Copies are saved there as files that are only ever added: nothing is overwritten or deleted, so browser cache clears cannot touch them.' }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Choose any folder on a drive or inside a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox). Generator vault saves go straight into it and are never kept in Weld. Files there are only ever added, so browser cache clears cannot touch them. With no folder, vault saves are refused and generators keep their own copies.' }));
     if (!F.supported) card.appendChild(E('div', { style: { fontSize: '12px', color: '#e0a030' }, text: 'This browser cannot open folders (Chrome or Edge can). The Download buttons below still work.' }));
     card.appendChild(E('div', { 'data-folder-state': '1', style: { fontSize: '12px', margin: '4px 0' }, text: F.handle ? 'Folder: ' + F.name + ' · ' + (F.perm === 'granted' ? 'access allowed' : 'needs permission (press Allow access)') : 'No folder chosen yet.' }));
     if (F.error) card.appendChild(E('div', { role: 'alert', style: { fontSize: '12px', color: '#ff9e92' }, text: F.error }));
@@ -425,7 +464,6 @@
     const keep = E('input', { type: 'checkbox', 'aria-label': 'Keep folder access allowed' }); keep.checked = F.keep;
     keep.addEventListener('change', () => setKeep(keep.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' }, title: 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\'s prompt to stop it forgetting at all.' }, [keep, E('span', { text: 'Keep access allowed (re-ask on my next click after a browser restart)' })]));
-    if (F.handle) card.appendChild(importCard());
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;
   }
@@ -434,35 +472,42 @@
     load();
     if (unsub) { try { unsub(); } catch (e) {} unsub = null; }
     const v = V();
-    if (v && typeof v.onChange === 'function') unsub = v.onChange(() => { if (host && host.isConnected !== false && !S.pendingDelete) { load(); draw(); } });
+    if (v && typeof v.onChange === 'function') unsub = v.onChange(() => { if (host && host.isConnected !== false) { load(); draw(); } });
     draw();
   }
+  // Redraws keep the reader where they were: scroll offsets of the panel and every opened section are restored.
+  function scrolled(n) { const out = []; for (let x = n; x && x.nodeType === 1; x = x.parentNode) if (x.scrollTop > 0) out.push([x, x.scrollTop]); return out; }
+  function remembered(d, id) { if (S.openGens.has(id)) d.open = true; d.addEventListener('toggle', () => { if (d.open) S.openGens.add(id); else S.openGens.delete(id); }); return d; }
   function draw() {
     const parent = host; if (!parent) return;
+    const keepScroll = scrolled(parent);
     while (parent.firstChild) parent.removeChild(parent.firstChild);
+    try { build(parent); } finally { keepScroll.forEach(x => { x[0].scrollTop = x[1]; }); }
+  }
+  function build(parent) {
     const rerender = () => draw();
     const wrap = E('div', { id: 'wc-backup-body' });
     wrap.appendChild(E('div', { text: 'Backup Manager', style: { fontWeight: '600', fontSize: '15px' } }));
-    wrap.appendChild(note('Look after the generator backup copies kept in this companion. You can inspect and download them, and delete a single key. This tab never edits, moves or repairs a record; generators own their own data.'));
+    wrap.appendChild(note('Weld keeps no backups: generator vault saves go straight to your backup folder. Anything older still held in browser storage is listed below; download it, delete keys one click at a time, or purge it all.'));
     const top = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '8px 0' } });
     top.appendChild(btn('Refresh', () => { load(); draw(); }));
     top.appendChild(btn('Export all', () => exportRows('all-generators', S.rows || []), { disabled: !(S.rows && S.rows.length) }));
     top.appendChild(btn('Scan for plaintext secrets', () => { scanSecrets(); draw(); }, { disabled: !(S.rows && S.rows.length) }));
+    top.appendChild(btn(S.busy ? 'Purging...' : 'Purge all Weld-stored backups', () => { purgeAll(); }, { disabled: S.busy, title: 'Removes every vault backup and the Project tab copies and snapshots from browser storage. Anything not yet on disk is saved to your backup folder (or downloaded) first.' }));
     wrap.appendChild(top);
     if (S.msg) wrap.appendChild(E('div', { role: 'status', 'aria-live': 'polite', style: { fontSize: '12px', margin: '4px 0', color: S.msgErr ? '#ff9e92' : '' }, text: S.msg }));
     if (S.error) { wrap.appendChild(E('div', { role: 'alert', style: { color: '#ff9e92', margin: '8px 0' }, text: S.error })); parent.appendChild(wrap); return; }
     const inv = S.inv, info = (V() && V().info && V().info()) || {};
     wrap.appendChild(E('div', { 'data-summary': '1', style: Object.assign({ margin: '4px 0 10px' }, small), text:
-      (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' · ' + C.fmtBytes(inv.bytes) + ' used by backups' +
+      (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' still in browser storage · ' + C.fmtBytes(inv.bytes) +
       (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
-    if (!inv.count) wrap.appendChild(note('No generator backups are stored yet. They appear here after a generator saves a copy through Skybridge storage.'));
+    if (!inv.count) wrap.appendChild(note('Nothing is held in Weld storage. Generator vault saves land in your backup folder.'));
     wrap.appendChild(folderCard());
     wrap.appendChild(cleanupCard());
     wrap.appendChild(familyCard(rerender));
-    const bar = confirmBar(rerender); if (bar) wrap.appendChild(bar);
     inv.generators.forEach(g => {
-      const d = E('details', { 'data-gen': g.gen, style: { margin: '6px 0' } });
-      if (S.selected && g.keys.some(k => k.gmKey === S.selected) || g.keys.some(k => k.gmKey === S.pendingDelete)) d.open = true;
+      const d = remembered(E('details', { 'data-gen': g.gen, style: { margin: '6px 0' } }), 'gen:' + g.gen);
+      if (S.selected && g.keys.some(k => k.gmKey === S.selected)) { d.open = true; S.openGens.add('gen:' + g.gen); }
       d.appendChild(E('summary', { text: g.gen + ' — ' + (g.snapshot ? 'source copy ' + (g.snapshot.stale ? '(stale)' : (g.snapshot.at ? C.fmtDate(g.snapshot.at) : 'present')) : 'no source copy') + ', ' + g.chats + ' chat cop' + (g.chats === 1 ? 'y' : 'ies') + ', ' + C.fmtBytes(g.bytes) +
         (g.newest ? ', newest ' + C.fmtDate(g.newest).slice(0, 10) : '') + (g.oldest && g.oldest !== g.newest ? ', oldest ' + C.fmtDate(g.oldest).slice(0, 10) : '') + (g.stale ? ', ' + g.stale + ' stale' : '') }));
       d.appendChild(E('div', { style: { padding: '2px 0 4px 12px' } }, [btn('Export folder', () => exportRows(g.gen, g.keys), { 'aria-label': 'Export folder ' + g.gen })]));
@@ -471,13 +516,13 @@
     });
     function plain(title, rows, canDelete, why) {
       if (!rows.length) return;
-      const d = E('details', { 'data-section': title, style: { margin: '6px 0' } });
+      const d = remembered(E('details', { 'data-section': title, style: { margin: '6px 0' } }), 'section:' + title);
       d.appendChild(E('summary', { text: title + ' (' + rows.length + ')' }));
       d.appendChild(E('div', { style: Object.assign({ padding: '2px 0 4px 12px' }, small), text: why }));
       rows.forEach(r => d.appendChild(E('div', { style: { paddingLeft: '12px' } }, [rowLine(r, canDelete, rerender)])));
       wrap.appendChild(d);
     }
-    plain('Legacy (dadchat:vault)', inv.legacy, false, 'Read-only. Generators own the migration of these keys; this tab never migrates, renames or cleans them.');
+    plain('Legacy (dadchat:vault)', inv.legacy, true, 'Old-format vault keys. This tab never migrates or renames them; Delete or Purge removes them.');
     plain('Operational keys', inv.operational, false, 'Small link and self-test records. Display only.');
     plain('Other vault-prefix keys', inv.other, true, 'Keys under weld:genvault: whose folder name is not a valid generator name.');
     if (S.secrets) {
@@ -489,5 +534,6 @@
     parent.appendChild(wrap);
   }
   bootFolder().catch(() => {});
-  window.weldBackup = { render, _sync: syncToFolder, _state: F };
+  // vault: the pass-through store Skybridge storage uses for weld:genvault: keys (see sbServiceStorage).
+  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: ptReady, set: ptSet, get: ptGet, list: ptList, noFolder: NO_FOLDER } };
 })();
