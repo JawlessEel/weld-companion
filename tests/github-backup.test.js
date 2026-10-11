@@ -75,6 +75,7 @@ const B = require('../src/github-backup');
     dslView: () => ({ state: { doc: { toString: () => 'output' } } }), htmlView: () => ({ state: { doc: { toString: () => '<p>hi</p>' } } }),
     ghResolve: () => ({ cfg: { owner: 'o', repo: 'r', branch: 'main', dslPath: '{name}/{name}-top-panel.txt', htmlPath: '{name}/{name}-html-panel.html' } }),
     window: {}, Date, confirm: () => true, toast() {}, lintHtmlScripts: () => [], ghGateNote: () => '',
+    ghPushStatus: () => ({ step() {}, end() {} }),
     ghCollectBackup: () => { throw new Error('Restored Push must not collect src or cache'); },
     ghPushFilesAtomic: (owner, repo, branch, files) => panelPushes.push(files) };
   vm.createContext(rollbackContext);
@@ -85,15 +86,22 @@ const B = require('../src/github-backup');
     { path: 'dad/dad-top-panel.txt', content: 'output' }, { path: 'dad/dad-html-panel.html', content: '<p>hi</p>' }
   ], 'restored Push and PR contain exactly the two editor panels');
   const uploader = shipped.slice(shipped.indexOf('function ghApiError('), shipped.indexOf('function ghGateNote('));
-  async function push(file, validate) {
-    const calls = [];
+  async function push(file, validate, mock = {}) {
+    const calls = [], progress = [];
     const context = { console, Promise, ghApi(method, url, token, body, cb) {
       calls.push({ method, url, body });
-      cb(null, method === 'POST' ? 201 : 200, method === 'GET' && url.includes('/ref/') ? { object: { sha: 'parent' } } : { sha: 'new', tree: { sha: 'tree' } });
+      if (method === 'PATCH' && mock.patchTimeout) return cb(new Error('GitHub request timed out.'), 0, null);
+      if (method === 'GET' && url.includes('/ref/')) {
+        const recheck = calls.filter(c => c.method === 'GET' && c.url.includes('/ref/')).length > 1;
+        return cb(null, 200, { object: { sha: recheck && mock.landed ? 'new' : 'parent' } });
+      }
+      if (method === 'POST' && url.endsWith('/trees')) return cb(null, 201, { sha: mock.sameTree ? 'tree' : 'tree2' });
+      cb(null, method === 'POST' ? 201 : 200, { sha: 'new', tree: { sha: 'tree' } });
     } };
     vm.createContext(context); vm.runInContext(uploader, context);
-    const error = await new Promise(resolve => context.ghPushFilesAtomic('o', 'r', 'main', [file], 'test-token', 'test', e => resolve(e), { validate }));
-    return { error, calls };
+    const [error, result, info] = await new Promise(resolve => context.ghPushFilesAtomic('o', 'r', 'main', [file], 'test-token', 'test',
+      (e, r, i) => resolve([e, r, i]), { validate, onProgress: t => progress.push(t) }));
+    return { error, result, info, calls, progress };
   }
   const binaryPush = await push({ path: 'dad/src/x.bin', encoding: 'base64', read: async () => 'AP8B' });
   assert.equal(binaryPush.error, null);
@@ -103,5 +111,20 @@ const B = require('../src/github-backup');
   assert.ok(failedPush.error); assert.equal(failedPush.calls.filter(c => c.method === 'PATCH').length, 0);
   const changedPush = await push({ path: 'dad/x', content: 'x' }, () => { throw new Error('changed'); });
   assert.match(changedPush.error.message, /changed/); assert.equal(changedPush.calls.filter(c => c.method === 'PATCH').length, 0);
+  // Success reports the commit, and progress lines are emitted for the on-screen status.
+  assert.equal(binaryPush.result, 'updated'); assert.equal(binaryPush.info.sha, 'new');
+  assert.equal(binaryPush.info.url, 'https://github.com/o/r/commit/new');
+  assert.ok(binaryPush.progress.some(t => /Uploading dad\/src\/x\.bin/.test(t)) && binaryPush.progress.some(t => /Moving main/.test(t)));
+  // Files identical to the branch head: no empty commit, no ref move, reported as 'unchanged'.
+  const samePush = await push({ path: 'dad/x', content: 'x' }, null, { sameTree: true });
+  assert.equal(samePush.error, null); assert.equal(samePush.result, 'unchanged');
+  assert.equal(samePush.calls.filter(c => c.url.endsWith('/commits') && c.method === 'POST').length, 0);
+  assert.equal(samePush.calls.filter(c => c.method === 'PATCH').length, 0);
+  // Final step times out but GitHub did move the branch: report success, not failure.
+  const landed = await push({ path: 'dad/x', content: 'x' }, null, { patchTimeout: true, landed: true });
+  assert.equal(landed.error, null); assert.equal(landed.result, 'updated');
+  // Final step times out and the branch did not move: still a failure.
+  const lost = await push({ path: 'dad/x', content: 'x' }, null, { patchTimeout: true });
+  assert.ok(lost.error); assert.match(lost.error.message, /PATCH branch/);
   console.log('GitHub backup binary, chunk restore, integrity, mutation and cache privacy tests passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

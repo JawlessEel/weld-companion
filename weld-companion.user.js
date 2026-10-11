@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.83.0
+// @version      1.83.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.83.0';
+  var WC_VERSION = '1.83.1';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1020,6 +1020,9 @@
   // branch stays exactly as it was; it can never contain just one pane's update.
   // opts.newBranch (optional): commit on top of `branch` but publish the commit as a NEW branch instead of
   // moving `branch` (used by "Push as pull request"). Existing callers pass no opts and behave as before.
+  // opts.onProgress (optional): receives a plain-language line before each step, for the on-screen status.
+  // cb(err, result, info): result is 'updated' | 'created' | 'unchanged'; info = { sha, url } of the commit.
+  // 'unchanged' means GitHub already holds exactly these files, so no (empty) commit is made.
   function ghPushFilesAtomic(o, repo, branch, files, token, msg, cb, opts) {
     // A stray space or a pasted label ("owner = name") in a custom mapping reads as a 404.
     function clean(v, label) { return String(v || '').replace(new RegExp('^\\s*' + label + '\\s*[=:]\\s*', 'i'), '').trim(); }
@@ -1029,6 +1032,9 @@
       if (opts && typeof opts.onStep === 'function') { try { opts.onStep(method + ' ' + path.split('/')[0]); } catch (e) {} }
       ghApi(method, base + path, token, body, done);
     }
+    function progress(text) { if (opts && typeof opts.onProgress === 'function') { try { opts.onProgress(text); } catch (e) {} } }
+    function info(sha, htmlUrl) { return { sha: sha, url: htmlUrl || ('https://github.com/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/commit/' + sha) }; }
+    progress('Checking ' + o + '/' + repo + '@' + branch + '…');
     function fail(action, err, st, json) { cb(err ? new Error(action + ': ' + err.message) : ghApiError(action, st, json)); }
     var branchPath = ghBranchPath(branch);
     if (!branchPath) return cb(new Error('Branch is required'));
@@ -1051,6 +1057,7 @@
         function putBlob() {
           if (i >= files.length) return putTree();
           var f = files[i++];
+          progress('Uploading ' + f.path + ' (' + i + ' of ' + files.length + ')…');
           function send(content) { api('POST', 'blobs', { content: content, encoding: f.encoding || 'utf-8' }, function (eBlob, sBlob, blob) {
             if (eBlob || (sBlob !== 201 && sBlob !== 200) || !blob || !blob.sha) return fail('POST blob', eBlob, sBlob, blob);
             blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
@@ -1063,18 +1070,30 @@
           try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
           api('POST', 'trees', { base_tree: parentCommit.tree.sha, tree: blobs }, function (eTree, sTree, tree) {
             if (eTree || (sTree !== 201 && sTree !== 200) || !tree || !tree.sha) return fail('POST tree', eTree, sTree, tree);
+            // Same tree as the branch head: GitHub already has these exact files. Skip the empty commit.
+            if (tree.sha === parentCommit.tree.sha) return cb(null, 'unchanged', info(parent, parentCommit.html_url));
+            progress('Creating the commit…');
             api('POST', 'commits', { message: msg, tree: tree.sha, parents: [parent] }, function (eNew, sNew, commit) {
               if (eNew || (sNew !== 201 && sNew !== 200) || !commit || !commit.sha) return fail('POST commit', eNew, sNew, commit);
               if (opts && opts.newBranch) {
                 if (!/^[\w.\/-]{1,120}$/.test(opts.newBranch) || /\.\.|\/\/|\.lock$|^\/|\/$/.test(opts.newBranch)) return fail('POST branch', new Error('Unsafe branch name'));
+                progress('Creating branch ' + opts.newBranch + '…');
                 return api('POST', 'refs', { ref: 'refs/heads/' + opts.newBranch, sha: commit.sha }, function (eNew2, sNew2, made) {
                   if (eNew2 || sNew2 !== 201) return fail('POST branch', eNew2, sNew2, made);
-                  cb(null, 'created');
+                  cb(null, 'created', info(commit.sha, commit.html_url));
                 });
               }
+              progress('Moving ' + branch + ' to the new commit…');
               api('PATCH', 'refs/heads/' + branchPath, { sha: commit.sha, force: false }, function (eRef, sRef, updated) {
-                if (eRef || sRef !== 200) return fail('PATCH branch', eRef, sRef, updated);
-                cb(null, 'updated');
+                if (!eRef && sRef === 200) return cb(null, 'updated', info(commit.sha, commit.html_url));
+                if (!eRef) return fail('PATCH branch', eRef, sRef, updated);
+                // No answer (timeout / network drop) on the last step: GitHub may still have applied it. Ask before reporting failure.
+                progress('No reply from GitHub; checking whether ' + branch + ' was updated…');
+                api('GET', 'ref/heads/' + branchPath, null, function (eChk, sChk, now) {
+                  if (!eChk && sChk === 200 && now && now.object && now.object.sha === commit.sha) return cb(null, 'updated', info(commit.sha, commit.html_url));
+                  if (!eChk && sChk === 200) return fail('PATCH branch', eRef, sRef, updated);   // confirmed not moved
+                  cb(new Error('PATCH branch: ' + eRef.message + ' GitHub could not confirm whether the push landed; open the repo to check before retrying.'));
+                });
               });
             });
           });
@@ -1093,6 +1112,25 @@
       if (!g.count) return '';
       return '\n\n⚠ Weld found ' + g.count + ' possible problem(s) (heuristic):\n' + g.lines.join('\n') + (g.more ? '\n… and ' + g.more + ' more (see the Project tab)' : '');
     } catch (e) { return ''; }
+  }
+  // On-screen push status. A push is ~6 sequential GitHub requests, so a 2s toast read as "nothing happened"
+  // and a finished push looked like a failure. This box stays up for every step, then shows the outcome
+  // (with a link to the commit) until it times out or is closed. Failures stay until closed.
+  function ghPushStatus(text) {
+    var line = el('span', { text: text });
+    var box = el('div', { class: 'wc-root wc-toast wc-toast-in wc-gh-status', role: 'status', 'aria-live': 'polite' }, [line]);
+    document.body.appendChild(box);
+    var timer = null, ended = false;
+    function close() { clearTimeout(timer); try { box.remove(); } catch (e) {} }
+    return {
+      step: function (t) { if (!ended) line.textContent = t; },
+      end: function (t, link, linkText, ms) {
+        ended = true; line.textContent = t;
+        if (link) box.appendChild(el('a', { class: 'wc-gh-status-link', href: link, target: '_blank', rel: 'noopener noreferrer', text: linkText || 'View on GitHub' }));
+        box.appendChild(el('button', { class: 'wc-btn wc-mini', text: 'Close', onclick: close }));
+        if (ms) timer = setTimeout(close, ms);
+      }
+    };
   }
   // Commit both panes to a NEW branch and open a pull request against the configured branch, so the change
   // can be reviewed (by you, Copilot, Codex, Claude...) before it reaches main. Needs a token with
@@ -1116,18 +1154,21 @@
     var msg = 'Open a pull request for “' + name + '”?\n\nrepo: ' + R.cfg.owner + '/' + R.cfg.repo + '\nnew branch: ' + branch + '  →  into ' + base + '\nDSL  → ' + dslP + '\nHTML → ' + htmlP
       + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghGateNote(name, dsl, html);
     if (!confirm(msg)) { toast('Cancelled'); return; }
-    toast('Creating branch and pull request…');
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err) {
-      if (err) { console.error('[weld pr]', err.message); toast('Could not create the branch: ' + err.message, 6000); return; }
+    var status = ghPushStatus('Creating branch and pull request for ' + name + '…');
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err, result) {
+      if (err) { console.error('[weld pr]', err.message); status.end('✗ Could not create the branch: ' + err.message + ' ' + base + ' was not changed.'); return; }
+      if (result === 'unchanged') { status.end('✓ Nothing to propose: ' + base + ' already has this exact version of ' + name + '. No branch or pull request was made.', null, null, 12000); return; }
+      status.step('Opening the pull request…');
       ghApi('POST', '/repos/' + R.cfg.owner + '/' + R.cfg.repo + '/pulls', token, { title: 'Update ' + name + ' via Weld Companion', head: branch, base: base,
         body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`.' }, function (e2, st, pr) {
         if (e2 || (st !== 201 && st !== 200) || !pr || !pr.html_url) {
-          toast('Branch ' + branch + ' was created, but the pull request failed (' + ((pr && pr.message) || e2 && e2.message || st) + '). Open it on GitHub.', 8000); return;
+          status.end('⚠ Branch ' + branch + ' was created, but the pull request failed (' + ((pr && pr.message) || e2 && e2.message || st) + '). Open it on GitHub.',
+            'https://github.com/' + R.cfg.owner + '/' + R.cfg.repo + '/compare/' + base + '...' + branch, 'Open on GitHub'); return;
         }
         try { copyText(pr.html_url); } catch (e) {}
-        toast('Pull request opened (link copied): ' + pr.html_url, 8000);
+        status.end('✓ Pull request opened for ' + name + ' (link copied).', pr.html_url, 'View pull request', 20000);
       });
-    }, { newBranch: branch });
+    }, { newBranch: branch, onProgress: function (t) { status.step(t); } });
   }
   function pushToGitHub(over) {
     var name = genName();
@@ -1154,13 +1195,15 @@
     if (pushLint.length) { console.warn('[weld lint]', pushLint); confirmMsg += '\n\n\u26A0 ' + pushLint.length + ' JavaScript problem(s) in the HTML pane (see console) \u2014 pushing commits them as-is.'; }
     confirmMsg += ghGateNote(name, dsl, html);
     if (!confirm(confirmMsg)) { toast('Cancelled'); return; }
-    toast('Pushing ' + name + ' to GitHub\u2026');
+    var where = R.cfg.owner + '/' + R.cfg.repo + '@' + branch;
+    var status = ghPushStatus('Pushing ' + name + ' to ' + where + '\u2026');
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result) {
-      if (err) { console.error('[weld push]', err.message); toast('Push failed: ' + err.message, 10000); return; }
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result, info) {
+      if (err) { console.error('[weld push]', err.message); status.end('\u2717 Push failed: ' + err.message); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
-      toast('Pushed ' + name + ' (one atomic commit)');
-    });
+      if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.', info && info.url, 'View latest commit', 12000); return; }
+      status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.', info && info.url, 'View commit', 20000);
+    }, { onProgress: function (t) { status.step(t); } });
   }
   function ghConfigure() {
     var cfg = ghCfg();
@@ -1384,6 +1427,8 @@
     '  display:flex;align-items:center;gap:9px;opacity:0;transition:opacity .3s cubic-bezier(.2,.8,.2,1),transform .3s cubic-bezier(.2,.8,.2,1);}',
     '.wc-toast::after{content:"";position:absolute;left:0;top:14%;height:72%;width:3px;border-radius:3px;background:var(--wc-arc);box-shadow:0 0 12px var(--wc-arc);}',
     '.wc-toast-in{opacity:1;transform:translateX(-50%) translateY(0) scale(1);}',
+    '.wc-gh-status{max-width:min(620px,calc(100vw - 32px));flex-wrap:wrap;}',
+    '.wc-gh-status-link{color:var(--wc-arc);font-weight:600;text-decoration:underline;}',
     // ---- buttons ----
     '.wc-btn{appearance:none;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.01));color:var(--wc-ink);',
     '  border:1px solid var(--wc-line);border-radius:9px;padding:8px 13px;font:600 12px/1 var(--wc-sans);letter-spacing:.2px;',
