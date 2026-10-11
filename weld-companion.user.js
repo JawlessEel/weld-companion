@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.85.0
+// @version      1.86.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.85.0';
+  var WC_VERSION = '1.86.0';
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1272,6 +1272,55 @@
       }
     };
   }
+  // GitHub connection test (GitHub tab): times tiny requests so a slow push can be traced to Tampermonkey, the
+  // network path, a busy page or a hidden tab. The report holds timings only, never the token or file contents.
+  function ghSpeedTest(out) {
+    var lines = [], t0 = Date.now(), maxLag = 0, last = Date.now(), hiddenSeen = document.visibilityState !== 'visible';
+    function log(s) { lines.push(s); out.textContent = lines.join('\n'); }
+    var lagTimer = setInterval(function () { var n = Date.now(); maxLag = Math.max(maxLag, n - last - 50); last = n; }, 50);
+    function onVis() { if (document.visibilityState !== 'visible') hiddenSeen = true; }
+    document.addEventListener('visibilitychange', onVis);
+    function gm(label, opt) {
+      return new Promise(function (res) {
+        var s = Date.now(), done = false, w = null;
+        function fin(r) { if (done) return; done = true; clearTimeout(w); log(label + ': ' + (Date.now() - s) + ' ms' + (r ? ' (' + r + ')' : '')); res(); }
+        w = setTimeout(function () { fin('no reply in 90s'); }, 90000);
+        try {
+          GM_xmlhttpRequest(Object.assign({ method: 'GET', onload: function (x) { fin('HTTP ' + x.status); },
+            onerror: function () { fin('network error'); }, ontimeout: function () { fin('timeout'); } }, opt));
+        } catch (e) { fin('could not start'); }
+      });
+    }
+    var tok = ghToken(), mgr = '';
+    try { mgr = (GM_info.scriptHandler || '?') + ' ' + (GM_info.version || ''); } catch (e) { mgr = 'unknown manager'; }
+    log('Weld ' + WC_VERSION + ' · ' + mgr + ' · ' + ((navigator.userAgent.match(/(Edg|Chrome|Firefox)\/[\d.]+/) || ['browser ?'])[0]));
+    log('Tab visible at start: ' + (document.visibilityState === 'visible' ? 'yes' : 'NO'));
+    // Tampermonkey hands every frame that runs Weld a copy of the script and of its stored values, so both sizes matter.
+    try {
+      var keys = GM_listValues(), chars = 0;
+      keys.forEach(function (k) { try { var v = GM_getValue(k, ''); chars += typeof v === 'string' ? v.length : 0; } catch (e) {} });
+      log('Weld storage: ' + (chars / 1048576).toFixed(1) + ' MB in ' + keys.length + ' values');
+    } catch (e) { log('Weld storage: could not measure'); }
+    try { log('Script size: ' + (GM_info.scriptSource ? (GM_info.scriptSource.length / 1048576).toFixed(2) + ' MB' : 'unknown') + ' · frames on this page: ' + document.querySelectorAll('iframe').length + ' (each Perchance frame may run its own copy)'); } catch (e) {}
+    var p = Promise.resolve();
+    [1, 2, 3].forEach(function (n) { p = p.then(function () { return gm('Tampermonkey → api.github.com #' + n, { url: 'https://api.github.com/zen' }); }); });
+    if (tok) p = p.then(function () { return gm('Tampermonkey → api.github.com with token', { url: 'https://api.github.com/rate_limit',
+      headers: { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } }); });
+    p = p.then(function () { return gm('Tampermonkey → perchance.org (not GitHub)', { method: 'HEAD', url: 'https://perchance.org/welcome' }); });
+    p = p.then(function () {
+      var s = Date.now();
+      return Promise.resolve().then(function () { return fetch('https://api.github.com/zen', { cache: 'no-store' }); }).then(
+        function (r) { log('Direct browser request → api.github.com: ' + (Date.now() - s) + ' ms (HTTP ' + r.status + ')'); },
+        function () { log('Direct browser request → api.github.com: blocked (expected; Perchance only allows its own site)'); });
+    });
+    return p.then(function () {
+      clearInterval(lagTimer); document.removeEventListener('visibilitychange', onVis);
+      log('Longest page freeze: ' + Math.max(0, maxLag) + ' ms');
+      log('Tab hidden during test: ' + (hiddenSeen ? 'YES (Chrome slows hidden tabs; keep this tab in front while pushing)' : 'no'));
+      log('Total: ' + Math.round((Date.now() - t0) / 1000) + ' s');
+      return lines.join('\n');
+    });
+  }
   // Commit both panes to a NEW branch and open a pull request against the configured branch, so the change
   // can be reviewed (by you, Copilot, Codex, Claude...) before it reaches main. Needs a token with
   // Contents + Pull requests: read & write.
@@ -2162,6 +2211,16 @@
       el('button', { class: 'wc-btn', text: 'Save token', title: 'Store the token locally for Push', onclick: function () { var v = tokIn.value.trim(); if (!v) { toast('Paste a token first'); return; } gset('ghToken', v); tokIn.value = ''; tokIn.placeholder = '\u2022\u2022\u2022\u2022 token saved \u2014 type to replace'; toast('GitHub token saved'); } }),
       el('button', { class: 'wc-btn', text: 'Clear token', title: 'Remove the stored token', onclick: function () { gdel('ghToken'); tokIn.value = ''; tokIn.placeholder = 'github_pat_\u2026 / ghp_\u2026'; toast('GitHub token cleared'); } })
     ]));
+    // Connection test: shows where a slow push spends its time. Timings only; safe to copy and share.
+    var speedOut = el('pre', { class: 'wc-section-note', style: { whiteSpace: 'pre-wrap', margin: '8px 0 0', display: 'none' } });
+    var speedReport = '';
+    var speedCopy = el('button', { class: 'wc-btn', text: 'Copy report', style: { display: 'none' }, onclick: function () { try { copyText(speedReport); toast('Report copied'); } catch (e) {} } });
+    var speedBtn = el('button', { class: 'wc-btn', text: 'Test connection speed', title: 'Time a few tiny GitHub requests (about 10 seconds when healthy)', onclick: function () {
+      speedBtn.disabled = true; speedOut.style.display = ''; speedCopy.style.display = 'none'; speedOut.textContent = 'Testing\u2026 keep this tab in front.';
+      ghSpeedTest(speedOut).then(function (r) { speedReport = r; speedCopy.style.display = ''; }, function () {}).then(function () { speedBtn.disabled = false; });
+    } });
+    cardTok.appendChild(row([speedBtn, speedCopy]));
+    cardTok.appendChild(speedOut);
     colB.appendChild(cardTok);
 
     var cardLint = el('div', { class: 'wc-card' });
