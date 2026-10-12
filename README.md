@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.88.1-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.89.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -127,7 +127,7 @@ Everything in the **📒 Library** tab is for people who *use* generators rather
 
 ##### 📌 Scrapbook
 
-A permanent, cross-generator collection of saved results. The drawer's **Save** button downloads a one-shot file and **Pins** are per-generator and capped at 12 — the Scrapbook is where great rolls actually live. One click saves the open generator's current output — captured from **inside the generator's sandbox frame** via the agent, reading the real output container and skipping Perchance's own frame chrome (the fullscreen / reload / warnings strip) and any inline scripts. On an AI Character Chat page it recognises the conversation and points you to **Chat stories** instead, where the whole thread exports cleanly from the database; every entry is searchable (text, generator, tags, notes), taggable, annotatable, readable aloud, and links back to the generator it came from. The whole collection (including your per-generator notes) exports to a single JSON file and imports back with duplicate-safe merging. Capacity is 500 entries; when full, the oldest entry rotates out and the save tells you so.
+A permanent, cross-generator collection of saved results. The drawer's **Save** button downloads a one-shot file and **Pins** are per-generator and capped at 12 — the Scrapbook is where great rolls actually live. One click saves the open generator's current output — captured from **inside the generator's sandbox frame** via the agent, reading the real output container and skipping Perchance's own frame chrome (the fullscreen / reload / warnings strip) and any inline scripts. On an AI Character Chat page it recognises the conversation and points you to **Chat stories** instead, where the whole thread exports cleanly from the database; every entry is searchable (text, generator, tags, notes), taggable, annotatable, readable aloud, and links back to the generator it came from. The whole collection (including your per-generator notes) exports to a single JSON file and imports back with duplicate-safe merging. Capacity is 500 entries; when full, the oldest entry rotates out and the save tells you so. Since 1.89.0 the Scrapbook is a file in your backup folder (Weld > Backups), not in browser storage.
 
 ##### 🔍 Search everything
 

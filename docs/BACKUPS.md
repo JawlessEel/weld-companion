@@ -62,6 +62,16 @@ Needs Chrome or Edge (other browsers cannot open folders). The folder choice is 
 
 Several computers can point at the same synced folder: each one's generators read the vault saves that are there. (The old **Check folder for new saves** import was removed in 1.88.0 because it copied records into Weld storage.)
 
+## Studio projects and Scrapbook (1.89.0)
+
+Studio projects (`studio:index:v1`, `studio:project:v1:<id>`) and the Scrapbook (`scrapbook`) are files in `<backup folder>/_weld-data/`, not in Weld storage. Each file is `{ "format": "weld-data", "v": 1, "key", "savedAt", "value" }`.
+
+- **Moving existing data:** the first time folder access is allowed, Weld copies these keys out of browser storage, reads each file back to confirm it, and only then removes the storage copy. If the folder already has a key: Scrapbook entries and the Studio project list are merged by id; for a project the higher revision wins and the other version is written to `_weld-data/conflicts/`.
+- **Saving:** edits are written to the folder about half a second later. Without a folder (or before access is allowed) Studio and Scrapbook can be read from any not-yet-moved copy but nothing is saved, and Weld says so.
+- **Two tabs or computers:** if a file changed elsewhere since this tab read it, Weld keeps the newer file, shows it, and reports that your last edit was not saved. Files are re-read when the window regains focus.
+- **Deleting** a Studio project removes its file. **Changing folder** does not move `_weld-data`; copy it yourself.
+- **Move everything** (state export/import) still includes these keys.
+
 ## Delete and Purge
 
 - **Delete** on a key removes that one key at once, with no confirmation. The opened sections and scroll position stay where they were. A generator's chat index is not edited.

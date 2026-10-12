@@ -193,15 +193,17 @@
       const h = await pageWin().showDirectoryPicker({ id: 'weld-backup-folder', mode: 'readwrite' });
       F.handle = h; F.name = h.name; F.perm = await permission(h, true); F.error = F.perm === 'granted' ? '' : 'Folder chosen, but write permission was not granted.';
       await kvSet('handle', h); say(F.perm === 'granted' ? 'Backup folder set: ' + h.name : F.error, F.perm !== 'granted');
+      fkReset(); afterGrant();
     } catch (e) { if (!(e && e.name === 'AbortError')) F.error = (e && e.message) || String(e); }
     draw();
   }
   async function allowFolder() {
     if (!F.handle) return;
-    F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.'; draw();
+    F.perm = await permission(F.handle, true); F.error = F.perm === 'granted' ? '' : 'Permission was not granted.'; afterGrant(); draw();
   }
   async function forgetFolder() {
-    F.handle = null; F.name = ''; F.perm = 'none'; await kvDel('handle'); say('Backup folder disconnected. Nothing in it was deleted.'); draw();
+    if (FK.pending.size) await fkFlush().catch(() => {});
+    F.handle = null; F.name = ''; F.perm = 'none'; await kvDel('handle'); fkReset(); say('Backup folder disconnected. Nothing in it was deleted.'); draw();
   }
   // Chrome drops folder permission on restart; requestPermission() needs a user gesture, so with "Keep access
   // allowed" on, the first click or key press anywhere re-grants it (no need to open Weld's panel).
@@ -214,6 +216,7 @@
       if (!F.handle || F.perm === 'granted' || !F.keep) return;
       F.perm = await permission(F.handle, true); if (F.perm === 'granted') F.error = '';
       if (F.perm === 'granted' && F.auto) scheduleSync(500);
+      afterGrant();
       if (host) draw();
     };
     document.addEventListener('pointerdown', go, true); document.addEventListener('keydown', go, true);
@@ -221,7 +224,7 @@
   async function recheckAccess() {
     if (!F.handle || !F.keep) return;
     const was = F.perm; F.perm = await permission(F.handle, false);
-    if (F.perm !== 'granted') armRegrant();
+    if (F.perm !== 'granted') armRegrant(); else afterGrant();   // also refreshes data files changed in another tab
     if (F.perm !== was && host) draw();
   }
   function setKeep(on) { F.keep = !!on; H.set(KEEP_KEY, F.keep); if (F.keep) recheckAccess(); draw(); }
@@ -449,11 +452,134 @@
     if (f.exact.length && (!F.handle || F.perm !== 'granted')) card.appendChild(note('Deleting needs a backup folder with access allowed, so every copy is saved first.'));
     return card;
   }
+  // ---- Weld data files: Studio projects and the Scrapbook live as files in <backup folder>/_weld-data, not in Weld
+  // storage. Weld's storage helpers route those keys here (see gget/gset). Reads come from an in-memory cache filled
+  // from the folder; writes update the cache and are written to the folder shortly after. A file another tab or
+  // computer changed since this tab read it is never overwritten: the newer file wins and the tab is told.
+  // Older copies still in browser storage are moved into the folder once access is allowed (verified, then removed).
+  const FK_DIR = '_weld-data', FK_DELAY = 500;
+  const FK = { cache: new Map(), seen: new Map(), pending: new Map(), loaded: false, loading: null, timer: null, flushing: null, moved: 0, conflicts: 0, error: '' };
+  const LG = () => H.legacy || null;
+  const fkName = key => String(key).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) + '-' + C.hash8(key) + '.json';
+  const fkDoc = (key, raw) => '{"format":"weld-data","v":1,"key":' + JSON.stringify(key) + ',"savedAt":' + Date.now() + ',"value":' + raw + '}';
+  async function fkDirHandle(create) { return dirAt(F.handle, [FK_DIR], create); }
+  async function fkFile(dir, name) { try { return await (await dir.getFileHandle(name)).getFile(); } catch (e) { return null; } }
+  function fkReset() { FK.cache.clear(); FK.seen.clear(); FK.pending.clear(); FK.loaded = false; if (FK.timer) { clearTimeout(FK.timer); FK.timer = null; } fkChanged(); }
+  function fkChanged() { try { if (typeof H.refreshTab === 'function') H.refreshTab(); } catch (e) {} }
+  // Read every data file whose content changed since this tab last saw it (all of them the first time).
+  async function fkLoad() {
+    if (!ptReady()) return false;
+    if (FK.loading) return FK.loading;
+    FK.loading = (async () => {
+      let changed = false;
+      try {
+        let dir = null; try { dir = await fkDirHandle(false); } catch (e) { dir = null; }
+        if (dir) for (const name of await ptNames(dir)) {
+          const f = await fkFile(dir, name); if (!f) continue;
+          let doc; try { doc = JSON.parse(await f.text()); } catch (e) { continue; }
+          if (!doc || doc.format !== 'weld-data' || typeof doc.key !== 'string' || fkName(doc.key) !== name || FK.pending.has(doc.key)) continue;
+          if (FK.seen.get(doc.key) === f.lastModified && FK.cache.has(doc.key)) continue;
+          FK.cache.set(doc.key, JSON.stringify(doc.value === undefined ? null : doc.value)); FK.seen.set(doc.key, f.lastModified); changed = true;
+        }
+        const first = !FK.loaded; FK.loaded = true; FK.error = '';
+        if (first) { await fkMigrate(); changed = true; }
+      } catch (e) { FK.error = 'Could not read Weld data files: ' + ((e && e.message) || e); }
+      FK.loading = null;
+      if (changed) fkChanged();
+      if (host) scheduleDraw();
+      return true;
+    })();
+    return FK.loading;
+  }
+  function fkGet(key, dflt) {
+    if (FK.cache.has(key)) { const raw = FK.cache.get(key); if (raw === null) return dflt; try { return JSON.parse(raw); } catch (e) { return dflt; } }
+    const lg = LG(), old = lg ? lg.get(key) : undefined;   // not moved yet (no folder access so far)
+    return old === undefined ? dflt : old;
+  }
+  function fkSet(key, value) {
+    if (!ptReady() || !FK.loaded) return false;
+    let raw = null;
+    if (value !== null && value !== undefined) { try { raw = JSON.stringify(value); } catch (e) { return false; } if (raw === undefined) return false; }
+    FK.cache.set(key, raw); FK.pending.set(key, raw);
+    if (!FK.timer) FK.timer = setTimeout(() => { FK.timer = null; fkFlush().catch(() => {}); }, FK_DELAY);
+    return true;
+  }
+  async function fkFlush() {
+    if (FK.flushing) { await FK.flushing; if (FK.pending.size && !FK.timer) return fkFlush(); return; }
+    FK.flushing = (async () => {
+      const batch = Array.from(FK.pending.entries()); FK.pending.clear();
+      let dir; try { dir = await fkDirHandle(true); } catch (e) { batch.forEach(b => { if (!FK.pending.has(b[0])) FK.pending.set(b[0], b[1]); }); fkFail(e); return; }
+      for (const [key, raw] of batch) {
+        const name = fkName(key);
+        try {
+          const cur = await fkFile(dir, name);
+          if (cur && (!FK.seen.has(key) || cur.lastModified > FK.seen.get(key))) {   // changed elsewhere since this tab read it: keep the newer file
+            try { const doc = JSON.parse(await cur.text()); FK.cache.set(key, JSON.stringify(doc.value === undefined ? null : doc.value)); FK.seen.set(key, cur.lastModified); } catch (e) {}
+            FK.conflicts++;
+            try { H.toast('This was changed in another tab or on another computer, so your latest edit was not saved. The newer copy is shown.', 9000); } catch (e) {}
+            fkChanged(); continue;
+          }
+          if (raw === null) { if (cur) await dir.removeEntry(name); FK.seen.delete(key); continue; }
+          const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(fkDoc(key, raw)); await w.close();
+          const after = await fkFile(dir, name); if (after) FK.seen.set(key, after.lastModified);
+        } catch (e) { if (!FK.pending.has(key)) FK.pending.set(key, raw); fkFail(e); }
+      }
+    })();
+    try { await FK.flushing; } finally { FK.flushing = null; }
+  }
+  function fkFail(e) {
+    if (e && e.name === 'NotAllowedError') { F.perm = 'prompt'; armRegrant(); }
+    FK.error = 'Could not save to the backup folder: ' + ((e && e.message) || e) + '. Weld retries on the next save.';
+    try { H.toast(FK.error, 9000); } catch (x) {}
+    if (host) scheduleDraw();
+  }
+  // Merge rules when the folder already has a key that browser storage also holds.
+  function fkMerge(key, folderVal, oldVal) {
+    const byId = (a, b) => { const seen = new Set((a || []).map(x => x && x.id)); return (a || []).concat((b || []).filter(x => x && !seen.has(x.id))); };
+    if (key === 'scrapbook' && Array.isArray(folderVal) && Array.isArray(oldVal)) return { value: byId(folderVal, oldVal).sort((x, y) => ((y && y.t) || 0) - ((x && x.t) || 0)) };
+    if (key === 'studio:index:v1' && Array.isArray(folderVal) && Array.isArray(oldVal)) return { value: byId(folderVal, oldVal) };
+    const rev = v => (v && typeof v.revision === 'number' ? v.revision : -1);
+    return rev(oldVal) > rev(folderVal) ? { value: oldVal, loser: folderVal } : { value: folderVal, loser: oldVal };
+  }
+  async function fkWriteVerified(dir, name, text) {
+    const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(text); await w.close();
+    const f = await fkFile(dir, name); return f && (await f.text()) === text ? f : null;
+  }
+  async function fkMigrate() {
+    const lg = LG(); if (!lg || typeof lg.keys !== 'function') return;
+    const keys = lg.keys().filter(k => lg.owns(k)); if (!keys.length) return;
+    const dir = await fkDirHandle(true);
+    let moved = 0;
+    for (const key of keys) {
+      const old = lg.get(key); if (old === undefined) continue;
+      if (FK.cache.has(key) && FK.cache.get(key) === null) { lg.del(key); continue; }
+      let value = old, loser;
+      if (FK.cache.has(key)) { const m = fkMerge(key, JSON.parse(FK.cache.get(key)), old); value = m.value; loser = m.loser; }
+      try {
+        if (loser !== undefined && loser !== null) {   // keep the version that lost a revision tie-break as its own file
+          const cdir = await dirAt(F.handle, [FK_DIR, 'conflicts'], true), stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+          if (!await fkWriteVerified(cdir, fkName(key).replace(/\.json$/, '') + '-' + stamp + '.json', fkDoc(key, JSON.stringify(loser)))) continue;
+        }
+        const raw = JSON.stringify(value), f = await fkWriteVerified(dir, fkName(key), fkDoc(key, raw));
+        if (!f) continue;   // never remove from storage what is not provably on disk
+        FK.cache.set(key, raw); FK.seen.set(key, f.lastModified); lg.del(key); moved++;
+      } catch (e) { fkFail(e); return; }
+    }
+    if (moved) { FK.moved += moved; try { H.toast('Moved ' + moved + ' Studio/Scrapbook record' + (moved === 1 ? '' : 's') + ' out of browser storage into ' + F.name + '/' + FK_DIR + '.', 8000); } catch (e) {} }
+  }
+  function fkStatus() {
+    if (!F.handle) return 'Saved in your backup folder. Choose one in Weld > Backups to save.';
+    if (F.perm !== 'granted') return 'Saved in ' + F.name + '. Press Allow access in Weld > Backups (or click anywhere) to load and save.';
+    return FK.loaded ? 'Saved in ' + F.name + '/' + FK_DIR : 'Loading from ' + F.name + '...';
+  }
+  function afterGrant() { if (F.perm === 'granted') fkLoad().catch(() => {}); }
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false, true).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
     F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
+    afterGrant();
+    try { window.addEventListener('pagehide', () => { if (FK.pending.size) fkFlush().catch(() => {}); }); } catch (e) {}
     try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
     armRegrant();
     const v = V(); if (v && typeof v.onChange === 'function') v.onChange(() => { if (F.auto) scheduleSync(1500); });   // a generator saved: mirror it
@@ -479,6 +605,8 @@
     const keep = E('input', { type: 'checkbox', 'aria-label': 'Keep folder access allowed' }); keep.checked = F.keep;
     keep.addEventListener('change', () => setKeep(keep.checked));
     card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' }, title: 'Chrome forgets folder access when it restarts. With this on, Weld re-requests it on your first click or key press. Pick "Allow on every visit" in Chrome\'s prompt to stop it forgetting at all.' }, [keep, E('span', { text: 'Keep access allowed (re-ask on my next click after a browser restart)' })]));
+    card.appendChild(E('div', { 'data-weld-data': '1', style: { fontSize: '12px', marginTop: '6px' }, text: 'Studio projects and Scrapbook: ' + fkStatus() + (FK.loaded ? ' (' + Array.from(FK.cache.values()).filter(v => v !== null).length + ' file' + (Array.from(FK.cache.values()).filter(v => v !== null).length === 1 ? '' : 's') + ')' : '') + (FK.moved ? ' · moved ' + FK.moved + ' out of browser storage' : '') + '. Changing folder does not move these files; copy the ' + FK_DIR + ' folder yourself.' }));
+    if (FK.error) card.appendChild(E('div', { role: 'alert', style: { fontSize: '12px', color: '#ff9e92' }, text: FK.error }));
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;
   }
@@ -550,5 +678,7 @@
   }
   bootFolder().catch(() => {});
   // vault: the pass-through store Skybridge storage uses for weld:genvault: keys (see sbServiceStorage).
-  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: ptReady, set: ptSet, get: ptGet, list: ptList, noFolder: NO_FOLDER } };
+  // files: the folder store behind Weld's storage helpers for Studio projects and the Scrapbook (see gget/gset).
+  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: ptReady, set: ptSet, get: ptGet, list: ptList, noFolder: NO_FOLDER },
+    files: { get: fkGet, set: fkSet, ready: () => ptReady() && FK.loaded, status: fkStatus, flush: fkFlush, load: fkLoad, keys: () => Array.from(FK.cache.keys()).filter(k => FK.cache.get(k) !== null) } };
 })();

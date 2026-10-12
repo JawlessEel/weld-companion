@@ -124,19 +124,27 @@ assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkS
 // ---- UI against a fake host
 const bytes = () => JSON.stringify([...store].sort());
 const listeners = [], downloads = []; let listFail = false, removed = [];
-class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += x; }, close: async () => { this.text = b; } }; } async getFile() { const t = this.text; return { size: t.length, text: async () => t }; } }
+class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += x; }, close: async () => { this.text = b; this.lastModified = ++FakeFile.clock; } }; } async getFile() { const t = this.text, m = this.lastModified || 0; return { size: t.length, lastModified: m, text: async () => t }; } }
+FakeFile.clock = 1000;
 class FakeDir {
   constructor(n) { this.name = n; this.kind = 'directory'; this.items = new Map(); this.perm = 'granted'; }
   async getDirectoryHandle(n, o = {}) { let d = this.items.get(n); if (!d) { if (!o.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); d = new FakeDir(n); this.items.set(n, d); } return d; }
   async getFileHandle(n, o = {}) { let f = this.items.get(n); if (!f) { if (!o.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); f = new FakeFile(n); this.items.set(n, f); } return f; }
   async *entries() { for (const e of this.items) yield e; }
+  async removeEntry(n) { if (!this.items.delete(n)) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); }
   async queryPermission() { return this.perm; } async requestPermission() { this.perm = 'granted'; return 'granted'; }
   files(prefix = '') { return [...this.items].flatMap(([n, x]) => x.kind === 'directory' ? x.files(prefix + n + '/') : [prefix + n]); }
 }
 const pickedDir = new FakeDir('MyDrive'); let pickerCalls = 0; const droppedDbs = [];
 const fakeIdb = { deleteDatabase: n => { droppedDbs.push(n); const r = {}; setTimeout(() => r.onsuccess && r.onsuccess(), 0); return r; } };
 const settings = new Map();
+// older Studio/Scrapbook copies still in Weld storage (moved into the folder once access is allowed)
+const legacyStore = new Map([['scrapbook', [{ id: 'sb-a', t: 10, text: 'kept line' }]], ['studio:index:v1', [{ id: 'p1', name: 'World' }]],
+  ['studio:project:v1:p1', { revision: 3, project: { id: 'p1', name: 'World' }, snapshots: [] }], ['favorites', ['x']]]);
+const toasts = [];
 const host = {
+  toast: m => toasts.push(String(m)),
+  legacy: { owns: k => k === 'scrapbook' || String(k).indexOf('studio:') === 0, keys: () => [...legacyStore.keys()], get: k => legacyStore.has(k) ? JSON.parse(JSON.stringify(legacyStore.get(k))) : undefined, del: k => { legacyStore.delete(k); } },
   get: (k, d) => settings.has(k) ? settings.get(k) : d, set: (k, v) => { settings.set(k, v); return true; },
   pageWindow: () => ({ showDirectoryPicker: async () => { pickerCalls++; return pickedDir; }, indexedDB: fakeIdb }),
   slug: () => 'alpha', favorites: () => ['delta'],
@@ -226,9 +234,41 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
   host.vault = vaultApi; window.weldBackup.render(parent);
   const sleep = ms => new Promise(r => setTimeout(r, ms)), until = async (fn, what) => { for (let i = 0; i < 200; i++) { if (fn()) return; await sleep(10); } throw new Error('timed out: ' + what); };
   assert.ok(btn('Choose folder...') && !btn('Allow access'), 'no folder yet');
+  const FF = window.weldBackup.files, J2 = x => JSON.parse(JSON.stringify(x));
+  assert.deepEqual(J2(FF.get('scrapbook', [])), [{ id: 'sb-a', t: 10, text: 'kept line' }], 'not-yet-moved copy is readable');
+  assert.equal(FF.set('scrapbook', []), false, 'nothing is saved without a folder');
+  assert.equal(legacyStore.has('scrapbook'), true);
   assert.equal(btn('Save all to folder now').disabled, true);
   click('Choose folder...'); await until(() => pickerCalls === 1 && btn('Change folder...'), 'folder chosen');
   assert.match(txt(walk(parent).find(n => n.attrs['data-folder-state'])), /MyDrive · access allowed/);
+  // Studio projects and Scrapbook: moved out of Weld storage into <folder>/_weld-data, verified first
+  {
+    await until(() => FF.ready() && !legacyStore.has('scrapbook'), 'data files moved');
+    assert.deepEqual([...legacyStore.keys()], ['favorites'], 'only keys the folder store owns are moved');
+    const dataDir = pickedDir.items.get('_weld-data'), names = [...dataDir.items.keys()];
+    assert.equal(names.length, 3); assert.ok(names.some(n => /^studio-project-v1-p1-[0-9a-f]{8}\.json$/.test(n)) && names.some(n => /^scrapbook-/.test(n)));
+    assert.ok(toasts.some(t => /Moved 3 Studio\/Scrapbook records/.test(t)));
+    assert.equal(FF.get('studio:project:v1:p1', null).revision, 3);
+    assert.deepEqual(J2(FF.keys()).sort(), ['scrapbook', 'studio:index:v1', 'studio:project:v1:p1']);
+    // a save lands in the file; reads return fresh copies, never the cached object
+    assert.equal(FF.set('scrapbook', [{ id: 'sb-b', t: 20, text: 'new' }, { id: 'sb-a', t: 10, text: 'kept line' }]), true);
+    await FF.flush();
+    const sbName = names.find(n => /^scrapbook-/.test(n)), onDisk = () => JSON.parse(dataDir.items.get(sbName).text);
+    assert.equal(onDisk().format, 'weld-data'); assert.equal(onDisk().key, 'scrapbook'); assert.equal(onDisk().value.length, 2);
+    const a1 = FF.get('scrapbook', []); a1.push({ id: 'mut' }); assert.equal(FF.get('scrapbook', []).length, 2);
+    // the file changed in another tab or computer since this tab read it: the newer file wins, the edit is reported
+    const file = dataDir.items.get(sbName); file.text = JSON.stringify({ format: 'weld-data', v: 1, key: 'scrapbook', savedAt: 1, value: [{ id: 'other-pc', t: 99 }] }); file.lastModified = ++FakeFile.clock;
+    FF.set('scrapbook', [{ id: 'mine', t: 100 }]); await FF.flush();
+    assert.deepEqual(J2(onDisk().value), [{ id: 'other-pc', t: 99 }], 'newer file kept');
+    assert.deepEqual(J2(FF.get('scrapbook', [])), [{ id: 'other-pc', t: 99 }]);
+    assert.ok(toasts.some(t => /changed in another tab or on another computer/.test(t)));
+    // after a reload of that file, saving works again; a null save (Studio Delete project) removes the file
+    assert.equal(FF.set('scrapbook', [{ id: 'mine', t: 100 }]), true); await FF.flush(); assert.deepEqual(J2(onDisk().value), [{ id: 'mine', t: 100 }]);
+    const projName = names.find(n => /^studio-project/.test(n));
+    FF.set('studio:project:v1:p1', null); await FF.flush();
+    assert.equal(dataDir.items.has(projName), false); assert.equal(FF.get('studio:project:v1:p1', 'gone'), 'gone');
+    assert.equal(store.size > 0 && [...store.keys()].some(k => /scrapbook|studio:/.test(k)), false, 'nothing of this lands in Weld storage');
+  }
   click('Save all to folder now'); await until(() => /Saved \d+ new file/.test(txt(parent)), 'first sync');
   const first = pickedDir.files();
   assert.ok(first.some(f => /^alpha\/snapshot\/snapshot-\d{8}-\d{6}-[0-9a-f]{4}\.json$/.test(f)), 'snapshot file: ' + first.join(', '));
@@ -394,6 +434,21 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.equal(f.left, 2, 'secret-shaped copies are left out');
     assert.ok(!JSON.stringify(f.exact).includes('SECRETVALUE'));
     const rep = C.duplicateReport(f); assert.ok(/EXACT/.test(rep) && /POSSIBLE/.test(rep) && !/different|"hi"/.test(rep), 'report has metadata only');
+  }
+  // reconnecting with older copies still in storage: lists merge by id, a project keeps the higher revision and the
+  // other version is kept as a conflict file
+  {
+    legacyStore.set('scrapbook', [{ id: 'old-1', t: 50 }]);
+    const dataDir = pickedDir.items.get('_weld-data'), pName = [...dataDir.items.keys()].find(n => /^scrapbook-/.test(n)).replace('scrapbook', 'studio-project-v1-p2');
+    const p2 = n => 'studio-project-v1-p2-' + C.hash8('studio:project:v1:p2') + '.json';
+    const pf = new FakeFile(p2()); pf.text = JSON.stringify({ format: 'weld-data', v: 1, key: 'studio:project:v1:p2', savedAt: 1, value: { revision: 7, project: { id: 'p2' } } }); pf.lastModified = ++FakeFile.clock; dataDir.items.set(p2(), pf);
+    legacyStore.set('studio:project:v1:p2', { revision: 2, project: { id: 'p2', name: 'older' } });
+    click('Choose folder...'); await until(() => window.weldBackup.files.ready() && !legacyStore.has('scrapbook') && !legacyStore.has('studio:project:v1:p2'), 'merge on reconnect');
+    const FF2 = window.weldBackup.files;
+    assert.deepEqual(JSON.parse(JSON.stringify(FF2.get('scrapbook', []))).map(e => e.id), ['mine', 'old-1'], 'merged by id, newest first');
+    assert.equal(FF2.get('studio:project:v1:p2', null).revision, 7, 'higher revision kept');
+    const conflicts = dataDir.items.get('conflicts'); assert.ok(conflicts && [...conflicts.items.values()].some(x => JSON.parse(x.text).value.revision === 2), 'the other version is kept as a file');
+    void pName;
   }
   console.log('backup tests passed');
 })().catch(e => { console.error(e); process.exit(1); });
