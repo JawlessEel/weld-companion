@@ -142,9 +142,44 @@ const settings = new Map();
 const legacyStore = new Map([['scrapbook', [{ id: 'sb-a', t: 10, text: 'kept line' }]], ['studio:index:v1', [{ id: 'p1', name: 'World' }]],
   ['studio:project:v1:p1', { revision: 3, project: { id: 'p1', name: 'World' }, snapshots: [] }], ['favorites', ['x']]]);
 const toasts = [];
+const R = require('../src/repo-store.js');
+// a fake GitHub Contents API: sha-checked writes (409 when another computer got there first), directory listing, blobs
+const gh = (() => {
+  const files = new Map(); let n = 0; const sha = () => 'sha' + (++n);
+  const b64 = t => Buffer.from(t, 'utf8').toString('base64');
+  return {
+    token: 'test-token',
+    paths: () => [...files.keys()], read: p => files.get(p).text,
+    external: (p, doc) => files.set(p, { text: JSON.stringify(doc), sha: sha() }),
+    externalDelete: p => files.delete(p),
+    async api(method, path, body) {
+      const m = path.match(/^\/repos\/[^/]+\/[^/]+\/contents\/([^?]+)/); if (!m) return { status: 404, json: null };
+      const p = decodeURIComponent(m[1]);
+      if (method === 'GET') {
+        if (files.has(p)) return { status: 200, json: { sha: files.get(p).sha, content: b64(files.get(p).text), type: 'file' } };
+        const kids = new Map(); for (const [f, v] of files) if (f.startsWith(p + '/')) { const rest = f.slice(p.length + 1), i = rest.indexOf('/'); kids.set(i < 0 ? rest : rest.slice(0, i), i < 0 ? { type: 'file', name: rest, sha: v.sha } : { type: 'dir', name: rest.slice(0, i) }); }
+        return kids.size ? { status: 200, json: [...kids.values()] } : { status: 404, json: { message: 'Not Found' } };
+      }
+      if (method === 'PUT') {
+        const cur = files.get(p);
+        if (cur && !body.sha) return { status: 422, json: { message: "Invalid request. \"sha\" wasn't supplied." } };
+        if (cur && body.sha !== cur.sha) return { status: 409, json: { message: p + ' does not match ' + body.sha } };
+        files.set(p, { text: Buffer.from(body.content, 'base64').toString('utf8'), sha: sha() });
+        return { status: cur ? 200 : 201, json: { content: { sha: files.get(p).sha } } };
+      }
+      if (method === 'DELETE') {
+        const cur = files.get(p); if (!cur) return { status: 404, json: null };
+        if (body.sha !== cur.sha) return { status: 409, json: { message: 'sha mismatch' } };
+        files.delete(p); return { status: 200, json: {} };
+      }
+      return { status: 400, json: null };
+    }
+  };
+})();
 const host = {
   toast: m => toasts.push(String(m)),
-  legacy: { owns: k => k === 'scrapbook' || String(k).indexOf('studio:') === 0, keys: () => [...legacyStore.keys()], get: k => legacyStore.has(k) ? JSON.parse(JSON.stringify(legacyStore.get(k))) : undefined, del: k => { legacyStore.delete(k); } },
+  gh: { config: () => ({ owner: 'me', repo: 'weld', branch: 'main', token: gh.token }), api: (m, p, b) => gh.api(m, p, b) },
+  legacy: { owns: k => /^(scrapbook|favorites|studio:.*)$/.test(k), keys: () => [...legacyStore.keys()], get: k => legacyStore.has(k) ? JSON.parse(JSON.stringify(legacyStore.get(k))) : undefined, del: k => { legacyStore.delete(k); } },
   get: (k, d) => settings.has(k) ? settings.get(k) : d, set: (k, v) => { settings.set(k, v); return true; },
   pageWindow: () => ({ showDirectoryPicker: async () => { pickerCalls++; return pickedDir; }, indexedDB: fakeIdb }),
   slug: () => 'alpha', favorites: () => ['delta'],
@@ -158,8 +193,8 @@ const host = {
     info: () => ({ backend: 'Fake GM' }), download: (n, t) => downloads.push({ n, t })
   }
 };
-const window = { WeldBackupCore: C, weldProjectHost: host }; window.top = window;
-vm.runInNewContext(fs.readFileSync('src/backup-ui.js', 'utf8'), { window, console, setTimeout, clearTimeout });
+const window = { WeldBackupCore: C, WeldRepoStore: R, weldProjectHost: host }; window.top = window;
+vm.runInNewContext(fs.readFileSync('src/backup-ui.js', 'utf8'), { window, console, setTimeout, clearTimeout, setInterval, clearInterval, btoa, atob, escape, unescape });
 const parent = new Element('main');
 const btn = label => walk(parent).find(n => n.tagName === 'button' && (n.attrs.text === label || n.attrs['aria-label'] === label));
 const click = label => { const b = btn(label); assert.ok(b, 'missing ' + label); b.click(); };
@@ -232,43 +267,42 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
 // ---- save to a user-chosen folder (async tail; restores the vault API removed above)
 (async () => {
   host.vault = vaultApi; window.weldBackup.render(parent);
-  const sleep = ms => new Promise(r => setTimeout(r, ms)), until = async (fn, what) => { for (let i = 0; i < 200; i++) { if (fn()) return; await sleep(10); } throw new Error('timed out: ' + what); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms)), until = async (fn, what) => { for (let i = 0; i < 200; i++) { if (fn()) return; await sleep(10); } throw new Error('timed out: ' + what + ' :: ' + txt(parent).slice(0, 600)); };
   assert.ok(btn('Choose folder...') && !btn('Allow access'), 'no folder yet');
   const FF = window.weldBackup.files, J2 = x => JSON.parse(JSON.stringify(x));
-  assert.deepEqual(J2(FF.get('scrapbook', [])), [{ id: 'sb-a', t: 10, text: 'kept line' }], 'not-yet-moved copy is readable');
-  assert.equal(FF.set('scrapbook', []), false, 'nothing is saved without a folder');
-  assert.equal(legacyStore.has('scrapbook'), true);
+  // GitHub repo store: older storage copies are moved in once (verified), after which Weld storage holds none of them
+  {
+    await until(() => FF.ready() && !legacyStore.has('scrapbook'), 'data moved to the repo');
+    assert.deepEqual([...legacyStore.keys()], [], 'every work key is moved out of browser storage');
+    const names = gh.paths().filter(f => /^_weld-data\/[^/]+\.json$/.test(f));
+    assert.equal(names.length, 4); assert.ok(names.some(n => /studio-project-v1-p1-[0-9a-f]{8}\.json$/.test(n)) && names.some(n => /\/scrapbook-/.test(n)) && names.some(n => /\/favorites-/.test(n)));
+    assert.ok(toasts.some(t => /Moved 4 records from this computer into your GitHub repo/.test(t)));
+    assert.equal(FF.get('studio:project:v1:p1', null).revision, 3);
+    assert.deepEqual(J2(FF.keys()).sort(), ['favorites', 'scrapbook', 'studio:index:v1', 'studio:project:v1:p1']);
+    // a save lands in the repo file; reads return fresh copies, never the cached object
+    assert.equal(FF.set('scrapbook', [{ id: 'sb-b', t: 20, text: 'new' }, { id: 'sb-a', t: 10, text: 'kept line' }]), true);
+    await FF.flush();
+    const sbPath = '_weld-data/' + R.fileName('scrapbook'), onDisk = () => JSON.parse(gh.read(sbPath));
+    assert.equal(onDisk().format, 'weld-data'); assert.equal(onDisk().key, 'scrapbook'); assert.equal(onDisk().value.length, 2);
+    const a1 = FF.get('scrapbook', []); a1.push({ id: 'mut' }); assert.equal(FF.get('scrapbook', []).length, 2);
+    // another computer added an entry and this one deleted another: both are kept, nothing comes back
+    gh.external(sbPath, { format: 'weld-data', v: 1, key: 'scrapbook', savedAt: 1, value: [{ id: 'other-pc', t: 99 }, { id: 'sb-b', t: 20, text: 'new' }, { id: 'sb-a', t: 10, text: 'kept line' }] });
+    FF.set('scrapbook', [{ id: 'sb-b', t: 20, text: 'new' }]); await FF.flush();
+    assert.deepEqual(J2(onDisk().value).map(e => e.id), ['other-pc', 'sb-b'], "merged: the other computer's add kept, this computer's delete kept");
+    assert.deepEqual(J2(FF.get('scrapbook', [])).map(e => e.id), ['other-pc', 'sb-b']);
+    assert.ok(toasts.some(t => /also changed on another computer/.test(t)));
+    // a file deleted on another computer is gone here after the next refresh
+    gh.externalDelete(sbPath); await window.weldBackup.repo.load();
+    assert.equal(FF.get('scrapbook', 'gone'), 'gone');
+    assert.equal(FF.set('scrapbook', [{ id: 'mine', t: 100 }]), true); await FF.flush(); assert.deepEqual(J2(onDisk().value), [{ id: 'mine', t: 100 }]);
+    // a null save (Studio Delete project) removes the file
+    FF.set('studio:project:v1:p1', null); await FF.flush();
+    assert.equal(gh.paths().some(f => /studio-project-v1-p1/.test(f)), false); assert.equal(FF.get('studio:project:v1:p1', 'gone'), 'gone');
+    assert.equal(store.size > 0 && [...store.keys()].some(k => /scrapbook|studio:/.test(k)), false, 'nothing of this lands in Weld storage');
+  }
   assert.equal(btn('Save all to folder now').disabled, true);
   click('Choose folder...'); await until(() => pickerCalls === 1 && btn('Change folder...'), 'folder chosen');
   assert.match(txt(walk(parent).find(n => n.attrs['data-folder-state'])), /MyDrive · access allowed/);
-  // Studio projects and Scrapbook: moved out of Weld storage into <folder>/_weld-data, verified first
-  {
-    await until(() => FF.ready() && !legacyStore.has('scrapbook'), 'data files moved');
-    assert.deepEqual([...legacyStore.keys()], ['favorites'], 'only keys the folder store owns are moved');
-    const dataDir = pickedDir.items.get('_weld-data'), names = [...dataDir.items.keys()];
-    assert.equal(names.length, 3); assert.ok(names.some(n => /^studio-project-v1-p1-[0-9a-f]{8}\.json$/.test(n)) && names.some(n => /^scrapbook-/.test(n)));
-    assert.ok(toasts.some(t => /Moved 3 Studio\/Scrapbook records/.test(t)));
-    assert.equal(FF.get('studio:project:v1:p1', null).revision, 3);
-    assert.deepEqual(J2(FF.keys()).sort(), ['scrapbook', 'studio:index:v1', 'studio:project:v1:p1']);
-    // a save lands in the file; reads return fresh copies, never the cached object
-    assert.equal(FF.set('scrapbook', [{ id: 'sb-b', t: 20, text: 'new' }, { id: 'sb-a', t: 10, text: 'kept line' }]), true);
-    await FF.flush();
-    const sbName = names.find(n => /^scrapbook-/.test(n)), onDisk = () => JSON.parse(dataDir.items.get(sbName).text);
-    assert.equal(onDisk().format, 'weld-data'); assert.equal(onDisk().key, 'scrapbook'); assert.equal(onDisk().value.length, 2);
-    const a1 = FF.get('scrapbook', []); a1.push({ id: 'mut' }); assert.equal(FF.get('scrapbook', []).length, 2);
-    // the file changed in another tab or computer since this tab read it: the newer file wins, the edit is reported
-    const file = dataDir.items.get(sbName); file.text = JSON.stringify({ format: 'weld-data', v: 1, key: 'scrapbook', savedAt: 1, value: [{ id: 'other-pc', t: 99 }] }); file.lastModified = ++FakeFile.clock;
-    FF.set('scrapbook', [{ id: 'mine', t: 100 }]); await FF.flush();
-    assert.deepEqual(J2(onDisk().value), [{ id: 'other-pc', t: 99 }], 'newer file kept');
-    assert.deepEqual(J2(FF.get('scrapbook', [])), [{ id: 'other-pc', t: 99 }]);
-    assert.ok(toasts.some(t => /changed in another tab or on another computer/.test(t)));
-    // after a reload of that file, saving works again; a null save (Studio Delete project) removes the file
-    assert.equal(FF.set('scrapbook', [{ id: 'mine', t: 100 }]), true); await FF.flush(); assert.deepEqual(J2(onDisk().value), [{ id: 'mine', t: 100 }]);
-    const projName = names.find(n => /^studio-project/.test(n));
-    FF.set('studio:project:v1:p1', null); await FF.flush();
-    assert.equal(dataDir.items.has(projName), false); assert.equal(FF.get('studio:project:v1:p1', 'gone'), 'gone');
-    assert.equal(store.size > 0 && [...store.keys()].some(k => /scrapbook|studio:/.test(k)), false, 'nothing of this lands in Weld storage');
-  }
   click('Save all to folder now'); await until(() => /Saved \d+ new file/.test(txt(parent)), 'first sync');
   const first = pickedDir.files();
   assert.ok(first.some(f => /^alpha\/snapshot\/snapshot-\d{8}-\d{6}-[0-9a-f]{4}\.json$/.test(f)), 'snapshot file: ' + first.join(', '));
@@ -288,57 +322,49 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
   // permission lost after a browser restart: Allow access, and nothing is written while it is missing
   pickedDir.perm = 'prompt'; window.weldBackup._state.perm = 'prompt'; window.weldBackup.render(parent);
   assert.ok(btn('Allow access')); assert.equal(btn('Save all to folder now').disabled, true); click('Allow access'); await until(() => !btn('Allow access'), 'access allowed');
-  // automatic mirror: a vault-updated event copies a newly stored record without a click
-  const auto = walk(parent).find(n => n.attrs['aria-label'] === 'Save new backups to the folder automatically'); auto.checked = true; auto.events.change();
-  assert.equal(settings.get('backupFolderAuto'), true);
-  await until(() => pickedDir.files().length === after.length, 'auto settled'); put('delta', 'weld:genvault:delta/snapshot', { v: 1, at: 5, protocol: 1, generator: 'delta', folder: 'delta', savedBy: 'delta', title: 'D', modelText: 'm' });
-  listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'delta' })); await until(() => pickedDir.files().some(f => f.startsWith('delta/snapshot/')), 'auto mirror');
-  // only starred generators are saved automatically; an unstarred one waits for the manual button
+  // the automatic mirror was removed in 1.90.0: ticking it changes nothing
+  {
+    const auto = walk(parent).find(n => n.attrs['aria-label'] === 'Save new backups to the folder automatically'); auto.checked = true; auto.events.change();
+    assert.equal(settings.get('backupFolderAuto'), false);
+    const n = pickedDir.files().length; put('delta', 'weld:genvault:delta/snapshot', { v: 1, at: 5, protocol: 1, generator: 'delta', folder: 'delta', savedBy: 'delta', title: 'D', modelText: 'm' });
+    listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'delta' })); await new Promise(r => setTimeout(r, 1800));
+    assert.equal(pickedDir.files().length, n, 'nothing is copied to the folder automatically');
+  }
   put('echo', 'weld:genvault:echo/snapshot', { v: 1, at: 6, protocol: 1, generator: 'echo', folder: 'echo', savedBy: 'echo', title: 'E', modelText: 'm' });
-  listeners.forEach(fn => fn({ v: 1, type: 'vault-updated', generator: 'echo' })); await new Promise(r => setTimeout(r, 1800));
-  assert.ok(!pickedDir.files().some(f => f.startsWith('echo/')), 'unstarred generator is not auto-saved');
-  click('Save all to folder now'); await until(() => pickedDir.files().some(f => f.startsWith('echo/snapshot/')), 'manual save still covers everything');
-  // pass-through vault: a generator save goes to the folder, never into Weld storage, and reads back from it
+  click('Save all to folder now'); await until(() => pickedDir.files().some(f => f.startsWith('echo/snapshot/')), 'manual save covers everything');
+  // vault: a generator save goes to the GitHub repo store, never to Weld storage or the folder, and reads back from it
   {
     const PV = window.weldBackup.vault, n0 = store.size, J = x => JSON.parse(JSON.stringify(x));   // values come from the vm realm
     assert.equal(PV.ready(), true);
     const snapV = { v: 1, at: Date.UTC(2026, 9, 11), protocol: 1, generator: 'zeta', folder: 'zeta', savedBy: 'zeta', title: 'Z', modelText: 'm' };
-    assert.deepEqual(J(await PV.set('zeta', 'weld:genvault:zeta/snapshot', snapV)), { ok: true, where: 'folder' });
+    assert.deepEqual(J(await PV.set('zeta', 'weld:genvault:zeta/snapshot', snapV)), { ok: true, where: 'github' });
     const copy = chat('zeta', 9, { data: { threads: [], config: { model: 'x' } } });
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', copy)).ok, true);
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/index', [{ key: 'snap-9-abcdef' }])).ok, true);
-    await sleep(5);
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/index', [{ key: 'snap-9-abcdef' }, { key: 'snap-10-xxxxxx' }])).ok, true);
     assert.equal(store.size, n0, 'nothing stored in Weld');
-    assert.ok(pickedDir.files().some(f => /^zeta\/snapshot\/snapshot-20261011-/.test(f)) && pickedDir.files().includes('zeta/chat/snap-9-abcdef.json'));
     assert.deepEqual(J(await PV.get('zeta', 'weld:genvault:zeta/snapshot')), snapV);
     assert.deepEqual(J(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef')), copy);
     assert.equal((await PV.get('zeta', 'weld:genvault:zeta/chat/index')).length, 2, 'the newest index wins');
     assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-404-zzzzzz'), undefined);
     assert.deepEqual(J(await PV.list('zeta', 'weld:genvault:zeta/chat/')), ['weld:genvault:zeta/chat/index', 'weld:genvault:zeta/chat/snap-9-abcdef']);
-    assert.deepEqual(J(await PV.list('zeta', '')), ['weld:genvault:zeta/snapshot', 'weld:genvault:zeta/chat/index', 'weld:genvault:zeta/chat/snap-9-abcdef']);
+    // saving the same chat copy again with new content replaces it (a stale copy must never be served back)
+    const edited = chat('zeta', 9, { data: { threads: [{ id: 't9', title: 'later', messages: [{}, {}] }], config: { model: 'x' } } });
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', edited)).ok, true);
+    assert.deepEqual(J(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef')), edited);
+    await window.weldBackup.repo.flush();
+    const onGh = JSON.parse(gh.read('_weld-data/' + R.fileName('weld:genvault:zeta/chat/snap-9-abcdef')));
+    assert.deepEqual(J(onGh.value), edited, 'the repo file holds the new copy');
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-11-secret', chat('zeta', 11))).code, 'secret-shaped');
     assert.equal((await PV.set('other', 'weld:genvault:zeta/snapshot', snapV)).code, 'bad-key');
-    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', null)).ok, true); assert.ok(pickedDir.files().includes('zeta/chat/snap-9-abcdef.json'), 'a null save never deletes a file');
     assert.equal((await PV.set('zeta', 'weld:genvault:zeta/snapshot', Object.assign({}, snapV, { generator: 'alpha' }))).code, 'owner-mismatch');
-    // a folder file another generator stored under this key, or one naming another owner, is never served
-    const zchat = pickedDir.items.get('zeta').items.get('chat'), plant = (name, rec) => { const f = new FakeFile(name); f.text = JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now() + 99999, record: rec }); zchat.items.set(name, f); };
-    plant('snap-12-planted.json', { key: 'weld:genvault:zeta/chat/snap-12-planted', storedBy: 'alpha', value: copy });
-    plant('snap-13-owner.json', { key: 'weld:genvault:zeta/chat/snap-13-owner', storedBy: 'zeta', value: Object.assign({}, copy, { generator: 'alpha' }) });
-    plant('index-planted.json', { key: 'weld:genvault:zeta/chat/index', storedBy: 'alpha', value: [{ key: 'snap-12-planted' }] });
-    assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-12-planted'), undefined);
-    assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-13-owner'), undefined);
-    assert.equal((await PV.get('zeta', 'weld:genvault:zeta/chat/index')).length, 2, 'a newer index planted by another generator is ignored');
-    ['snap-12-planted.json', 'snap-13-owner.json', 'index-planted.json'].forEach(n => zchat.items.delete(n));
-    // disk guard: a write budget per generator, and a file cap per folder
+    assert.equal((await PV.set('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef', null)).ok, true);
+    assert.equal(await PV.get('zeta', 'weld:genvault:zeta/chat/snap-9-abcdef'), undefined, 'a null save deletes the copy (git history keeps it)');
+    assert.equal(await PV.get('alpha', 'weld:genvault:zeta/snapshot'), undefined, 'a generator only reads its own keys');
     const omega = at => ({ v: 1, at, protocol: 1, generator: 'omega', folder: 'omega', savedBy: 'omega', title: 'O', modelText: 'm' + at });
     for (let i = 0; i < 30; i++) assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(1000 + i))).ok, true);
     assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(2000))).code, 'rate-limited');
-    assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(1000))).ok, true, 'an unchanged copy already on disk costs nothing');
-    const psiChat = await (await pickedDir.getDirectoryHandle('psi', { create: true })).getDirectoryHandle('chat', { create: true });
-    for (let i = 0; i < 500; i++) psiChat.items.set('snap-' + i + '-filler.json', new FakeFile('snap-' + i + '-filler.json'));
-    assert.equal((await PV.set('psi', 'weld:genvault:psi/chat/snap-9999-newone', chat('psi', 9999, { data: { threads: [], config: {} } }))).code, 'folder-full');
-    pickedDir.items.delete('psi'); pickedDir.items.delete('omega');
+    assert.equal((await PV.set('omega', 'weld:genvault:omega/snapshot', omega(1029))).ok, true, 'an unchanged copy costs nothing');
   }
   // purge: one click; what is not provably in the folder is downloaded first; operational and out-of-scope keys stay
   {
@@ -356,8 +382,7 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
   }
   // disconnect never deletes
   const kept = pickedDir.files().length; click('Disconnect folder (nothing in it is deleted)'); await until(() => btn('Choose folder...'), 'disconnected'); assert.equal(pickedDir.files().length, kept);
-  assert.equal(window.weldBackup.vault.ready(), false);
-  assert.equal((await window.weldBackup.vault.set('zeta', 'weld:genvault:zeta/snapshot', { generator: 'zeta' })).code, 'no-backup-folder');
+  assert.equal(window.weldBackup.vault.ready(), true, 'vault saves go to the GitHub repo, not the folder');
   // purge with no folder: everything is downloaded first
   {
     put('kappa', 'weld:genvault:kappa/snapshot', { v: 1, at: 7, protocol: 1, generator: 'kappa', folder: 'kappa', savedBy: 'kappa', title: 'K', modelText: 'm' });
@@ -435,20 +460,14 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.ok(!JSON.stringify(f.exact).includes('SECRETVALUE'));
     const rep = C.duplicateReport(f); assert.ok(/EXACT/.test(rep) && /POSSIBLE/.test(rep) && !/different|"hi"/.test(rep), 'report has metadata only');
   }
-  // reconnecting with older copies still in storage: lists merge by id, a project keeps the higher revision and the
-  // other version is kept as a conflict file
+  // an older computer's browser copy never comes back over the repo: it is filed under _weld-data/legacy and removed from storage
   {
     legacyStore.set('scrapbook', [{ id: 'old-1', t: 50 }]);
-    const dataDir = pickedDir.items.get('_weld-data'), pName = [...dataDir.items.keys()].find(n => /^scrapbook-/.test(n)).replace('scrapbook', 'studio-project-v1-p2');
-    const p2 = n => 'studio-project-v1-p2-' + C.hash8('studio:project:v1:p2') + '.json';
-    const pf = new FakeFile(p2()); pf.text = JSON.stringify({ format: 'weld-data', v: 1, key: 'studio:project:v1:p2', savedAt: 1, value: { revision: 7, project: { id: 'p2' } } }); pf.lastModified = ++FakeFile.clock; dataDir.items.set(p2(), pf);
-    legacyStore.set('studio:project:v1:p2', { revision: 2, project: { id: 'p2', name: 'older' } });
-    click('Choose folder...'); await until(() => window.weldBackup.files.ready() && !legacyStore.has('scrapbook') && !legacyStore.has('studio:project:v1:p2'), 'merge on reconnect');
-    const FF2 = window.weldBackup.files;
-    assert.deepEqual(JSON.parse(JSON.stringify(FF2.get('scrapbook', []))).map(e => e.id), ['mine', 'old-1'], 'merged by id, newest first');
-    assert.equal(FF2.get('studio:project:v1:p2', null).revision, 7, 'higher revision kept');
-    const conflicts = dataDir.items.get('conflicts'); assert.ok(conflicts && [...conflicts.items.values()].some(x => JSON.parse(x.text).value.revision === 2), 'the other version is kept as a file');
-    void pName;
+    const before = J2(window.weldBackup.files.get('scrapbook', []));
+    click('Choose folder...'); await until(() => !legacyStore.has('scrapbook'), 'stale copy handled');
+    assert.deepEqual(J2(window.weldBackup.files.get('scrapbook', [])), before, 'the repo copy is untouched');
+    assert.ok(gh.paths().some(f => /^_weld-data\/legacy\/scrapbook-.*-browser-/.test(f)), 'the older copy is kept as a file: ' + gh.paths().join(', '));
+    assert.ok(!JSON.stringify(window.weldBackup.files.get('scrapbook', [])).includes('old-1'));
   }
   console.log('backup tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

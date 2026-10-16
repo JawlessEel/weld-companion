@@ -5,7 +5,7 @@
   'use strict';
   if (window.top !== window) return;
   const C = window.WeldBackupCore, H = window.weldProjectHost;
-  if (!C || !H) return;
+  if (!C || !H || !window.WeldRepoStore) return;
   const E = H.el;
   const S = { pick: '', rows: null, inv: null, error: '', selected: null, inspected: null, secrets: null, msg: '', stamp: 0, openGens: new Set(), busy: false };
   let host = null, unsub = null;
@@ -228,7 +228,7 @@
     if (F.perm !== was && host) draw();
   }
   function setKeep(on) { F.keep = !!on; H.set(KEEP_KEY, F.keep); if (F.keep) recheckAccess(); draw(); }
-  function setAuto(on) { F.auto = !!on; H.set(AUTO_KEY, F.auto); if (F.auto) scheduleSync(300); draw(); }
+  function setAuto(on) { F.auto = false; H.set(AUTO_KEY, false); if (on) say('Automatic folder saving was removed in 1.90.0: your data lives in your GitHub repo. Use Save all to folder now for a manual copy.', true); draw(); }
   async function dirAt(root, segs, create) { let d = root; for (const s of segs) d = await d.getDirectoryHandle(s, { create }); return d; }
   async function exists(dir, name) {
     try { await dir.getFileHandle(name); return true; } catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return false; throw e; }
@@ -266,7 +266,8 @@
   // chat index file, which is re-stamped when the same list is saved again so the newest list wins.
   const NO_FOLDER = 'Weld keeps no backups. Choose a backup folder in Weld > Backups (a drive or a cloud-synced folder) and allow access to receive vault saves.';
   const VAULT_KINDS = ['snapshot', 'chat-index', 'chat-copy'];
-  const ptReady = () => !!(F.handle && F.perm === 'granted');
+  const ptReady = () => !!(F.handle && F.perm === 'granted');   // the manual-export folder
+  const vaultReady = () => RP.ready();   // the GitHub repo: where vault saves go
   async function ptDoc(dir, name) {
     try { const doc = JSON.parse(await (await (await dir.getFileHandle(name)).getFile()).text()); return doc && doc.format === 'weld-backup-record' && doc.record ? doc : null; } catch (e) { return null; }
   }
@@ -586,13 +587,87 @@
     if (F.perm !== 'granted') return 'Saved in ' + F.name + '. Press Allow access in Weld > Backups (or click anywhere) to load and save.';
     return FK.loaded ? 'Saved in ' + F.name + '/' + FK_DIR : 'Loading from ' + F.name + '...';
   }
-  function afterGrant() { if (F.perm === 'granted') fkLoad().catch(() => {}); }
+  // ---- GitHub repo store (1.90.0): ALL of Weld's work data and the generator vault live in <repo>/_weld-data/ (see
+  // src/repo-store.js). Nothing is kept in browser storage and nothing is written to the backup folder any more.
+  // A write that another computer got to first is merged, not overwritten; deletions are kept.
+  const RP = window.WeldRepoStore.create({
+    api: (m, path, body) => H.gh.api(m, path, body), config: () => H.gh.config(), toast: (t, ms) => { try { H.toast(t, ms); } catch (e) {} },
+    encode: s => btoa(unescape(encodeURIComponent(s))), decode: b => decodeURIComponent(escape(atob(b)))
+  });
+  const rpLegacy = () => H.legacy || null;
+  const repoFiles = {
+    // Until the repo has been read, an older copy still in browser storage is shown (read-only) so screens are not blank.
+    get: (key, dflt) => { if (RP.ready()) return RP.get(key, dflt); const lg = rpLegacy(), old = lg ? lg.get(key) : undefined; return old === undefined ? dflt : old; },
+    set: (key, value) => RP.set(key, value), ready: () => RP.ready(), status: () => RP.status(), flush: () => RP.flush(), load: () => RP.load(), keys: () => RP.keys()
+  };
+  // One-time move of browser-storage copies (and of 1.89.x files in the backup folder) into the repo. The repo always wins:
+  // a copy of a key the repo does not have is imported; any other copy is filed under _weld-data/legacy/ and then removed
+  // from storage, so an old computer can never bring back something that was deleted.
+  async function repoMigrate() {
+    const lg = rpLegacy(); let moved = 0, filed = 0;
+    if (lg && typeof lg.keys === 'function') {
+      for (const key of lg.keys().filter(k => lg.owns(k))) {
+        const old = lg.get(key); if (old === undefined) continue;
+        const r = await RP.importLegacy(key, old, 'browser');
+        if (r) { lg.del(key); if (r === 'moved') moved++; else filed++; }
+      }
+    }
+    if (ptReady()) {   // 1.89.x kept these as files in the backup folder
+      try {
+        const dir = await fkDirHandle(false);
+        for (const name of await ptNames(dir)) {
+          const f = await fkFile(dir, name); if (!f) continue;
+          let doc; try { doc = JSON.parse(await f.text()); } catch (e) { continue; }
+          if (!doc || doc.format !== 'weld-data' || typeof doc.key !== 'string' || !/^(scrapbook|studio:.*)$/.test(doc.key)) continue;
+          const mark = 'repoMigrated:' + name, sig = String(f.lastModified) + ':' + f.size;
+          if ((await kvGet(mark)) === sig) continue;
+          const r = await RP.importLegacy(doc.key, doc.value === undefined ? null : doc.value, 'folder');
+          if (r) { await kvSet(mark, sig); if (r === 'moved') moved++; else filed++; }
+        }
+      } catch (e) {}
+    }
+    if (moved || filed) { try { H.toast('Moved ' + moved + ' record' + (moved === 1 ? '' : 's') + ' from this computer into your GitHub repo' + (filed ? ' (' + filed + ' older local cop' + (filed === 1 ? 'y' : 'ies') + ' filed under _weld-data/legacy)' : '') + '.', 9000); } catch (e) {} }
+  }
+  let repoTimer = null;
+  async function repoRefresh() { try { await RP.load(); } catch (e) {} if (host) scheduleDraw(); }
+  async function repoBoot() {
+    RP.onChange(() => { try { if (typeof H.refreshTab === 'function') H.refreshTab(); } catch (e) {} });
+    if (RP.configured()) { await RP.load(); if (RP.ready()) await repoMigrate(); }
+    if (!repoTimer) repoTimer = setInterval(() => { if ((typeof document === 'undefined' || !document.hidden) && RP.configured()) RP.load().catch(() => {}); }, 60000); if (repoTimer && typeof repoTimer.unref === 'function') repoTimer.unref();   // pick up another computer's saves
+    try { window.addEventListener('focus', () => { if (RP.configured()) RP.load().catch(() => {}); }); } catch (e) {}
+    try { window.addEventListener('beforeunload', e => { if (RP.pending()) { RP.flush().catch(() => {}); e.preventDefault(); e.returnValue = ''; } }); } catch (e) {}
+    if (host) scheduleDraw();
+  }
+  // Generator vault saves (Skybridge storage) go to the same repo store.
+  async function rpVaultSet(caller, key, value) {
+    if (!vaultReady()) return { ok: false, code: 'no-github-repo', reason: 'Weld keeps your data in your GitHub repo. Set owner, repo and token in Weld > GitHub and wait for it to load.' };
+    const p = C.parseKey(key);
+    if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return { ok: false, code: 'bad-key', reason: 'bad-key' };
+    if (value === null || value === undefined) { RP.set(key, null); return { ok: true, where: 'github' }; }
+    if (C.checkStoreWrite(key, value).ok !== true) return { ok: false, code: 'owner-mismatch', reason: 'owner-mismatch' };
+    if (p.kind === 'chat-copy' && C.secretScan(value && value.data).length) return { ok: false, code: 'secret-shaped', reason: 'this chat copy holds a plaintext secret-shaped value, so it was not written to the repo' };
+    if (RP.get(key, undefined) !== undefined && C.canonical(RP.get(key, undefined)) === C.canonical(value)) return { ok: true, where: 'github' };
+    if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
+    return RP.set(key, value) ? { ok: true, where: 'github' } : { ok: false, code: 'github-write-failed', reason: 'could not queue the save' };
+  }
+  async function rpVaultGet(caller, key) {
+    if (!vaultReady()) return undefined;
+    const p = C.parseKey(key); if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return undefined;
+    return RP.get(key, undefined);
+  }
+  async function rpVaultList(caller, prefix) {
+    if (!vaultReady() || !C.GEN_RE.test(String(caller || ''))) return [];
+    const base = 'weld:genvault:' + caller + '/';
+    return RP.keys().filter(k => k.indexOf(base) === 0 && k.indexOf(String(prefix || '')) === 0).sort();
+  }
+  let migrating = null;
+  function afterGrant() { if (RP.ready() && !migrating) migrating = repoMigrate().catch(() => {}).then(() => { migrating = null; }); }   // the folder holds manual exports only; Weld's data is in the GitHub repo (repoBoot)
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false, true).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
-    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
+    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = false; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
-    afterGrant();
+    repoBoot().catch(() => {});
     try { window.addEventListener('pagehide', () => { if (FK.pending.size) fkFlush().catch(() => {}); }); } catch (e) {}
     try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
     armRegrant();
@@ -603,7 +678,7 @@
   function folderCard() {
     const card = E('div', { 'data-folder': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
     card.appendChild(E('div', { text: 'Backup location', style: { fontWeight: '600' } }));
-    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Choose any folder on a drive or inside a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox). Generator vault saves go straight into it and are never kept in Weld. Files there are only ever added, so browser cache clears cannot touch them. With no folder, vault saves are refused and generators keep their own copies.' }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Optional, for manual copies only. Weld keeps your data (Studio projects, Scrapbook, notes, pins, favorites, generator vault saves) in your GitHub repo under _weld-data/, set in Weld > GitHub. This folder is used only by the Save all to folder now button.' }));
     if (!F.supported) card.appendChild(E('div', { style: { fontSize: '12px', color: '#e0a030' }, text: 'This browser cannot open folders (Chrome or Edge can). The Download buttons below still work.' }));
     card.appendChild(E('div', { 'data-folder-state': '1', style: { fontSize: '12px', margin: '4px 0' }, text: F.handle ? 'Folder: ' + F.name + ' · ' + (F.perm === 'granted' ? 'access allowed' : 'needs permission (press Allow access)') : 'No folder chosen yet.' }));
     if (F.error) card.appendChild(E('div', { role: 'alert', style: { fontSize: '12px', color: '#ff9e92' }, text: F.error }));
@@ -645,7 +720,7 @@
     const rerender = () => draw();
     const wrap = E('div', { id: 'wc-backup-body' });
     wrap.appendChild(E('div', { text: 'Backup Manager', style: { fontWeight: '600', fontSize: '15px' } }));
-    wrap.appendChild(note('Weld keeps no backups: generator vault saves go straight to your backup folder. Anything older still held in browser storage is listed below; download it, delete keys one click at a time, or purge it all.'));
+    wrap.appendChild(note('Weld keeps no backups of its own and no data in browser storage: everything lives in your GitHub repo (_weld-data/). This tab lists, exports and purges anything older still held in browser storage.'));
     const top = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '8px 0' } });
     top.appendChild(btn('Refresh', () => { load(); draw(); }));
     top.appendChild(btn('Export all', () => exportRows('all-generators', S.rows || []), { disabled: !(S.rows && S.rows.length) }));
@@ -693,6 +768,6 @@
   bootFolder().catch(() => {});
   // vault: the pass-through store Skybridge storage uses for weld:genvault: keys (see sbServiceStorage).
   // files: the folder store behind Weld's storage helpers for Studio projects and the Scrapbook (see gget/gset).
-  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: ptReady, set: ptSet, get: ptGet, list: ptList, noFolder: NO_FOLDER },
-    files: { get: fkGet, set: fkSet, ready: () => ptReady() && FK.loaded, status: fkStatus, flush: fkFlush, load: fkLoad, keys: () => Array.from(FK.cache.keys()).filter(k => FK.cache.get(k) !== null) } };
+  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: vaultReady, set: rpVaultSet, get: rpVaultGet, list: rpVaultList, noFolder: 'Weld keeps your data in your GitHub repo. Set owner, repo and token in Weld > GitHub.' },
+    files: repoFiles, repo: RP };
 })();

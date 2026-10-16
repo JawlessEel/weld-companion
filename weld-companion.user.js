@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.89.2
+// @version      1.90.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -66,7 +66,13 @@
   var NS = 'weldCompanion';
   // Studio projects and the Scrapbook are not kept in Weld storage: these keys are files in the backup folder
   // (window.weldBackup.files, src/backup-ui.js). Until the folder is readable, older copies still in storage are read.
-  function folderKey(key) { return key === 'scrapbook' || String(key).indexOf('studio:') === 0; }
+  // Since 1.90.0 ALL work data is a file in the GitHub repo (_weld-data/, src/repo-store.js); only settings and
+  // credentials stay in browser storage, and caches/clipboard history live in memory for the page only.
+  var REPO_KEY_RE = /^(scrapbook|genNotes|capsules|sessions|tabSnaps|favorites|ratings|boundaries|outRules|aiccLore|pins:.*|studio:.*|sbk:.*)$/;
+  var MEMORY_KEYS = { recent: 1, directory: 1, genStats: 1, wdmScan: 1, clipRing: 1, timeTrack: 1, loreHealth: 1, genWatch: 1 };
+  var memStore = {};
+  function memoryKey(key) { return Object.prototype.hasOwnProperty.call(MEMORY_KEYS, key); }
+  function folderKey(key) { return REPO_KEY_RE.test(String(key)); }
   function folderFiles() { try { var b = window.weldBackup; return b && b.files ? b.files : null; } catch (e) { return null; } }
   function graw(key) {   // storage only, never the folder
     try { var v = GM_getValue(NS + ':' + key, undefined); return v === undefined ? undefined : JSON.parse(v); } catch (e) { return undefined; }
@@ -75,19 +81,25 @@
   function folderRefused() {
     if (Date.now() - folderRefusedAt < 15000) return; folderRefusedAt = Date.now();
     var ff = folderFiles();
-    try { toast('Not saved: Studio projects and the Scrapbook are saved as files in your backup folder. ' + (ff ? ff.status() : 'Choose one in Weld > Backups.'), 9000); } catch (e) {}
+    try { toast('Not saved: your Weld data (Studio projects, Scrapbook, notes, pins, favorites ...) is kept in your GitHub repo. ' + (ff ? ff.status() : 'Set owner, repo and token in Weld > GitHub.'), 9000); } catch (e) {}
   }
   function gget(key, dflt) {
     if (folderKey(key)) { var ff = folderFiles(); if (ff) return ff.get(key, dflt); var old = graw(key); return old === undefined ? dflt : old; }
+    if (memoryKey(key)) { return Object.prototype.hasOwnProperty.call(memStore, key) ? JSON.parse(memStore[key]) : dflt; }
     try { var v = GM_getValue(NS + ':' + key, undefined); return v === undefined ? dflt : JSON.parse(v); }
     catch (e) { return dflt; }
   }
   var GSET_MAX_CHARS = 32 * 1024 * 1024;   // Tampermonkey passes values to the extension in one message; Chrome rejects >64 MiB, which stalls every script
   function gset(key, val) {
     if (folderKey(key)) { var ff = folderFiles(); if (ff && ff.set(key, val)) return true; folderRefused(); return false; }
+    if (memoryKey(key)) { try { memStore[key] = JSON.stringify(val); return true; } catch (e) { return false; } }
     try { var raw = JSON.stringify(val); if (raw && raw.length > GSET_MAX_CHARS) throw new Error('too-large'); GM_setValue(NS + ':' + key, raw); return true; } catch (e) { try { toast('Save failed — browser storage may be full'); } catch (_) {} return false; }
   }
-  function gdel(key) { try { GM_deleteValue(NS + ':' + key); } catch (e) {} }
+  function gdel(key) {
+    if (folderKey(key)) { var ff = folderFiles(); if (ff && ff.ready()) { ff.set(key, null); return; } }
+    if (memoryKey(key)) { delete memStore[key]; return; }
+    try { GM_deleteValue(NS + ':' + key); } catch (e) {}
+  }
   // Automatic saving into Weld storage (clipboard history, time tracking, generator-initiated Skybridge writes) is OFF by
   // default: it filled browser storage. Anything the user does on purpose (Save, Pin, Push, Backups) is unaffected.
   function autoSaveOn() { return gget('autoSave', false) === true; }
@@ -3496,6 +3508,7 @@
             if (typeof k === 'string' && k.indexOf(prefix) === 0) out.push(k.slice(base.length));
           }
         } catch (e) {}
+        var rk = (typeof folderFiles === 'function') ? folderFiles() : null; if (rk && rk.ready()) rk.keys().forEach(function (k) { var sp = sbStoreKey(gen, ''); if (k.indexOf(sp) === 0 && k.slice(sp.length).indexOf(String(payload.prefix || '')) === 0) out.push(k.slice(sp.length)); });
         var lp = String(payload.prefix || ''), vb = 'weld:genvault:' + gen + '/';   // folder copies of this generator's vault keys join the list when the prefix can reach them
         if (pt && pt.ready() && (vb.indexOf(lp) === 0 || lp.indexOf(vb) === 0)) return pt.list(gen, lp).then(function (keys) { keys.forEach(function (k) { if (out.indexOf(k) === -1) out.push(k); }); resolve({ ok: true, value: out }); }, function () { resolve({ ok: true, value: out }); });
         resolve({ ok: true, value: out });
@@ -4279,6 +4292,11 @@
   }
   window.weldProjectHost = {
     get: gget, set: gset, el: el, toast: toast, copy: copyText,
+    // GitHub access for the repo store (src/backup-ui.js): config and a promise-returning API call. The token only goes to api.github.com.
+    gh: {
+      config: function () { var c = ghCfg(); return { owner: c.owner, repo: c.repo, branch: c.branch, token: ghToken() }; },
+      api: function (method, path, body) { return new Promise(function (resolve) { ghApi(method, path, ghToken(), body || null, function (err, status, json) { resolve(err ? { status: 0, json: null, error: String(err.message || err) } : { status: status, json: json }); }); }); }
+    },
     // Older Studio/Scrapbook copies still in Weld storage, for the one-time move into the backup folder (src/backup-ui.js).
     legacy: {
       owns: folderKey,
@@ -14765,7 +14783,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); return F.cfg; }
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); F.cfg.autoMirror = false; F.cfg.projectBackups = {}; return F.cfg; }   // 1.90.0: the master folder is manual export only; Weld's data lives in the GitHub repo
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   function folderBaseKey(slug) { return 'base:' + (F.revision ? F.revision + ':' : '') + slug; }
   async function refreshMasterFolder() {
@@ -14981,7 +14999,6 @@
       const result = await window.WeldLocalBackup.save({ root: handle, slug, backup, crypto: H.backup.crypto, overwrite: manual, active,
         progress: (n, total) => { F.projectStatus = 'Saving project files and assets ' + n + '/' + total; draw(); } });
       if (!active()) throw new Error('Local project download paused or location changed');
-      if (manual) { folderCfg(); F.cfg.projectBackups = Object.assign({}, F.cfg.projectBackups, { [slug]: true }); saveFolderCfg(); }
       const p = paths(slug), canonical = D.folderPaths(slug);
       if (p.dsl === canonical.dsl && p.html === canonical.html) await kvSet(folderBaseKey(slug), { dsl: norm(live.dsl), html: norm(live.html || '') });
       F.projectStatus = 'Saved ' + result.files + ' files (' + (result.bytes / 1048576).toFixed(1) + ' MiB); ' + result.written + ' updated.' +
@@ -18141,6 +18158,207 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
 /* END GENERATED SKILLS */
 
 /* BEGIN GENERATED BACKUP */
+/* Repo store: Weld's work data (Studio projects, Scrapbook, notes, pins, favorites ...) lives as JSON files in the
+   GitHub repo at <repo>/_weld-data/, not in browser storage. Every write carries the file's last-seen sha, so GitHub
+   refuses it when another computer changed the file first; the write is then merged (three-way, so a deletion made
+   here or there is kept) and retried. Nothing is ever resurrected from an old local copy: legacy copies are only
+   imported for keys the repo does not have, and otherwise filed under _weld-data/legacy/. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WeldRepoStore = factory();
+})(typeof window === 'object' ? window : globalThis, function () {
+  'use strict';
+  const DIR = '_weld-data';
+  const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+  function hash8(t) { let h = 5381; t = String(t); for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return ('00000000' + h.toString(16)).slice(-8); }
+  const fileName = key => String(key).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) + '-' + hash8(key) + '.json';
+  function canon(v) {
+    if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+    if (isObj(v)) return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+    return JSON.stringify(v === undefined ? null : v);
+  }
+  const same = (a, b) => canon(a) === canon(b);
+  const stampOf = x => { if (!isObj(x)) return 0; for (const k of ['revision', 'updatedAt', 'savedAt', 'modified', 't']) if (typeof x[k] === 'number') return x[k]; return 0; };
+  const idList = a => Array.isArray(a) && a.every(x => isObj(x) && x.id !== undefined && x.id !== null);
+
+  // Three-way merge of one key. base = what this computer last synced, mine = its edit, theirs = what the repo holds now.
+  // -> { value, losers: [values that were not kept] }
+  function merge(key, base, mine, theirs) {
+    const losers = [];
+    function rec(b, m, t, top) {
+      if (same(m, t)) return m;
+      if (same(m, b)) return t;               // only the repo changed
+      if (same(t, b)) return m;               // only this computer changed
+      if (idList(m) && idList(t) && (b === undefined || b === null || idList(b))) {
+        const bm = new Map((b || []).map(x => [x.id, x])), mm = new Map(m.map(x => [x.id, x])), tm = new Map(t.map(x => [x.id, x]));
+        const out = [];
+        t.forEach(tx => {
+          const bx = bm.get(tx.id), mx = mm.get(tx.id);
+          if (mx === undefined) { if (bx === undefined || !same(tx, bx)) out.push(tx); return; }   // gone here: drop only if the repo did not edit it
+          const mineChanged = bx === undefined || !same(mx, bx), theirsChanged = bx === undefined || !same(tx, bx);
+          if (!mineChanged) out.push(tx); else if (!theirsChanged) out.push(mx);
+          else if (same(mx, tx)) out.push(tx);
+          else if (stampOf(mx) > stampOf(tx)) { losers.push(tx); out.push(mx); } else { losers.push(mx); out.push(tx); }
+        });
+        m.forEach(mx => { if (!tm.has(mx.id)) { const bx = bm.get(mx.id); if (bx === undefined || !same(mx, bx)) out.push(mx); } });   // added here; or edited here but deleted in the repo
+        if (out.every(x => typeof x.t === 'number')) out.sort((x, y) => y.t - x.t);
+        return out;
+      }
+      if (isObj(m) && isObj(t) && !(typeof m.revision === 'number' && typeof t.revision === 'number')) {
+        const bb = isObj(b) ? b : {}, out = {};
+        new Set(Object.keys(m).concat(Object.keys(t), Object.keys(bb))).forEach(k => {
+          const v = rec(bb[k], m[k], t[k], false);
+          if (v !== undefined) out[k] = v;
+        });
+        return out;
+      }
+      if (m === undefined) return same(t, b) ? undefined : t;
+      if (t === undefined) return same(m, b) ? undefined : m;
+      if (stampOf(m) > stampOf(t)) { losers.push(t); return m; }
+      losers.push(m); return t;                // a tie goes to the repo: the other computer saved first
+    }
+    const value = rec(base, mine, theirs, true);
+    return { value, losers };
+  }
+
+  function create(opt) {
+    const API = opt.api, cfg = opt.config, toast = opt.toast || (() => {}), DELAY = opt.delay == null ? 1500 : opt.delay;
+    const enc = opt.encode || (s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(s)))));
+    const dec = opt.decode || (b => (typeof Buffer !== 'undefined' ? Buffer.from(b, 'base64').toString('utf8') : decodeURIComponent(escape(atob(b)))));
+    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [] };
+    const changed = () => S.listeners.forEach(f => { try { f(); } catch (e) { } });
+    const c = () => { const x = cfg(); return x && x.token && x.owner && x.repo ? x : null; };
+    const base = x => '/repos/' + encodeURIComponent(x.owner) + '/' + encodeURIComponent(x.repo);
+    const q = x => '?ref=' + encodeURIComponent(String(x.branch || 'main').replace(/^refs\/heads\//, ''));
+    const fpath = (x, sub, name) => base(x) + '/contents/' + DIR + (sub ? '/' + sub : '') + '/' + name;
+    const docText = (key, raw) => '{"format":"weld-data","v":1,"key":' + JSON.stringify(key) + ',"savedAt":' + Date.now() + ',"value":' + raw + '}';
+
+    async function readFile(x, entry) {   // -> { sha, doc } | null
+      let r = await API('GET', fpath(x, '', entry.name) + q(x));
+      if (r.status === 404) return null;
+      if (r.status !== 200 || !r.json) throw new Error('GitHub answered ' + r.status + ' reading ' + entry.name);
+      let text = r.json.content ? dec(String(r.json.content).replace(/\s/g, '')) : null;
+      if (text === null) { const b = await API('GET', base(x) + '/git/blobs/' + r.json.sha); if (b.status !== 200 || !b.json) throw new Error('GitHub answered ' + b.status + ' reading ' + entry.name); text = dec(String(b.json.content).replace(/\s/g, '')); }
+      let doc = null; try { doc = JSON.parse(text); } catch (e) { }
+      return { sha: r.json.sha, doc };
+    }
+    // Read every file whose sha changed (all the first time); files gone from the repo are dropped unless edited here.
+    async function load() {
+      const x = c(); if (!x) return false;
+      if (S.loading) return S.loading;
+      S.loading = (async () => {
+        let any = false;
+        try {
+          const r = await API('GET', base(x) + '/contents/' + DIR + q(x));
+          let list = [];
+          if (r.status === 200 && Array.isArray(r.json)) list = r.json.filter(e => e.type === 'file' && /\.json$/.test(e.name));
+          else if (r.status !== 404) throw new Error('GitHub answered ' + r.status + ' listing ' + DIR + (r.status === 401 || r.status === 403 ? ' (check the token has Contents access to this repo)' : ''));
+          const seen = new Set();
+          for (const e of list) {
+            const known = S.names.get(e.name);
+            if (known && S.sha.get(known) === e.sha) { seen.add(known); continue; }
+            const f = await readFile(x, e);
+            if (!f || !f.doc || f.doc.format !== 'weld-data' || typeof f.doc.key !== 'string' || fileName(f.doc.key) !== e.name) continue;
+            const key = f.doc.key; seen.add(key);
+            S.names.set(e.name, key); S.sha.set(key, f.sha);
+            if (S.pending.has(key)) continue;   // an edit made here is merged when it is written
+            const raw = JSON.stringify(f.doc.value === undefined ? null : f.doc.value);
+            S.cache.set(key, raw); S.base.set(key, raw); any = true;
+          }
+          Array.from(S.sha.keys()).forEach(k => { if (!seen.has(k) && !S.pending.has(k)) { S.sha.delete(k); S.cache.delete(k); S.base.delete(k); S.names.delete(fileName(k)); any = true; } });
+          const first = !S.loaded; S.loaded = true; S.error = '';
+          if (first) any = true;
+        } catch (e) { S.error = 'Could not read Weld data from GitHub: ' + ((e && e.message) || e); }
+        S.loading = null;
+        if (any) changed();
+        return S.loaded;
+      })();
+      return S.loading;
+    }
+    function get(key, dflt) {
+      if (!S.cache.has(key)) return dflt;
+      const raw = S.cache.get(key); if (raw === null) return dflt;
+      try { return JSON.parse(raw); } catch (e) { return dflt; }
+    }
+    function set(key, value) {
+      if (!c() || !S.loaded) return false;
+      let raw = null;
+      if (value !== null && value !== undefined) { try { raw = JSON.stringify(value); } catch (e) { return false; } if (raw === undefined) return false; }
+      S.cache.set(key, raw); S.pending.set(key, raw);
+      if (!S.timer) S.timer = setTimeout(() => { S.timer = null; flush().catch(() => { }); }, DELAY);
+      return true;
+    }
+    async function writeConflict(x, key, value, why) {
+      try {
+        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15), name = fileName(key).replace(/\.json$/, '') + '-' + why + '-' + stamp + '.json';
+        await API('PUT', fpath(x, 'conflicts', name), { message: 'Weld: keep a version that lost a merge (' + key + ')', content: enc(docText(key, JSON.stringify(value === undefined ? null : value))), branch: String(x.branch || 'main') });
+      } catch (e) { }
+    }
+    async function writeKey(x, key, raw) {
+      const name = fileName(key);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const sha = S.sha.get(key);
+        let r;
+        if (raw === null) { if (!sha) { S.cache.delete(key); return; } r = await API('DELETE', fpath(x, '', name), { message: 'Weld: delete ' + key, sha, branch: String(x.branch || 'main') }); }
+        else r = await API('PUT', fpath(x, '', name), { message: 'Weld: update ' + key, content: enc(docText(key, raw)), sha: sha || undefined, branch: String(x.branch || 'main') });
+        if (r.status === 200 || r.status === 201) {
+          if (raw === null) { S.sha.delete(key); S.cache.delete(key); S.base.delete(key); S.names.delete(name); } else { S.sha.set(key, r.json && r.json.content && r.json.content.sha); S.base.set(key, raw); S.names.set(name, key); }
+          return;
+        }
+        if (r.status === 409 || r.status === 422 || (r.status === 404 && raw === null)) {   // the repo changed under us, or the file is new/gone
+          const f = await readFile(x, { name });
+          if (!f) { S.sha.delete(key); S.base.delete(key); if (raw === null) { S.cache.delete(key); return; } continue; }   // gone in the repo: write ours as a new file
+          const theirsRaw = JSON.stringify(f.doc && f.doc.value !== undefined ? f.doc.value : null), baseRaw = S.base.get(key);
+          S.sha.set(key, f.sha);
+          if (raw === null) { if (theirsRaw === baseRaw) continue; S.conflicts++; raw = theirsRaw; S.cache.set(key, raw); S.base.set(key, raw); toast('A file you deleted was changed on another computer, so it was kept.', 9000); changed(); return; }
+          const m = merge(key, baseRaw === undefined ? undefined : JSON.parse(baseRaw), JSON.parse(raw), JSON.parse(theirsRaw));
+          for (const l of m.losers) await writeConflict(x, key, l, 'merged');
+          raw = JSON.stringify(m.value === undefined ? null : m.value); S.cache.set(key, raw); S.base.set(key, theirsRaw);
+          S.conflicts++; toast('This was also changed on another computer. Both sets of changes were merged' + (m.losers.length ? ' (the version that lost is under _weld-data/conflicts).' : '.'), 9000); changed();
+          if (raw === theirsRaw) { return; }
+          continue;
+        }
+        const e = new Error('GitHub answered ' + r.status + (r.json && r.json.message ? ' ' + r.json.message : '') + ' saving ' + key); e.status = r.status; throw e;
+      }
+      throw new Error('Could not save ' + key + ': it kept changing on GitHub. Try again.');
+    }
+    async function flush() {
+      if (S.flushing) { await S.flushing; if (S.pending.size && !S.timer) return flush(); return; }
+      S.flushing = (async () => {
+        const x = c(); if (!x) return;
+        const batch = Array.from(S.pending.entries()); S.pending.clear();
+        for (const [key, raw] of batch) {
+          try { await writeKey(x, key, raw); S.error = ''; }
+          catch (e) { if (!S.pending.has(key)) S.pending.set(key, S.cache.has(key) ? S.cache.get(key) : raw); S.error = 'Could not save to GitHub: ' + ((e && e.message) || e) + '. Weld retries on the next save.'; try { toast(S.error, 9000); } catch (z) { } }
+        }
+      })();
+      try { await S.flushing; } finally { S.flushing = null; }
+    }
+    // Legacy copies (browser storage, the old backup folder): the repo wins. A copy of a key the repo lacks is imported;
+    // otherwise it is filed under _weld-data/legacy/ so nothing is lost and nothing comes back. -> 'moved' | 'filed' | null (not safe to remove yet)
+    async function importLegacy(key, value, source) {
+      const x = c(); if (!x || !S.loaded) return null;
+      try {
+        if (!S.cache.has(key) || S.cache.get(key) === null) { set(key, value); await flush(); return S.pending.has(key) ? null : 'moved'; }
+        const raw = JSON.stringify(value);
+        if (raw === S.cache.get(key)) return 'moved';
+        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15), name = fileName(key).replace(/\.json$/, '') + '-' + source + '-' + stamp + '.json';
+        const r = await API('PUT', fpath(x, 'legacy', name), { message: 'Weld: keep an older local copy of ' + key, content: enc(docText(key, raw)), branch: String(x.branch || 'main') });
+        return r.status === 200 || r.status === 201 ? 'filed' : null;
+      } catch (e) { return null; }
+    }
+    function status() {
+      if (!c()) return 'Saved in your GitHub repo. Set owner, repo and token in Weld > GitHub to load and save.';
+      const x = c();
+      if (S.error) return S.error;
+      return S.loaded ? 'Saved in GitHub: ' + x.owner + '/' + x.repo + '/' + DIR : 'Loading from GitHub...';
+    }
+    return { get, set, load, flush, importLegacy, status, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
+      pending: () => S.pending.size, onChange: f => { S.listeners.push(f); }, _state: S };
+  }
+  return { create, merge, fileName, DIR, canon };
+});
+
 /* Backup Manager core: read-only inventory, record inspection and export bundles for generator backup copies.
    The companion is a storekeeper, not an owner: nothing here rewrites, moves or repairs a record. */
 (function (root, factory) {
@@ -18540,7 +18758,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   'use strict';
   if (window.top !== window) return;
   const C = window.WeldBackupCore, H = window.weldProjectHost;
-  if (!C || !H) return;
+  if (!C || !H || !window.WeldRepoStore) return;
   const E = H.el;
   const S = { pick: '', rows: null, inv: null, error: '', selected: null, inspected: null, secrets: null, msg: '', stamp: 0, openGens: new Set(), busy: false };
   let host = null, unsub = null;
@@ -18763,7 +18981,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     if (F.perm !== was && host) draw();
   }
   function setKeep(on) { F.keep = !!on; H.set(KEEP_KEY, F.keep); if (F.keep) recheckAccess(); draw(); }
-  function setAuto(on) { F.auto = !!on; H.set(AUTO_KEY, F.auto); if (F.auto) scheduleSync(300); draw(); }
+  function setAuto(on) { F.auto = false; H.set(AUTO_KEY, false); if (on) say('Automatic folder saving was removed in 1.90.0: your data lives in your GitHub repo. Use Save all to folder now for a manual copy.', true); draw(); }
   async function dirAt(root, segs, create) { let d = root; for (const s of segs) d = await d.getDirectoryHandle(s, { create }); return d; }
   async function exists(dir, name) {
     try { await dir.getFileHandle(name); return true; } catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return false; throw e; }
@@ -18801,7 +19019,8 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   // chat index file, which is re-stamped when the same list is saved again so the newest list wins.
   const NO_FOLDER = 'Weld keeps no backups. Choose a backup folder in Weld > Backups (a drive or a cloud-synced folder) and allow access to receive vault saves.';
   const VAULT_KINDS = ['snapshot', 'chat-index', 'chat-copy'];
-  const ptReady = () => !!(F.handle && F.perm === 'granted');
+  const ptReady = () => !!(F.handle && F.perm === 'granted');   // the manual-export folder
+  const vaultReady = () => RP.ready();   // the GitHub repo: where vault saves go
   async function ptDoc(dir, name) {
     try { const doc = JSON.parse(await (await (await dir.getFileHandle(name)).getFile()).text()); return doc && doc.format === 'weld-backup-record' && doc.record ? doc : null; } catch (e) { return null; }
   }
@@ -19121,13 +19340,87 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     if (F.perm !== 'granted') return 'Saved in ' + F.name + '. Press Allow access in Weld > Backups (or click anywhere) to load and save.';
     return FK.loaded ? 'Saved in ' + F.name + '/' + FK_DIR : 'Loading from ' + F.name + '...';
   }
-  function afterGrant() { if (F.perm === 'granted') fkLoad().catch(() => {}); }
+  // ---- GitHub repo store (1.90.0): ALL of Weld's work data and the generator vault live in <repo>/_weld-data/ (see
+  // src/repo-store.js). Nothing is kept in browser storage and nothing is written to the backup folder any more.
+  // A write that another computer got to first is merged, not overwritten; deletions are kept.
+  const RP = window.WeldRepoStore.create({
+    api: (m, path, body) => H.gh.api(m, path, body), config: () => H.gh.config(), toast: (t, ms) => { try { H.toast(t, ms); } catch (e) {} },
+    encode: s => btoa(unescape(encodeURIComponent(s))), decode: b => decodeURIComponent(escape(atob(b)))
+  });
+  const rpLegacy = () => H.legacy || null;
+  const repoFiles = {
+    // Until the repo has been read, an older copy still in browser storage is shown (read-only) so screens are not blank.
+    get: (key, dflt) => { if (RP.ready()) return RP.get(key, dflt); const lg = rpLegacy(), old = lg ? lg.get(key) : undefined; return old === undefined ? dflt : old; },
+    set: (key, value) => RP.set(key, value), ready: () => RP.ready(), status: () => RP.status(), flush: () => RP.flush(), load: () => RP.load(), keys: () => RP.keys()
+  };
+  // One-time move of browser-storage copies (and of 1.89.x files in the backup folder) into the repo. The repo always wins:
+  // a copy of a key the repo does not have is imported; any other copy is filed under _weld-data/legacy/ and then removed
+  // from storage, so an old computer can never bring back something that was deleted.
+  async function repoMigrate() {
+    const lg = rpLegacy(); let moved = 0, filed = 0;
+    if (lg && typeof lg.keys === 'function') {
+      for (const key of lg.keys().filter(k => lg.owns(k))) {
+        const old = lg.get(key); if (old === undefined) continue;
+        const r = await RP.importLegacy(key, old, 'browser');
+        if (r) { lg.del(key); if (r === 'moved') moved++; else filed++; }
+      }
+    }
+    if (ptReady()) {   // 1.89.x kept these as files in the backup folder
+      try {
+        const dir = await fkDirHandle(false);
+        for (const name of await ptNames(dir)) {
+          const f = await fkFile(dir, name); if (!f) continue;
+          let doc; try { doc = JSON.parse(await f.text()); } catch (e) { continue; }
+          if (!doc || doc.format !== 'weld-data' || typeof doc.key !== 'string' || !/^(scrapbook|studio:.*)$/.test(doc.key)) continue;
+          const mark = 'repoMigrated:' + name, sig = String(f.lastModified) + ':' + f.size;
+          if ((await kvGet(mark)) === sig) continue;
+          const r = await RP.importLegacy(doc.key, doc.value === undefined ? null : doc.value, 'folder');
+          if (r) { await kvSet(mark, sig); if (r === 'moved') moved++; else filed++; }
+        }
+      } catch (e) {}
+    }
+    if (moved || filed) { try { H.toast('Moved ' + moved + ' record' + (moved === 1 ? '' : 's') + ' from this computer into your GitHub repo' + (filed ? ' (' + filed + ' older local cop' + (filed === 1 ? 'y' : 'ies') + ' filed under _weld-data/legacy)' : '') + '.', 9000); } catch (e) {} }
+  }
+  let repoTimer = null;
+  async function repoRefresh() { try { await RP.load(); } catch (e) {} if (host) scheduleDraw(); }
+  async function repoBoot() {
+    RP.onChange(() => { try { if (typeof H.refreshTab === 'function') H.refreshTab(); } catch (e) {} });
+    if (RP.configured()) { await RP.load(); if (RP.ready()) await repoMigrate(); }
+    if (!repoTimer) repoTimer = setInterval(() => { if ((typeof document === 'undefined' || !document.hidden) && RP.configured()) RP.load().catch(() => {}); }, 60000); if (repoTimer && typeof repoTimer.unref === 'function') repoTimer.unref();   // pick up another computer's saves
+    try { window.addEventListener('focus', () => { if (RP.configured()) RP.load().catch(() => {}); }); } catch (e) {}
+    try { window.addEventListener('beforeunload', e => { if (RP.pending()) { RP.flush().catch(() => {}); e.preventDefault(); e.returnValue = ''; } }); } catch (e) {}
+    if (host) scheduleDraw();
+  }
+  // Generator vault saves (Skybridge storage) go to the same repo store.
+  async function rpVaultSet(caller, key, value) {
+    if (!vaultReady()) return { ok: false, code: 'no-github-repo', reason: 'Weld keeps your data in your GitHub repo. Set owner, repo and token in Weld > GitHub and wait for it to load.' };
+    const p = C.parseKey(key);
+    if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return { ok: false, code: 'bad-key', reason: 'bad-key' };
+    if (value === null || value === undefined) { RP.set(key, null); return { ok: true, where: 'github' }; }
+    if (C.checkStoreWrite(key, value).ok !== true) return { ok: false, code: 'owner-mismatch', reason: 'owner-mismatch' };
+    if (p.kind === 'chat-copy' && C.secretScan(value && value.data).length) return { ok: false, code: 'secret-shaped', reason: 'this chat copy holds a plaintext secret-shaped value, so it was not written to the repo' };
+    if (RP.get(key, undefined) !== undefined && C.canonical(RP.get(key, undefined)) === C.canonical(value)) return { ok: true, where: 'github' };
+    if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
+    return RP.set(key, value) ? { ok: true, where: 'github' } : { ok: false, code: 'github-write-failed', reason: 'could not queue the save' };
+  }
+  async function rpVaultGet(caller, key) {
+    if (!vaultReady()) return undefined;
+    const p = C.parseKey(key); if (!p.gen || p.gen !== caller || VAULT_KINDS.indexOf(p.kind) === -1) return undefined;
+    return RP.get(key, undefined);
+  }
+  async function rpVaultList(caller, prefix) {
+    if (!vaultReady() || !C.GEN_RE.test(String(caller || ''))) return [];
+    const base = 'weld:genvault:' + caller + '/';
+    return RP.keys().filter(k => k.indexOf(base) === 0 && k.indexOf(String(prefix || '')) === 0).sort();
+  }
+  let migrating = null;
+  function afterGrant() { if (RP.ready() && !migrating) migrating = repoMigrate().catch(() => {}).then(() => { migrating = null; }); }   // the folder holds manual exports only; Weld's data is in the GitHub repo (repoBoot)
   let syncTimer = null;
   function scheduleSync(ms) { if (syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncTimer = null; syncToFolder(false, true).catch(() => {}); }, ms || 1500); }
   async function bootFolder() {
-    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = H.get(AUTO_KEY, false) === true; F.keep = H.get(KEEP_KEY, true) !== false;
+    F.supported = typeof pageWin().showDirectoryPicker === 'function'; F.auto = false; F.keep = H.get(KEEP_KEY, true) !== false;
     try { const h = await kvGet('handle'); if (h && typeof h.queryPermission === 'function') { F.handle = h; F.name = h.name; F.perm = await permission(h, false); } } catch (e) {}
-    afterGrant();
+    repoBoot().catch(() => {});
     try { window.addEventListener('pagehide', () => { if (FK.pending.size) fkFlush().catch(() => {}); }); } catch (e) {}
     try { window.addEventListener('focus', () => { recheckAccess().catch(() => {}); }); } catch (e) {}
     armRegrant();
@@ -19138,7 +19431,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   function folderCard() {
     const card = E('div', { 'data-folder': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
     card.appendChild(E('div', { text: 'Backup location', style: { fontWeight: '600' } }));
-    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Choose any folder on a drive or inside a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox). Generator vault saves go straight into it and are never kept in Weld. Files there are only ever added, so browser cache clears cannot touch them. With no folder, vault saves are refused and generators keep their own copies.' }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: 'Optional, for manual copies only. Weld keeps your data (Studio projects, Scrapbook, notes, pins, favorites, generator vault saves) in your GitHub repo under _weld-data/, set in Weld > GitHub. This folder is used only by the Save all to folder now button.' }));
     if (!F.supported) card.appendChild(E('div', { style: { fontSize: '12px', color: '#e0a030' }, text: 'This browser cannot open folders (Chrome or Edge can). The Download buttons below still work.' }));
     card.appendChild(E('div', { 'data-folder-state': '1', style: { fontSize: '12px', margin: '4px 0' }, text: F.handle ? 'Folder: ' + F.name + ' · ' + (F.perm === 'granted' ? 'access allowed' : 'needs permission (press Allow access)') : 'No folder chosen yet.' }));
     if (F.error) card.appendChild(E('div', { role: 'alert', style: { fontSize: '12px', color: '#ff9e92' }, text: F.error }));
@@ -19180,7 +19473,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     const rerender = () => draw();
     const wrap = E('div', { id: 'wc-backup-body' });
     wrap.appendChild(E('div', { text: 'Backup Manager', style: { fontWeight: '600', fontSize: '15px' } }));
-    wrap.appendChild(note('Weld keeps no backups: generator vault saves go straight to your backup folder. Anything older still held in browser storage is listed below; download it, delete keys one click at a time, or purge it all.'));
+    wrap.appendChild(note('Weld keeps no backups of its own and no data in browser storage: everything lives in your GitHub repo (_weld-data/). This tab lists, exports and purges anything older still held in browser storage.'));
     const top = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '8px 0' } });
     top.appendChild(btn('Refresh', () => { load(); draw(); }));
     top.appendChild(btn('Export all', () => exportRows('all-generators', S.rows || []), { disabled: !(S.rows && S.rows.length) }));
@@ -19228,8 +19521,8 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   bootFolder().catch(() => {});
   // vault: the pass-through store Skybridge storage uses for weld:genvault: keys (see sbServiceStorage).
   // files: the folder store behind Weld's storage helpers for Studio projects and the Scrapbook (see gget/gset).
-  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: ptReady, set: ptSet, get: ptGet, list: ptList, noFolder: NO_FOLDER },
-    files: { get: fkGet, set: fkSet, ready: () => ptReady() && FK.loaded, status: fkStatus, flush: fkFlush, load: fkLoad, keys: () => Array.from(FK.cache.keys()).filter(k => FK.cache.get(k) !== null) } };
+  window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: vaultReady, set: rpVaultSet, get: rpVaultGet, list: rpVaultList, noFolder: 'Weld keeps your data in your GitHub repo. Set owner, repo and token in Weld > GitHub.' },
+    files: repoFiles, repo: RP };
 })();
 
 /* Shared collector: generator sources, with optional public cached/model bytes for local downloads. */

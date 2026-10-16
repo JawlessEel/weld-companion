@@ -106,3 +106,13 @@ Each file is `{ "format": "weld-backup-record", "v": 1, "exportedAt", "record": 
 - **Possible duplicates** (same thread and message counts, different content) are only listed. Delete one with the per-key Delete button after checking it.
 - **Ask the AI helper to review** opens the AI helper with a metadata-only report (key names, dates, counts; never chat text or settings). You press Ask yourself.
 - Chat copies holding secret-shaped values are left out of cleanup because they are never copied to the folder.
+
+## One place for your data: the GitHub repo (1.90.0)
+
+Everything Weld keeps for you is now a file in your GitHub repo, in `_weld-data/` (the owner, repo, branch and token from Weld > GitHub). Nothing is kept in browser storage except settings and credentials (the token, AI keys, preferences). The earlier backup-folder store and the automatic local-folder writes are gone; the folder and the Dev tab's master folder are for manual exports only.
+
+- **What is in the repo:** Studio projects, Scrapbook, notes, pins, capsules, sessions, tab snapshots, favorites, ratings, boundaries, output rules, lore and generator storage (`sbk:`), plus generator vault saves (`weld:genvault:...`). Clipboard history, time tracking, recents and other caches stay in memory for the page only.
+- **Two computers:** every write carries the file's last-seen version. If another computer saved first, GitHub refuses the write, and Weld merges both sets of changes and retries: entries added on either side are kept, and an entry deleted on one side stays deleted. If the same entry was edited on both, the newer one wins and the other is saved under `_weld-data/conflicts/`. Weld re-reads the repo when the window gains focus and once a minute.
+- **First run on a computer:** older copies in browser storage (and 1.89.x files in the backup folder) are imported only for keys the repo does not have. Any other older copy is filed under `_weld-data/legacy/` and removed from storage, so an old computer can never bring back something you deleted. History is in git.
+- **Not saved without GitHub:** with no owner, repo and token set, edits to this data are refused with a message. Use a private repo: your notes and generator storage are stored there as readable JSON.
+- Save in Perchance and Push still write the generator's panels as before.

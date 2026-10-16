@@ -162,8 +162,8 @@ const norm = t => t.replace(/\r\n?/g, '\n');
   live.dsl += '  eel\n';
   await dev.tick(true); assert.equal(dev.state.F.plan.state, 'editor-ahead');
   dev.state.F.cfg.autoMirror = true; host.set('folderSync', dev.state.F.cfg); await dev.tick(true);
-  assert.equal(norm(root.read('zoo/zoo-top-panel.txt')), live.dsl, 'auto-mirror wrote the editor to the folder');
-  assert.equal(dev.state.F.plan.state, 'in-sync'); dev.state.F.cfg.autoMirror = false; host.set('folderSync', dev.state.F.cfg);
+  assert.notEqual(norm(root.read('zoo/zoo-top-panel.txt')), live.dsl, 'auto-mirror was removed in 1.90.0: the folder is only written on request');
+  assert.equal(dev.state.F.plan.state, 'editor-ahead'); click('Write editor to folder'); await sleep(60); assert.equal(norm(root.read('zoo/zoo-top-panel.txt')), live.dsl); assert.equal(dev.state.F.plan.state, 'in-sync');
 
   // Both changed -> conflict, and overwriting asks first.
   live.dsl += '  fox\n'; root.put('zoo/zoo-top-panel.txt', 'output\n  something else\n');

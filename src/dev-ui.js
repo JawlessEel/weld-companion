@@ -48,7 +48,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); return F.cfg; }
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); F.cfg.autoMirror = false; F.cfg.projectBackups = {}; return F.cfg; }   // 1.90.0: the master folder is manual export only; Weld's data lives in the GitHub repo
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   function folderBaseKey(slug) { return 'base:' + (F.revision ? F.revision + ':' : '') + slug; }
   async function refreshMasterFolder() {
@@ -264,7 +264,6 @@
       const result = await window.WeldLocalBackup.save({ root: handle, slug, backup, crypto: H.backup.crypto, overwrite: manual, active,
         progress: (n, total) => { F.projectStatus = 'Saving project files and assets ' + n + '/' + total; draw(); } });
       if (!active()) throw new Error('Local project download paused or location changed');
-      if (manual) { folderCfg(); F.cfg.projectBackups = Object.assign({}, F.cfg.projectBackups, { [slug]: true }); saveFolderCfg(); }
       const p = paths(slug), canonical = D.folderPaths(slug);
       if (p.dsl === canonical.dsl && p.html === canonical.html) await kvSet(folderBaseKey(slug), { dsl: norm(live.dsl), html: norm(live.html || '') });
       F.projectStatus = 'Saved ' + result.files + ' files (' + (result.bytes / 1048576).toFixed(1) + ' MiB); ' + result.written + ' updated.' +
