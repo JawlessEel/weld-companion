@@ -4,3 +4,4 @@
 - 2026-10-16 · 1.90.0 · All work data moved from browser storage / backup folder to the GitHub repo (_weld-data/) with sha-checked, three-way-merged writes; automatic local-folder writes removed (Dev master folder, backup folder are manual export only). Src push into the generator folder NOT done yet.
 - 2026-10-16 · 1.90.1 · Repo store refuses public repos, caps vault keys per generator, ignores truncated listings, verifies file key before overwrite.
 - 2026-10-16 · 1.91.0 · Push and Push as pull request now also commit the generator's src/ files into <name>/src/ (atomic, unchanged files skipped by blob sha, list and count in the confirmation, secret scan, 4 MiB parts; falls back to the two panels with a warning). Not tried in a real userscript manager.
+- 2026-10-16 · 1.91.1 · Repo store writes only to the repo that passed the private check (config change drops cache and queued edits); new vault keys refused while the repo listing is truncated.

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.91.0
+// @version      1.91.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -18256,9 +18256,14 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     const API = opt.api, cfg = opt.config, toast = opt.toast || (() => {}), DELAY = opt.delay == null ? 1500 : opt.delay;
     const enc = opt.encode || (s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(s)))));
     const dec = opt.decode || (b => (typeof Buffer !== 'undefined' ? Buffer.from(b, 'base64').toString('utf8') : decodeURIComponent(escape(atob(b)))));
-    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [] };
+    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false };
     const changed = () => S.listeners.forEach(f => { try { f(); } catch (e) { } });
-    const c = () => { const x = cfg(); return x && x.token && x.owner && x.repo ? x : null; };
+    const ident = x => x.owner + '/' + x.repo + '@' + String(x.branch || 'main');
+    const c0 = () => { const x = cfg(); return x && x.token && x.owner && x.repo ? x : null; };
+    // Writes need a repo that passed the private check. If the configured repo, branch or token changes, everything read
+    // from the old one is dropped (including queued edits) so it can never be written to the new one.
+    function reset() { S.cache.clear(); S.base.clear(); S.sha.clear(); S.pending.clear(); S.names.clear(); S.loaded = false; S.verified = ''; S.truncated = false; if (S.timer) { clearTimeout(S.timer); S.timer = null; } }
+    const c = () => { const x = c0(); if (x && S.verified && S.verified !== ident(x)) reset(); return x; };
     const base = x => '/repos/' + encodeURIComponent(x.owner) + '/' + encodeURIComponent(x.repo);
     const q = x => '?ref=' + encodeURIComponent(String(x.branch || 'main').replace(/^refs\/heads\//, ''));
     const fpath = (x, sub, name) => base(x) + '/contents/' + DIR + (sub ? '/' + sub : '') + '/' + name;
@@ -18280,13 +18285,14 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
       S.loading = (async () => {
         let any = false;
         try {
+          if (S.verified && S.verified !== ident(x)) reset();
           const meta = await API('GET', base(x));   // personal notes and chats are only stored in a private repo
-          if (meta.status === 200 && meta.json && meta.json.private !== true) throw new Error(x.owner + '/' + x.repo + ' is a public repo, so nothing is stored in it. Use a private repo in Weld > GitHub');
+          if (meta.status === 200 && meta.json && meta.json.private !== true) { reset(); throw new Error(x.owner + '/' + x.repo + ' is a public repo, so nothing is stored in it. Use a private repo in Weld > GitHub'); }
           const r = await API('GET', base(x) + '/contents/' + DIR + q(x));
           let list = [];
           if (r.status === 200 && Array.isArray(r.json)) list = r.json.filter(e => e.type === 'file' && /\.json$/.test(e.name));
           else if (r.status !== 404) throw new Error('GitHub answered ' + r.status + ' listing ' + DIR + (r.status === 401 || r.status === 403 ? ' (check the token has Contents access to this repo)' : ''));
-          const truncated = r.status === 200 && Array.isArray(r.json) && r.json.length >= 1000;   // the directory listing is cut off at 1000 entries
+          const truncated = S.truncated = r.status === 200 && Array.isArray(r.json) && r.json.length >= 1000;   // the directory listing is cut off at 1000 entries
           const seen = new Set();
           for (const e of list) {
             const known = S.names.get(e.name);
@@ -18300,7 +18306,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
             S.cache.set(key, raw); S.base.set(key, raw); any = true;
           }
           if (!truncated) Array.from(S.sha.keys()).forEach(k => { if (!seen.has(k) && !S.pending.has(k)) { S.sha.delete(k); S.cache.delete(k); S.base.delete(k); S.names.delete(fileName(k)); any = true; } });
-          const first = !S.loaded; S.loaded = true; S.error = '';
+          const first = !S.loaded; S.loaded = true; S.verified = ident(x); S.error = '';
           if (first) any = true;
         } catch (e) { S.error = 'Could not read Weld data from GitHub: ' + ((e && e.message) || e); }
         S.loading = null;
@@ -18315,7 +18321,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
       try { return JSON.parse(raw); } catch (e) { return dflt; }
     }
     function set(key, value) {
-      if (!c() || !S.loaded) return false;
+      if (!c() || !S.loaded || S.verified !== ident(c())) return false;
       let raw = null;
       if (value !== null && value !== undefined) { try { raw = JSON.stringify(value); } catch (e) { return false; } if (raw === undefined) return false; }
       S.cache.set(key, raw); S.pending.set(key, raw);
@@ -18360,7 +18366,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     async function flush() {
       if (S.flushing) { await S.flushing; if (S.pending.size && !S.timer) return flush(); return; }
       S.flushing = (async () => {
-        const x = c(); if (!x) return;
+        const x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return;
         const batch = Array.from(S.pending.entries()); S.pending.clear();
         for (const [key, raw] of batch) {
           try { await writeKey(x, key, raw); S.error = ''; }
@@ -18372,7 +18378,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     // Legacy copies (browser storage, the old backup folder): the repo wins. A copy of a key the repo lacks is imported;
     // otherwise it is filed under _weld-data/legacy/ so nothing is lost and nothing comes back. -> 'moved' | 'filed' | null (not safe to remove yet)
     async function importLegacy(key, value, source) {
-      const x = c(); if (!x || !S.loaded) return null;
+      const x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return null;
       try {
         if (!S.cache.has(key) || S.cache.get(key) === null) { set(key, value); await flush(); return S.pending.has(key) ? null : 'moved'; }
         const raw = JSON.stringify(value);
@@ -18389,7 +18395,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
       return S.loaded ? 'Saved in GitHub: ' + x.owner + '/' + x.repo + '/' + DIR : 'Loading from GitHub...';
     }
     return { get, set, load, flush, importLegacy, status, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
-      pending: () => S.pending.size, onChange: f => { S.listeners.push(f); }, _state: S };
+      pending: () => S.pending.size, truncated: () => S.truncated, onChange: f => { S.listeners.push(f); }, _state: S };
   }
   return { create, merge, fileName, DIR, canon };
 });
@@ -19436,6 +19442,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     if (p.kind === 'chat-copy' && C.secretScan(value && value.data).length) return { ok: false, code: 'secret-shaped', reason: 'this chat copy holds a plaintext secret-shaped value, so it was not written to the repo' };
     if (RP.get(key, undefined) !== undefined && C.canonical(RP.get(key, undefined)) === C.canonical(value)) return { ok: true, where: 'github' };
     if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
+    if (RP.get(key, undefined) === undefined && RP.truncated()) return { ok: false, code: 'folder-full', reason: 'the repo listing is too large to count vault entries safely; new entries are refused until some are deleted' };
     if (RP.get(key, undefined) === undefined && RP.keys().filter(k => k.indexOf('weld:genvault:' + caller + '/') === 0).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' vault entries in the repo; delete some first' };
     return RP.set(key, value) ? { ok: true, where: 'github' } : { ok: false, code: 'github-write-failed', reason: 'could not queue the save' };
   }

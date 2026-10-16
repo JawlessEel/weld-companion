@@ -91,5 +91,11 @@ mk.toasts = [];
   // a public repo is refused outright
   const pub = R.create({ api: gh.api, config: () => ({ owner: 'o', repo: 'pub', branch: 'main', token: 't' }), toast: () => { }, delay: 0 });
   await pub.load(); assert.equal(pub.ready(), false); assert.match(pub.status(), /public repo/); assert.equal(pub.set('x', 1), false);
+  // switching repo drops everything read from the old one, including queued edits
+  let cur = { owner: 'o', repo: 'r', branch: 'main', token: 't' };
+  const sw = R.create({ api: gh.api, config: () => cur, toast: () => { }, delay: 100000 });
+  await sw.load(); sw.set('pending-key', 1); assert.equal(sw.pending(), 1);
+  cur = { owner: 'o', repo: 'other', branch: 'main', token: 't' };
+  assert.equal(sw.set('x', 1), false, 'not loaded for the new repo'); assert.equal(sw.pending(), 0); assert.equal(sw.get('pending-key', 'none'), 'none');
   console.log('repo store tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

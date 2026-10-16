@@ -648,6 +648,7 @@
     if (p.kind === 'chat-copy' && C.secretScan(value && value.data).length) return { ok: false, code: 'secret-shaped', reason: 'this chat copy holds a plaintext secret-shaped value, so it was not written to the repo' };
     if (RP.get(key, undefined) !== undefined && C.canonical(RP.get(key, undefined)) === C.canonical(value)) return { ok: true, where: 'github' };
     if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
+    if (RP.get(key, undefined) === undefined && RP.truncated()) return { ok: false, code: 'folder-full', reason: 'the repo listing is too large to count vault entries safely; new entries are refused until some are deleted' };
     if (RP.get(key, undefined) === undefined && RP.keys().filter(k => k.indexOf('weld:genvault:' + caller + '/') === 0).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' vault entries in the repo; delete some first' };
     return RP.set(key, value) ? { ok: true, where: 'github' } : { ok: false, code: 'github-write-failed', reason: 'could not queue the save' };
   }
