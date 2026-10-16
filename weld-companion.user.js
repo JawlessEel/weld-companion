@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.91.2
+// @version      1.92.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -14907,7 +14907,7 @@
 
   // ------------------------------------------------------------- folder sync
   const win = () => { try { return H.pageWindow ? H.pageWindow() : window; } catch (e) { return window; } };
-  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {} }, c); F.cfg.autoMirror = false; F.cfg.projectBackups = {}; return F.cfg; }   // 1.90.0: the master folder is manual export only; Weld's data lives in the GitHub repo
+  function folderCfg() { const c = H.get(GM_KEYS.folder, {}) || {}; F.cfg = Object.assign({ autoMirror: false, watch: true, keepAccess: true, dslPath: '', htmlPath: '', projectBackups: {}, showPanel: false }, c); F.cfg.autoMirror = false; F.cfg.projectBackups = {}; return F.cfg; }   // 1.90.0: the master folder is manual export only; Weld's data lives in the GitHub repo
   function saveFolderCfg() { H.set(GM_KEYS.folder, F.cfg); }
   function folderBaseKey(slug) { return 'base:' + (F.revision ? F.revision + ':' : '') + slug; }
   async function refreshMasterFolder() {
@@ -15021,6 +15021,8 @@
     if (F.bootDone) return; F.bootDone = true;
     F.supported = typeof win().showDirectoryPicker === 'function'; folderCfg();
     try { await refreshMasterFolder(); } catch (e) {}
+    // 1.92.0: the master-folder panel is off by default (GitHub holds the work). A folder connected earlier is disconnected once; nothing in it is deleted.
+    if (!F.cfg.showPanel && F.handle) { try { await disconnectFolder(); } catch (e) {} }
     try { window.addEventListener('focus', () => { refreshMasterFolder().then(recheckAccess).catch(() => {}); }); } catch (e) {}
     armRegrant(); startWatch(); draw();
   }
@@ -15477,6 +15479,10 @@
     'unknown': ['The editor and the folder differ and Weld has no earlier sync point to tell which is newer.', '#d29922'],
     'no-editor': ['Open the generator\u2019s editor (#edit) to sync it.', '#768390']
   };
+  function hiddenFolderSection(parent) {
+    note(parent, 'The local master folder is switched off: your work lives in the GitHub repo (GitHub tab > Push). Turn this panel on only if you want a local folder copy again; you will have to choose the folder again.');
+    row(parent, [btn('Show folder sync', () => { folderCfg(); F.cfg.showPanel = true; saveFolderCfg(); draw(); }, { mini: true })]);
+  }
   function folderSection(parent) {
     if (!F.supported) { note(parent, 'This browser cannot give web pages a folder to work in. Use Chrome, Edge or another Chromium browser.', { color: '#d29922' }); return; }
     note(parent, 'Master Dev location — choose one folder for all generators in this browser profile. Each generator uses its own subfolder. Open tabs pick up changes within a few seconds. GitHub Push uses its separate owner/repo settings.');
@@ -15627,7 +15633,8 @@
     if (!viewPanel(wrap)) {
       const pend = pendingCount();
       section(wrap, 'proposals', 'Agent proposals', pend ? pend + ' waiting' : S.proposals.length || '', proposalsSection, pend > 0);
-      section(wrap, 'folder', 'Folder sync', F.handle ? (F.plan && STATE_TEXT[F.plan.state] ? F.plan.state : F.name) : 'off', folderSection, true);
+      if (!F.cfg.showPanel) section(wrap, 'folder', 'Folder sync', 'off', hiddenFolderSection);
+      else section(wrap, 'folder', 'Folder sync', F.handle ? (F.plan && STATE_TEXT[F.plan.state] ? F.plan.state : F.name) : 'off', folderSection, true);
       section(wrap, 'bridge', 'Agent bridge (MCP)', B.state, bridgeSection);
       section(wrap, 'agents', 'GitHub agents', '', agentsSection);
       section(wrap, 'refactor', 'Find usages and rename', '', refactorSection);

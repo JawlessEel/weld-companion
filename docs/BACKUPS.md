@@ -124,3 +124,7 @@ Everything Weld keeps for you is now a file in your GitHub repo, in `_weld-data/
 - **First run on a computer:** older copies in browser storage (and 1.89.x files in the backup folder) are imported only for keys the repo does not have. Any other older copy is filed under `_weld-data/legacy/` and removed from storage, so an old computer can never bring back something you deleted. History is in git.
 - **Not saved without GitHub:** with no owner, repo and token set, edits to this data are refused with a message. Use a private repo: your notes and generator storage are stored there as readable JSON.
 - Save in Perchance and Push still write the generator's panels as before.
+
+## Dev master folder (Weld 1.92.0)
+
+Since your work lives in the GitHub repo, the Dev tab's **Folder sync** panel is off by default. On first load a previously connected master folder is disconnected (the folder and its files are not touched). To use a local folder again, open Dev > Folder sync > **Show folder sync**, then choose the folder again. The setting is `showPanel` inside the stored `folderSync` config.

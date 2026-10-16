@@ -118,6 +118,12 @@ const norm = t => t.replace(/\r\n?/g, '\n');
 (async () => {
   // ============================================================ folder sync
   render(); await sleep(30); render();
+  // 1.92.0: the master-folder panel is off by default and can be switched back on.
+  assert.doesNotMatch(bodyText(), /Choose folder/);
+  openSection('Folder sync'); assert.match(bodyText(), /switched off/);
+  assert.equal(store.get('folderSync') && store.get('folderSync').showPanel, undefined);
+  click('Show folder sync'); await sleep(30); render();
+  assert.equal(store.get('folderSync').showPanel, true, 'choice is remembered');
   assert.match(bodyText(), /Choose folder/);
   openSection('Folder sync');
   click('Choose folder…'); await until(() => dev.state.F.handle, 2000, 'folder');
