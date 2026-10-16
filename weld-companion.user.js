@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.89.0
+// @version      1.89.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -18785,6 +18785,8 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
         try {
           const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, true);
           if (await exists(dir, t.name)) { res.skipped++; res.saved.push(row.gmKey); continue; }
+          // Reads return the newest-written chat index, so an old index from browser storage must never be stamped as new.
+          if (C.parseKey(rec.key).kind === 'chat-index' && (await ptNames(dir)).some(n => /^index-/.test(n))) { res.skipped++; continue; }
           const w = await (await dir.getFileHandle(t.name, { create: true })).createWritable();
           await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close(); res.written++; res.saved.push(row.gmKey);
         } catch (e) { res.failed++; if (e && e.name === 'NotAllowedError') { F.perm = 'prompt'; break; } }
@@ -18832,8 +18834,19 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     try {
       const t = C.backupTarget(rec), dir = await dirAt(F.handle, t.dir, true);
       const there = await exists(dir, t.name);
-      if (p.kind !== 'chat-index' && there) return { ok: true, where: 'folder' };
+      let oldText = null;
+      if (there && p.kind === 'chat-copy') {
+        // Same chat copy id saved again: if the content changed, the new one must win (reads return this file), so the
+        // previous version is kept under chat/_history first. Identical content is a no-op.
+        try { oldText = await (await (await dir.getFileHandle(t.name)).getFile()).text(); } catch (e) { oldText = null; }
+        let oldDoc = null; try { oldDoc = JSON.parse(oldText); } catch (e) {}
+        if (oldDoc && oldDoc.record && C.canonical(oldDoc.record.value) === C.canonical(value)) return { ok: true, where: 'folder' };
+      } else if (p.kind !== 'chat-index' && there) return { ok: true, where: 'folder' };
       if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
+      if (oldText !== null) {
+        const hdir = await dirAt(F.handle, [p.gen, 'chat', '_history'], true), stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+        if (!await fkWriteVerified(hdir, t.name.replace(/\.json$/, '') + '-' + stamp + '-' + C.hash8(oldText).slice(0, 4) + '.json', oldText)) return { ok: false, code: 'folder-write-failed', reason: 'could not keep the previous version, so the chat copy was not replaced' };
+      }
       if (!there && (await ptNames(dir)).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' files in its backup folder; move or delete some there first' };
       const w = await (await dir.getFileHandle(t.name, { create: true })).createWritable();
       await w.write(JSON.stringify({ format: 'weld-backup-record', v: 1, exportedAt: Date.now(), record: C.entryFor(rec) }, null, 2)); await w.close();
