@@ -70,21 +70,39 @@ const B = require('../src/github-backup');
   vm.runInContext('var localCollect = ' + localAdapter, collectorContext);
   await collectorContext.localCollect('dad', { dsl: opts.dslPath, html: opts.htmlPath }, { dsl: opts.dsl, html: opts.html }, true);
   assert.equal(collected[1].includeCache, true, 'local download continues to capture requested assets');
-  const panelPushes = [];
-  const rollbackContext = { console, genName: () => 'dad', ghToken: () => 'test-token',
-    dslView: () => ({ state: { doc: { toString: () => 'output' } } }), htmlView: () => ({ state: { doc: { toString: () => '<p>hi</p>' } } }),
-    ghResolve: () => ({ cfg: { owner: 'o', repo: 'r', branch: 'main', dslPath: '{name}/{name}-top-panel.txt', htmlPath: '{name}/{name}-html-panel.html' } }),
-    window: {}, Date, confirm: () => true, toast() {}, lintHtmlScripts: () => [], ghGateNote: () => '',
-    ghPushStatus: () => ({ step() {}, end() {} }),
-    ghCollectBackup: () => { throw new Error('Restored Push must not collect src or cache'); },
-    ghPushFilesAtomic: (owner, repo, branch, files) => panelPushes.push(files) };
-  vm.createContext(rollbackContext);
-  vm.runInContext(shipped.slice(shipped.indexOf('function pushAsPullRequest('), shipped.indexOf('function ghConfigure(')), rollbackContext);
-  rollbackContext.pushToGitHub(); rollbackContext.pushAsPullRequest();
-  assert.equal(panelPushes.length, 2);
-  for (const files of panelPushes) assert.deepEqual(JSON.parse(JSON.stringify(files)), [
-    { path: 'dad/dad-top-panel.txt', content: 'output' }, { path: 'dad/dad-html-panel.html', content: '<p>hi</p>' }
-  ], 'restored Push and PR contain exactly the two editor panels');
+  // Push / Push as pull request commit the panels plus the generator's src files (when it has a src store).
+  const tick = () => new Promise(r => setTimeout(r, 5));
+  async function pushFlow(mock) {
+    const pushes = [], confirms = [], opts = [], toasts = [];
+    const ctx = { console, Promise, genName: () => 'dad', ghToken: () => 'test-token',
+      dslView: () => ({ state: { doc: { toString: () => 'output' } } }), htmlView: () => ({ state: { doc: { toString: () => '<p>hi</p>' } } }),
+      ghResolve: () => ({ cfg: { owner: 'o', repo: 'r', branch: 'main', dslPath: '{name}/{name}-top-panel.txt', htmlPath: '{name}/{name}-html-panel.html' } }),
+      window: {}, Date, confirm: m => { confirms.push(m); return true; }, toast: m => toasts.push(m), lintHtmlScripts: () => [], ghGateNote: () => '',
+      ghPushStatus: () => ({ step() {}, end() {} }), pageProp: () => mock.srcState, ghCollectBackup: mock.collect || (() => { throw new Error('must not collect'); }),
+      ghPushFilesAtomic: (owner, repo, branch, files, token, msg, cb, o) => { pushes.push(files); opts.push(o); } };
+    vm.createContext(ctx);
+    vm.runInContext(shipped.slice(shipped.indexOf('function ghPushPayload('), shipped.indexOf('function ghPushFilesAtomic(')) +
+      shipped.slice(shipped.indexOf('function pushAsPullRequest('), shipped.indexOf('function ghConfigure(')), ctx);
+    ctx.pushToGitHub(); ctx.pushAsPullRequest(); await tick();
+    return { pushes, confirms, opts, toasts };
+  }
+  const panelsOnly = [{ path: 'dad/dad-top-panel.txt', content: 'output' }, { path: 'dad/dad-html-panel.html', content: '<p>hi</p>' }];
+  const plain = await pushFlow({});
+  assert.equal(plain.pushes.length, 2);
+  for (const files of plain.pushes) assert.deepEqual(JSON.parse(JSON.stringify(files)), panelsOnly, 'a generator without src pushes exactly the two panels');
+  const srcFiles = panelsOnly.concat([{ path: 'dad/src/a.js', encoding: 'base64', read: async () => 'AP8B' }, { path: 'dad/.weld-backup/manifest.json', read: () => '{}' }]);
+  let validated = 0;
+  const withSrc = await pushFlow({ srcState: {}, collect: async () => ({ files: srcFiles, bytes: 3, validate: () => { validated++; }, manifest: { files: [{ path: 'dad/src/a.js' }] } }) });
+  assert.equal(withSrc.pushes.length, 2);
+  for (const files of withSrc.pushes) assert.equal(files, srcFiles, 'Push and PR commit panels + src together (one atomic commit)');
+  for (const m of withSrc.confirms) assert.ok(/1 src file/.test(m) && m.includes('dad/src/a.js') && /nothing is deleted/.test(m), 'confirmation lists the src files');
+  withSrc.opts[0].validate(); assert.equal(validated, 1, 'validate guard is passed to the atomic push');
+  assert.ok(!JSON.stringify(withSrc.confirms).includes('test-token'));
+  const emptySrc = await pushFlow({ srcState: {}, collect: async () => ({ files: srcFiles, bytes: 0, manifest: { files: [] } }) });
+  for (const files of emptySrc.pushes) assert.deepEqual(JSON.parse(JSON.stringify(files)), panelsOnly, 'empty src store: panels only');
+  const failed = await pushFlow({ srcState: {}, collect: async () => { throw new Error('Secret-shaped project content detected'); } });
+  for (const files of failed.pushes) assert.deepEqual(JSON.parse(JSON.stringify(files)), panelsOnly, 'unreadable src falls back to the panels');
+  for (const m of failed.confirms) assert.ok(/src files NOT included: Secret-shaped/.test(m), 'fallback is announced in the confirmation');
   const uploader = shipped.slice(shipped.indexOf('function ghApiError('), shipped.indexOf('function ghGateNote('));
   async function push(file, validate, mock = {}) {
     const calls = [], progress = [];
@@ -135,7 +153,7 @@ const B = require('../src/github-backup');
     assert.equal(gitSha('hello\n'), 'ce013625030ba8dba906f756967f9e9ca394464a', 'git blob hash formula');
     async function hashedPush(files, onGitHub) {
       const calls = [];
-      const context = { console, Promise, setInterval, clearInterval, crypto: webcrypto, TextEncoder, ghApi(method, url, token, body, cb) {
+      const context = { console, Promise, setInterval, clearInterval, crypto: webcrypto, TextEncoder, atob, ghApi(method, url, token, body, cb) {
         calls.push({ method, url, body });
         if (method === 'GET' && url.includes('/ref/')) return cb(null, 200, { object: { sha: 'parent' } });
         if (method === 'GET' && url.includes('/commits/')) return cb(null, 200, { tree: { sha: 'tree' } });
@@ -155,6 +173,14 @@ const B = require('../src/github-backup');
     assert.equal(oneChanged.result, 'updated'); assert.deepEqual(oneChanged.blobs, ['<p>big</p>']);
     const tree = oneChanged.calls.find(c => c.method === 'POST' && c.url.endsWith('/trees')).body.tree;
     assert.equal(tree.length, 2); assert.equal(tree[0].sha, gitSha('top ü'));
+    // Lazy base64 src files: unchanged (same git hash of the bytes) are skipped, changed ones uploaded.
+    const withBin = pair.concat([{ path: 'dad/src/x.bin', encoding: 'base64', read: async () => 'AP8B' }]);
+    const binSame = await hashedPush(withBin, { 'a.txt': 'top ü', 'b.html': '<p>big</p>', 'x.bin': Buffer.from([0, 255, 1]) });
+    assert.equal(binSame.result, 'unchanged'); assert.equal(binSame.blobs.length, 0);
+    const binOld = await hashedPush(withBin, { 'a.txt': 'top ü', 'b.html': '<p>big</p>', 'x.bin': Buffer.from([9]) });
+    assert.equal(binOld.result, 'updated'); assert.deepEqual(binOld.blobs, ['AP8B']);
+    assert.ok(binOld.calls.some(c => c.method === 'GET' && c.url.includes('trees/parent:dad/src')), 'src folders are listed to compare hashes');
+    assert.ok(binOld.calls.every(c => c.method !== 'DELETE') && binOld.calls.find(c => c.url.endsWith('/trees') && c.method === 'POST').body.tree.every(t => t.sha), 'nothing is deleted');
     const fresh = await hashedPush(pair, {});
     assert.equal(fresh.result, 'updated'); assert.equal(fresh.blobs.length, 2);
   }

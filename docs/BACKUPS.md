@@ -1,22 +1,30 @@
 # Backups tab
 
-## GitHub backup (Weld 1.79.1)
+## GitHub backup (Weld 1.91.0)
 
-The GitHub tab's **Push** and **Push as pull request** have been restored to their
-earlier two-panel behavior: the DSL/top panel and HTML panel only. They do not
-collect `src/` files, browser caches, downloaded models or OPFS files. Existing
-repository mappings and the saved token are preserved. Each push still commits
-both panels atomically, so a failed upload cannot update only one panel.
+The GitHub tab's **Push** and **Push as pull request** commit the two editor panels
+**and the open generator's `src/` files** into the generator's repo folder:
+`<name>/<name>-top-panel.txt`, `<name>/<name>-html-panel.html` and
+`<name>/src/<path>` for every src file. One atomic commit holds all of it, so a
+failed upload cannot leave half a generator. The confirmation lists the src files
+and their count. Files whose git blob hash already matches the branch are skipped;
+nothing in the repo is deleted; `_weld-data/` is never touched. Src files over
+4 MiB are stored as verified parts under `<name>/.weld-backup/` with a
+`manifest.json` and `restore.py` (same format as below). Secret-shaped content
+(private keys, GitHub/OpenAI/Anthropic/Hugging Face tokens) or `.env`/`.pem`/`.key`
+paths abort the push. Browser caches, models, OPFS and chat databases are never
+included. A generator with no src store pushes just the two panels; if src cannot
+be read, the confirmation says so and offers the two panels only. Not yet tried in
+a real userscript manager.
 
 The earlier Tampermonkey request options are restored without a native timeout
 option; an explicit 35-second watchdog remains to stop requests that never call
-a handler. This rollback has not yet been verified in the installed manager.
+a handler.
 
 ### Restoring older full-project backups
 
 Full-project backups made with earlier versions use `.weld-backup/manifest.json`
-and verified 4 MiB parts for large files. Existing backup files are retained by
-the restored two-panel Push; it does not delete older project or asset files.
+and verified 4 MiB parts for large files. Push never deletes older project or asset files.
 
 To restore the exact source bytes from a downloaded/cloned backup,
 run this inside the generator's folder (Python 3, standard library only):

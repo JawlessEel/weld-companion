@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.90.1
+// @version      1.91.0
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -1016,7 +1016,7 @@
   function ghBlobSha(text) {
     try {
       if (!ghBlobShaAvailable()) return Promise.resolve(null);
-      var enc = new TextEncoder(), body = enc.encode(String(text)), head = enc.encode('blob ' + body.length + '\0');
+      var enc = new TextEncoder(), body = (text instanceof Uint8Array) ? text : enc.encode(String(text)), head = enc.encode('blob ' + body.length + '\0');
       var all = new Uint8Array(head.length + body.length); all.set(head); all.set(body, head.length);
       return crypto.subtle.digest('SHA-1', all).then(function (buf) {
         return Array.prototype.map.call(new Uint8Array(buf), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
@@ -1056,6 +1056,24 @@
       + '\nIncludes editor panels and selected src files only.'
       + '\nBrowser caches, downloaded models, OPFS, cookies, credentials and private chat databases are not included.'
       + (backup.manifest.unavailable.length ? '\nUnavailable: ' + backup.manifest.unavailable.join('; ') : '');
+  }
+  // What Push commits: both editor panels plus (when the generator has a src store) every src file under the
+  // generator's folder, via the shared collector (4 MiB parts, secret scan, no caches/models). Never rejects:
+  // if src cannot be read the panels are still offered, with a warning in the confirmation.
+  function ghPushPayload(name, dslP, htmlP, dsl, html) {
+    var panels = [{ path: dslP, content: dsl }, { path: htmlP, content: html }], none = { files: panels, validate: null, note: '' };
+    var hasSrc = false; try { hasSrc = !!pageProp('srcState'); } catch (e) {}
+    if (!hasSrc) return Promise.resolve(none);
+    return ghCollectBackup(name, dslP, htmlP, dsl, html, true, false).then(function (b) {
+      if (!b || !b.manifest || !b.manifest.files || !b.manifest.files.length) return none;
+      var paths = b.manifest.files.map(function (r) { return r.path; });
+      var note = '\n\nAlso commits ' + paths.length + ' src file(s), ' + (b.bytes / 1048576).toFixed(2) + ' MiB (' + b.files.length + ' GitHub file(s) incl. manifest):\n'
+        + paths.slice(0, 15).map(function (x) { return '  ' + x; }).join('\n') + (paths.length > 15 ? '\n  … and ' + (paths.length - 15) + ' more' : '')
+        + '\nUnchanged files are skipped; nothing is deleted. Files over 4 MiB are stored as verified parts.';
+      return { files: b.files, validate: b.validate, note: note };
+    }, function (e) {
+      return { files: panels, validate: null, note: '\n\n⚠ src files NOT included: ' + ((e && e.message) || 'could not read them') + '. Only the two panels will be committed.' };
+    });
   }
   // Commit both editor panes through Git's blob/tree/commit/ref APIs, rather than
   // two Contents-API PUTs. If any request fails before the final ref update, the
@@ -1144,7 +1162,16 @@
             blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
             putBlob();
           }); }
-          if (f.read) Promise.resolve().then(f.read).then(send).catch(function () { cb(new Error('Backup asset read failed; branch not updated')); });
+          // Lazy src files are read first, then hashed (bytes for base64, text otherwise) so an unchanged one is not re-uploaded.
+          if (f.read) Promise.resolve().then(f.read).then(function (content) {
+            if (!have[f.path] || !ghBlobShaAvailable()) return send(content);
+            var bytes = null;
+            try { if (f.encoding === 'base64') bytes = Uint8Array.from(atob(content), function (c) { return c.charCodeAt(0); }); } catch (e) { return send(content); }
+            return ghBlobSha(bytes || content).then(function (sha) {
+              if (sha && sha === have[f.path]) { skipped++; progress('Unchanged: ' + f.path + ' (' + i + ' of ' + files.length + ')'); blobs.push({ path: f.path, mode: '100644', type: 'blob', sha: sha }); putBlob(); }
+              else send(content);
+            });
+          }).catch(function () { cb(new Error('Backup asset read failed; branch not updated')); });
           else if (!have[f.path] || (f.encoding && f.encoding !== 'utf-8')) send(f.content);
           // GitHub already holds a file at this path: upload only if its git hash differs from ours.
           else ghBlobSha(f.content).then(function (sha) {
@@ -1158,7 +1185,7 @@
         function listExisting(next) {
           if (!ghBlobShaAvailable()) return next();
           var dirs = [];
-          files.forEach(function (f) { if (f.read || (f.encoding && f.encoding !== 'utf-8')) return; var d = f.path.indexOf('/') === -1 ? '' : f.path.slice(0, f.path.lastIndexOf('/')); if (dirs.indexOf(d) === -1) dirs.push(d); });
+          files.forEach(function (f) { var d = f.path.indexOf('/') === -1 ? '' : f.path.slice(0, f.path.lastIndexOf('/')); if (dirs.indexOf(d) === -1) dirs.push(d); });
           if (!dirs.length) return next();
           progress('Comparing with ' + branch + '…');
           var k = 0;
@@ -1366,16 +1393,17 @@
     var branch = DC ? DC.pushBranchName(name) : ('weld/' + name + '-' + Date.now());
     var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
     var dslP = R.cfg.dslPath.replace(/\{name\}/g, function () { return name; }), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, function () { return name; });
+    ghPushPayload(name, dslP, htmlP, dsl, html).then(function (P) {
     var msg = 'Open a pull request for “' + name + '”?\n\nrepo: ' + R.cfg.owner + '/' + R.cfg.repo + '\nnew branch: ' + branch + '  →  into ' + base + '\nDSL  → ' + dslP + '\nHTML → ' + htmlP
-      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + ghGateNote(name, dsl, html);
+      + '\n\n' + base + ' is NOT changed until you merge the pull request.' + P.note + ghGateNote(name, dsl, html);
     if (!confirm(msg)) { toast('Cancelled'); return; }
     var status = ghPushStatus('Creating branch and pull request for ' + name + '…');
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, 'Update ' + name + ' via Weld Companion', function (err, result) {
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, base, P.files, token, 'Update ' + name + ' via Weld Companion', function (err, result) {
       if (err) { console.error('[weld pr]', err.message); status.end('✗ Could not create the branch: ' + err.message + ' ' + base + ' was not changed.'); return; }
       if (result === 'unchanged') { status.end('✓ Nothing to propose: ' + base + ' already has this exact version of ' + name + '. No branch or pull request was made.', null, null); return; }
       status.step('Opening the pull request…');
       ghApi('POST', '/repos/' + R.cfg.owner + '/' + R.cfg.repo + '/pulls', token, { title: 'Update ' + name + ' via Weld Companion', head: branch, base: base,
-        body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`.' }, function (e2, st, pr) {
+        body: 'Created by Weld Companion from the editor.\n\nFiles: `' + dslP + '`, `' + htmlP + '`' + (P.files.length > 2 ? ' and ' + (P.files.length - 2) + ' src file(s) in the same folder.' : '.') }, function (e2, st, pr) {
         if (e2 || (st !== 201 && st !== 200) || !pr || !pr.html_url) {
           status.end('⚠ Branch ' + branch + ' was created, but the pull request failed (' + ((pr && pr.message) || e2 && e2.message || st) + '). Open it on GitHub.',
             'https://github.com/' + R.cfg.owner + '/' + R.cfg.repo + '/compare/' + base + '...' + branch, 'Open on GitHub'); return;
@@ -1383,7 +1411,8 @@
         try { copyText(pr.html_url); } catch (e) {}
         status.end('✓ Pull request opened for ' + name + ' (link copied).', pr.html_url, 'View pull request');
       });
-    }, { newBranch: branch, onProgress: function (t) { status.step(t); } });
+    }, { newBranch: branch, validate: P.validate, onProgress: function (t) { status.step(t); } });
+    }, function (e) { toast('Push cancelled: ' + ((e && e.message) || 'could not prepare files')); });
   }
   function pushToGitHub(over) {
     var name = genName();
@@ -1401,11 +1430,12 @@
     var branch = R.cfg.branch || 'main';
     var dsl = mt.state.doc.toString(), html = ot.state.doc.toString();
     var dslP = R.cfg.dslPath.replace(/\{name\}/g, name), htmlP = R.cfg.htmlPath.replace(/\{name\}/g, name);
+    ghPushPayload(name, dslP, htmlP, dsl, html).then(function (P) {
     var confirmMsg = 'Push \u201C' + name + '\u201D to GitHub?' + (R.overridden ? '  [custom mapping]' : '') + '\n\n'
       + 'repo: ' + R.cfg.owner + '/' + R.cfg.repo + '@' + branch + '\n'
       + 'DSL  \u2192 ' + dslP + '   (' + dsl.length + ' chars)\n'
       + 'HTML \u2192 ' + htmlP + '   (' + html.length + ' chars)\n\n'
-      + 'This COMMITS over the GitHub copies of these two files.';
+      + 'This COMMITS over the GitHub copies of these files.' + P.note;
     var pushLint = lintHtmlScripts();
     if (pushLint.length) { console.warn('[weld lint]', pushLint); confirmMsg += '\n\n\u26A0 ' + pushLint.length + ' JavaScript problem(s) in the HTML pane (see console) \u2014 pushing commits them as-is.'; }
     confirmMsg += ghGateNote(name, dsl, html);
@@ -1415,12 +1445,13 @@
     var t0 = Date.now();
     function took() { var s = Math.round((Date.now() - t0) / 1000); return s < 5 ? '' : ' Took ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's') + '.'; }
     var commitMsg = 'Update ' + name + ' via Weld Companion';   // sent to GitHub; no token, no local paths
-    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, [{ path: dslP, content: dsl }, { path: htmlP, content: html }], token, commitMsg, function (err, result, info) {
+    ghPushFilesAtomic(R.cfg.owner, R.cfg.repo, branch, P.files, token, commitMsg, function (err, result, info) {
       if (err) { console.error('[weld push]', err.message); status.end('\u2717 Push failed: ' + err.message + took()); return; }
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
       if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.' + took(), info && info.url, 'View latest commit'); return; }
       status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.' + took(), info && info.url, 'View commit');
-    }, { onProgress: function (t) { status.step(t); } });
+    }, { validate: P.validate, onProgress: function (t) { status.step(t); } });
+    }, function (e) { toast('Push cancelled: ' + ((e && e.message) || 'could not prepare files')); });
   }
   function ghConfigure() {
     var cfg = ghCfg();
