@@ -1,6 +1,6 @@
 # Backups tab
 
-## GitHub backup (Weld 1.91.0)
+## GitHub backup (Weld 1.91.2)
 
 The GitHub tab's **Push** and **Push as pull request** commit the two editor panels
 **and the open generator's `src/` files** into the generator's repo folder:
@@ -13,7 +13,7 @@ nothing in the repo is deleted; `_weld-data/` is never touched. Src files over
 `manifest.json` and `restore.py` (same format as below). Secret-shaped content
 (private keys, GitHub/OpenAI/Anthropic/Hugging Face tokens) or `.env`/`.pem`/`.key`
 paths abort the push. Browser caches, models, OPFS and chat databases are never
-included. A generator with no src store pushes just the two panels; if src cannot
+included. **Few requests:** Weld reads the branch head and the generator folder's hashes in two requests, skips unchanged files, then sends the changed ones as GraphQL `createCommitOnBranch` additions in batches of about 4.5 MB (one request per batch, not one per file); the progress box shows "batch k of n". If everything fits in one batch the push is a single atomic commit; if it needs more, the confirmation warns that it is not atomic, the two panels go in the last commit, and a stopped push can simply be repeated (committed batches are skipped). A generator with no src store pushes just the two panels; if src cannot
 be read, the confirmation says so and offers the two panels only. Not yet tried in
 a real userscript manager.
 

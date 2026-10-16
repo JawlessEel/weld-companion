@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.91.1
+// @version      1.91.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -1066,10 +1066,11 @@
     if (!hasSrc) return Promise.resolve(none);
     return ghCollectBackup(name, dslP, htmlP, dsl, html, true, false).then(function (b) {
       if (!b || !b.manifest || !b.manifest.files || !b.manifest.files.length) return none;
-      var paths = b.manifest.files.map(function (r) { return r.path; });
+      var paths = b.manifest.files.map(function (r) { return r.path; }), commits = Math.ceil(b.bytes * 4 / 3 / 4500000);
       var note = '\n\nAlso commits ' + paths.length + ' src file(s), ' + (b.bytes / 1048576).toFixed(2) + ' MiB (' + b.files.length + ' GitHub file(s) incl. manifest):\n'
         + paths.slice(0, 15).map(function (x) { return '  ' + x; }).join('\n') + (paths.length > 15 ? '\n  … and ' + (paths.length - 15) + ' more' : '')
-        + '\nUnchanged files are skipped; nothing is deleted. Files over 4 MiB are stored as verified parts.';
+        + '\nUnchanged files are skipped; nothing is deleted. Files over 4 MiB are stored as verified parts.'
+        + (commits > 1 ? '\n\n⚠ Up to ' + commits + ' commits are needed (about 4.5 MB each), so this is NOT one atomic commit; the two panels go in the last one. If it stops midway, the earlier commits stay and a retry skips them.' : '');
       return { files: b.files, validate: b.validate, note: note };
     }, function (e) {
       return { files: panels, validate: null, note: '\n\n⚠ src files NOT included: ' + ((e && e.message) || 'could not read them') + '. Only the two panels will be committed.' };
@@ -1133,6 +1134,7 @@
     var fastOk = !(opts && (opts.newBranch || opts.transport === 'rest')) && files.length > 0 && ghBlobShaAvailable() && typeof btoa === 'function'
       && files.every(function (f) { return !f.read && (!f.encoding || f.encoding === 'utf-8') && typeof f.content === 'string'; });
     if (fastOk) return ghPushGraphQL(rest);
+    if (!fastOk && files.some(function (f) { return f.read; }) && !(opts && opts.transport === 'rest') && ghBlobShaAvailable() && typeof btoa === 'function' && typeof atob === 'function') return ghPushBatched(rest);
     rest();
     function rest() {
     progress('Checking ' + o + '/' + repo + '@' + branch + '…');
@@ -1241,6 +1243,86 @@
       });
     });
     }
+    // Src push: a first push can be hundreds of files and every Tampermonkey-relayed request costs ~20-30s, so files
+    // go in through GraphQL createCommitOnBranch (base64 additions) in batches under ~4.5 MB, not one blob each. The
+    // existing hashes of the generator folder come from ONE recursive tree read, so unchanged files are skipped.
+    // opts.last lists paths (the two panels) that go in the final commit. More than one batch means more than one commit.
+    function ghPushBatched(fallback) {
+      var LIMIT = 4500000, target = (opts && opts.newBranch) || branch, last = (opts && opts.last) || [];
+      function gql(query, variables, done, tries) { call('POST', '/graphql', { query: query, variables: variables }, done, tries); }
+      var hq = 'query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){target{oid ...on Commit{url parents(first:1){nodes{oid}}}}}}}';
+      function readHead(ref, done) {
+        gql(hq, { owner: o, name: repo, ref: 'refs/heads/' + ref }, function (err, st, json) {
+          var r = !err && st === 200 && json && !json.errors && json.data && json.data.repository && json.data.repository.ref && json.data.repository.ref.target;
+          done(err, r && r.oid ? { oid: r.oid, url: r.url, parent: r.parents && r.parents.nodes && r.parents.nodes[0] && r.parents.nodes[0].oid } : null);
+        }, 2);
+      }
+      var dirs = files.map(function (f) { return f.path.split('/').slice(0, -1); }), common = dirs[0] || [];
+      dirs.forEach(function (d) { var n = 0; while (n < common.length && n < d.length && common[n] === d[n]) n++; common = common.slice(0, n); });
+      var dir = common.join('/');
+      progress('Checking ' + o + '/' + repo + '@' + branch + '…');
+      readHead(branch, function (e0, head) {
+        if (!head) return fallback();
+        function afterHave(have) {
+          var items = [], i = 0, skipped = 0;
+          (function nextFile() {
+            if (i >= files.length) return planAndCommit(items, skipped);
+            var f = files[i++];
+            progress('Reading ' + f.path + ' (' + i + ' of ' + files.length + ')…');
+            Promise.resolve().then(function () { return f.read ? f.read() : f.content; }).then(function (content) {
+              var b64 = f.encoding === 'base64' ? content : ghB64(content), bytes = null;
+              if (f.encoding === 'base64') bytes = Uint8Array.from(atob(content), function (c) { return c.charCodeAt(0); });
+              return ghBlobSha(bytes || content).then(function (sha) {
+                if (sha && have[f.path] === sha) skipped++; else items.push({ path: f.path, b64: b64, last: last.indexOf(f.path) !== -1 });
+                nextFile();
+              });
+            }).catch(function () { cb(new Error('Backup asset read failed; branch not updated')); });
+          })();
+        }
+        function planAndCommit(items, skipped) {
+          try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
+          if (!items.length) return cb(null, 'unchanged', info(head.oid, head.url));
+          var batches = ghPlanBatches(items, LIMIT), done = 0, expected = head.oid, lastInfo = null;
+          progress(items.length + ' changed file(s), ' + skipped + ' unchanged, in ' + batches.length + ' commit(s)…');
+          function commitNext() {
+            if (done >= batches.length) return cb(null, (opts && opts.newBranch) ? 'created' : 'updated', lastInfo);
+            var b = batches[done++], n = batches.length;
+            progress('Committing batch ' + done + ' of ' + n + ' (' + b.length + ' file(s))…');
+            var input = { branch: { repositoryNameWithOwner: o + '/' + repo, branchName: target }, message: { headline: n > 1 ? msg + ' (part ' + done + ' of ' + n + ')' : msg }, expectedHeadOid: expected,
+              fileChanges: { additions: b.map(function (it) { return { path: it.path, contents: it.b64 }; }) } };
+            gql('mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid url}}}', { input: input }, function (err, st, json) {
+              var c = !err && st === 200 && json && !json.errors && json.data && json.data.createCommitOnBranch && json.data.createCommitOnBranch.commit;
+              if (c && c.oid) { expected = c.oid; lastInfo = info(c.oid, c.url); return commitNext(); }
+              var later = done > 1 ? ' ' + (done - 1) + ' earlier commit(s) are already on ' + target + '.' : '';
+              if (!err && done === 1 && !(opts && opts.newBranch)) return fallback();   // refused before anything was written: REST retries cleanly
+              if (!err) return cb(new Error('Commit refused by GitHub: ' + ((json && json.errors && json.errors[0] && json.errors[0].message) || ('HTTP ' + st)) + '.' + later));
+              progress('No reply from GitHub; checking whether ' + target + ' was updated…');
+              readHead(target, function (e2, now) {
+                if (now && now.oid !== expected && now.parent === expected) { expected = now.oid; lastInfo = info(now.oid, now.url); return commitNext(); }
+                if (now && now.oid === expected) return cb(new Error('Commit: ' + err.message + ' The batch was not applied.' + later));
+                cb(new Error('Commit: ' + err.message + ' GitHub could not confirm whether the push landed; open the repo to check before retrying.' + later));
+              });
+            }, 1);
+          }
+          if (opts && opts.newBranch) {
+            if (!/^[\w.\/-]{1,120}$/.test(opts.newBranch) || /\.\.|\/\/|\.lock$|^\/|\/$/.test(opts.newBranch)) return cb(new Error('POST branch: Unsafe branch name'));
+            progress('Creating branch ' + opts.newBranch + '…');
+            return api('POST', 'refs', { ref: 'refs/heads/' + opts.newBranch, sha: head.oid }, function (eR, sR, made) {
+              if (eR || sR !== 201) return fail('POST branch', eR, sR, made);
+              commitNext();
+            });
+          }
+          commitNext();
+        }
+        if (!dir) return afterHave({});
+        progress('Comparing with ' + branch + '…');
+        api('GET', 'trees/' + encodeURIComponent(head.oid) + ':' + dir.split('/').map(encodeURIComponent).join('/') + '?recursive=1', null, function (eT, sT, t) {
+          var have = {};
+          if (!eT && sT === 200 && t && t.tree && t.tree.forEach && !t.truncated) t.tree.forEach(function (x) { if (x && x.type === 'blob' && x.sha) have[dir + '/' + x.path] = x.sha; });
+          afterHave(have);
+        });
+      });
+    }
     function ghPushGraphQL(fallback) {
       var head = null, names = files.map(function (f, n) { return 'f' + n; });
       function gql(query, variables, done, tries) { call('POST', '/graphql', { query: query, variables: variables }, done, tries); }
@@ -1284,6 +1366,17 @@
         });
       });
     }
+  }
+  // Split changed files into commits of at most ~limit base64 chars; items flagged last (the panels) go in the final commit.
+  // A file larger than the limit gets a commit of its own.
+  function ghPlanBatches(items, limit) {
+    var ordered = items.filter(function (x) { return !x.last; }).concat(items.filter(function (x) { return x.last; })), out = [], cur = [], size = 0;
+    ordered.forEach(function (it) {
+      if (cur.length && size + it.b64.length > limit) { out.push(cur); cur = []; size = 0; }
+      cur.push(it); size += it.b64.length;
+    });
+    if (cur.length) out.push(cur);
+    return out;
   }
   // UTF-8 text -> base64 (GraphQL file contents), chunked so large panels don't overflow the argument limit.
   function ghB64(text) {
@@ -1411,7 +1504,7 @@
         try { copyText(pr.html_url); } catch (e) {}
         status.end('✓ Pull request opened for ' + name + ' (link copied).', pr.html_url, 'View pull request');
       });
-    }, { newBranch: branch, validate: P.validate, onProgress: function (t) { status.step(t); } });
+    }, { newBranch: branch, validate: P.validate, last: [dslP, htmlP], onProgress: function (t) { status.step(t); } });
     }, function (e) { toast('Push cancelled: ' + ((e && e.message) || 'could not prepare files')); });
   }
   function pushToGitHub(over) {
@@ -1450,7 +1543,7 @@
       console.log('[weld github] pushed atomically', { name: name, dsl: dslP, html: htmlP, result: result, branch: branch });
       if (result === 'unchanged') { status.end('\u2713 Already up to date: ' + where + ' has this exact version of ' + name + '. Nothing new to commit.' + took(), info && info.url, 'View latest commit'); return; }
       status.end('\u2713 Pushed ' + name + ' to ' + where + (info && info.sha ? ' (commit ' + String(info.sha).slice(0, 7) + ')' : '') + '.' + took(), info && info.url, 'View commit');
-    }, { validate: P.validate, onProgress: function (t) { status.step(t); } });
+    }, { validate: P.validate, last: [dslP, htmlP], onProgress: function (t) { status.step(t); } });
     }, function (e) { toast('Push cancelled: ' + ((e && e.message) || 'could not prepare files')); });
   }
   function ghConfigure() {

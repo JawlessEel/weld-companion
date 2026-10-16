@@ -232,6 +232,62 @@ const B = require('../src/github-backup');
     const lostCommit = await gqlPush(pair, {}, { stallCommit: true });
     assert.match(lostCommit.error.message, /branch was not changed/); assert.equal(lostCommit.rest.length, 0, 'a commit that may have landed is never resent');
   }
+  // Src push batching: changed files go through createCommitOnBranch in size-bounded batches, panels in the last commit.
+  {
+    const gitSha = s => require('crypto').createHash('sha1').update(Buffer.concat([Buffer.from('blob ' + Buffer.byteLength(s) + '\0'), Buffer.from(s)])).digest('hex');
+    async function batchPush(files, onGitHub, mock = {}, o = {}) {
+      const calls = [], progress = [];
+      const context = { console, Promise, setInterval, clearInterval, crypto: webcrypto, TextEncoder, atob, btoa, Uint8Array, ghApi(method, url, token, body, cb) {
+        calls.push({ method, url, body });
+        if (url === '/graphql' && /^query/.test(body.query)) return cb(null, 200, { data: { repository: { ref: { target: { oid: 'head0', url: 'u', parents: { nodes: [{ oid: 'p' }] } } } } } });
+        if (url === '/graphql') {
+          const n = calls.filter(c => c.url === '/graphql' && /^mutation/.test(c.body.query)).length;
+          if (mock.refuse) return cb(null, 200, { errors: [{ message: 'nope' }] });
+          return cb(null, 200, { data: { createCommitOnBranch: { commit: { oid: 'c' + n, url: 'https://github.com/o/r/commit/c' + n } } } });
+        }
+        if (method === 'GET' && url.includes('?recursive=1')) return cb(null, 200, { tree: Object.entries(onGitHub).map(([p, c]) => ({ path: p, type: 'blob', sha: gitSha(c) })) });
+        if (method === 'GET' && url.includes('/ref/')) return cb(null, 200, { object: { sha: 'head0' } });
+        if (method === 'GET' && url.includes('/commits/')) return cb(null, 200, { tree: { sha: 'tree' } });
+        if (method === 'POST' && url.endsWith('/trees')) return cb(null, 201, { sha: 'tree2' });
+        cb(null, method === 'POST' ? 201 : 200, { sha: 'new' });
+      } };
+      vm.createContext(context); vm.runInContext(uploader, context);
+      const [error, result, info] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'msg', (e, res, i) => r([e, res, i]), { last: ['dad/p.txt', 'dad/h.html'], onProgress: t => progress.push(t), ...o }));
+      const commits = calls.filter(c => c.url === '/graphql' && /^mutation/.test(c.body.query)).map(c => c.body.variables.input);
+      return { error, result, info, calls, commits, progress, requests: calls.length };
+    }
+    const big = () => 'A'.repeat(3000000);
+    const mk = () => [{ path: 'dad/p.txt', content: 'panel' }, { path: 'dad/h.html', content: '<p>h</p>' },
+      { path: 'dad/src/same.bin', encoding: 'base64', read: async () => 'AP8B' }, { path: 'dad/src/new.bin', encoding: 'base64', read: async () => 'AQID' },
+      { path: 'dad/src/big1.bin', encoding: 'base64', read: async () => big() }, { path: 'dad/src/big2.bin', encoding: 'base64', read: async () => big() }];
+    const gh = { 'src/same.bin': Buffer.from([0, 255, 1]) };
+    const two = await batchPush(mk(), gh);
+    assert.equal(two.error, null); assert.equal(two.result, 'updated'); assert.equal(two.commits.length, 2, 'size-bounded batches');
+    const names = two.commits.map(c => c.fileChanges.additions.map(a => a.path));
+    assert.ok(!names.flat().includes('dad/src/same.bin'), 'unchanged src file skipped by blob sha');
+    assert.deepEqual(JSON.parse(JSON.stringify(names[1].slice(-2))), ['dad/p.txt', 'dad/h.html'], 'panels are in the last commit ' + JSON.stringify(names));
+    assert.equal(two.commits[0].expectedHeadOid, 'head0'); assert.equal(two.commits[1].expectedHeadOid, 'c1', 'commits chain on each other');
+    assert.match(two.commits[0].message.headline, /part 1 of 2/); assert.equal(two.info.sha, 'c2');
+    assert.ok(two.calls.every(c => c.method !== 'DELETE' && !/_weld-data/.test(JSON.stringify(c.body || {}))), 'no deletions, no _weld-data');
+    assert.ok(two.calls.filter(c => c.url.includes('/blobs')).length === 0, 'no per-file blob requests');
+    assert.ok(two.requests <= 6, 'few requests: ' + two.requests);
+    assert.ok(two.progress.some(t => /Committing batch 1 of 2/.test(t)));
+    const small = await batchPush([mk()[0], mk()[1], mk()[2], mk()[3]], gh);
+    assert.equal(small.commits.length, 1); assert.equal(small.commits[0].message.headline, 'msg');
+    assert.equal(small.requests, 3, 'head + tree listing + one commit, regardless of file count');
+    const allSame = await batchPush([{ path: 'dad/p.txt', content: 'panel' }, { path: 'dad/src/same.bin', encoding: 'base64', read: async () => 'AP8B' }], { 'p.txt': 'panel', 'src/same.bin': Buffer.from([0, 255, 1]) });
+    assert.equal(allSame.result, 'unchanged'); assert.equal(allSame.commits.length, 0);
+    const pr = await batchPush(mk().slice(0, 4), gh, {}, { newBranch: 'weld/dad-x' });
+    assert.equal(pr.result, 'created'); assert.equal(pr.commits[0].branch.branchName, 'weld/dad-x');
+    assert.ok(pr.calls.some(c => c.method === 'POST' && c.url.endsWith('/refs') && c.body.sha === 'head0'));
+    const refused = await batchPush(mk().slice(0, 4), gh, { refuse: true });
+    assert.ok(refused.calls.some(c => c.method === 'PATCH') || refused.error, 'refused first commit falls back to REST');
+    let guard = 0;
+    const guarded = await batchPush(mk().slice(0, 4), gh, {}, { validate: () => { guard++; throw new Error('changed'); } });
+    assert.match(guarded.error.message, /changed/); assert.equal(guarded.commits.length, 0); assert.equal(guard, 1);
+    const unreadable = await batchPush([mk()[0], { path: 'dad/src/x', read: async () => { throw new Error('Secret-shaped'); } }], {});
+    assert.match(unreadable.error.message, /branch not updated/); assert.equal(unreadable.commits.length, 0);
+  }
   // A read that gets no reply at all is sent once more, then the push carries on.
   const retried = await push({ path: 'dad/x', content: 'x' }, null, { stallFirst: true });
   assert.equal(retried.error, null); assert.equal(retried.result, 'updated');
