@@ -310,6 +310,7 @@
       if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
       if (oldText !== null) {
         const hdir = await dirAt(F.handle, [p.gen, 'chat', '_history'], true), stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+        if ((await ptNames(hdir)).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' files in its chat history folder; move or delete some there first' };
         if (!await fkWriteVerified(hdir, t.name.replace(/\.json$/, '') + '-' + stamp + '-' + C.hash8(oldText).slice(0, 4) + '.json', oldText)) return { ok: false, code: 'folder-write-failed', reason: 'could not keep the previous version, so the chat copy was not replaced' };
       }
       if (!there && (await ptNames(dir)).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' files in its backup folder; move or delete some there first' };

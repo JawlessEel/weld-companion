@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.89.1
+// @version      1.89.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -18845,6 +18845,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
       if (!ptBudget(caller, Date.now())) return { ok: false, code: 'rate-limited', reason: 'too many vault saves from this generator; try again in a few minutes' };
       if (oldText !== null) {
         const hdir = await dirAt(F.handle, [p.gen, 'chat', '_history'], true), stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+        if ((await ptNames(hdir)).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' files in its chat history folder; move or delete some there first' };
         if (!await fkWriteVerified(hdir, t.name.replace(/\.json$/, '') + '-' + stamp + '-' + C.hash8(oldText).slice(0, 4) + '.json', oldText)) return { ok: false, code: 'folder-write-failed', reason: 'could not keep the previous version, so the chat copy was not replaced' };
       }
       if (!there && (await ptNames(dir)).length >= PT_MAX_FILES) return { ok: false, code: 'folder-full', reason: 'this generator already has ' + PT_MAX_FILES + ' files in its backup folder; move or delete some there first' };
