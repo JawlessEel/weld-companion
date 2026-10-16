@@ -153,7 +153,7 @@ const gh = (() => {
     external: (p, doc) => files.set(p, { text: JSON.stringify(doc), sha: sha() }),
     externalDelete: p => files.delete(p),
     async api(method, path, body) {
-      const m = path.match(/^\/repos\/[^/]+\/[^/]+\/contents\/([^?]+)/); if (!m) return { status: 404, json: null };
+      const m = path.match(/^\/repos\/[^/]+\/[^/]+\/contents\/([^?]+)/); if (!m) return { status: 200, json: { private: true } };
       const p = decodeURIComponent(m[1]);
       if (method === 'GET') {
         if (files.has(p)) return { status: 200, json: { sha: files.get(p).sha, content: b64(files.get(p).text), type: 'file' } };

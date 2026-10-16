@@ -89,10 +89,13 @@
       S.loading = (async () => {
         let any = false;
         try {
+          const meta = await API('GET', base(x));   // personal notes and chats are only stored in a private repo
+          if (meta.status === 200 && meta.json && meta.json.private !== true) throw new Error(x.owner + '/' + x.repo + ' is a public repo, so nothing is stored in it. Use a private repo in Weld > GitHub');
           const r = await API('GET', base(x) + '/contents/' + DIR + q(x));
           let list = [];
           if (r.status === 200 && Array.isArray(r.json)) list = r.json.filter(e => e.type === 'file' && /\.json$/.test(e.name));
           else if (r.status !== 404) throw new Error('GitHub answered ' + r.status + ' listing ' + DIR + (r.status === 401 || r.status === 403 ? ' (check the token has Contents access to this repo)' : ''));
+          const truncated = r.status === 200 && Array.isArray(r.json) && r.json.length >= 1000;   // the directory listing is cut off at 1000 entries
           const seen = new Set();
           for (const e of list) {
             const known = S.names.get(e.name);
@@ -105,7 +108,7 @@
             const raw = JSON.stringify(f.doc.value === undefined ? null : f.doc.value);
             S.cache.set(key, raw); S.base.set(key, raw); any = true;
           }
-          Array.from(S.sha.keys()).forEach(k => { if (!seen.has(k) && !S.pending.has(k)) { S.sha.delete(k); S.cache.delete(k); S.base.delete(k); S.names.delete(fileName(k)); any = true; } });
+          if (!truncated) Array.from(S.sha.keys()).forEach(k => { if (!seen.has(k) && !S.pending.has(k)) { S.sha.delete(k); S.cache.delete(k); S.base.delete(k); S.names.delete(fileName(k)); any = true; } });
           const first = !S.loaded; S.loaded = true; S.error = '';
           if (first) any = true;
         } catch (e) { S.error = 'Could not read Weld data from GitHub: ' + ((e && e.message) || e); }
@@ -148,6 +151,7 @@
         if (r.status === 409 || r.status === 422 || (r.status === 404 && raw === null)) {   // the repo changed under us, or the file is new/gone
           const f = await readFile(x, { name });
           if (!f) { S.sha.delete(key); S.base.delete(key); if (raw === null) { S.cache.delete(key); return; } continue; }   // gone in the repo: write ours as a new file
+          if (!f.doc || f.doc.key !== key) throw new Error('the file name for ' + key + ' is taken by another key; nothing was overwritten');
           const theirsRaw = JSON.stringify(f.doc && f.doc.value !== undefined ? f.doc.value : null), baseRaw = S.base.get(key);
           S.sha.set(key, f.sha);
           if (raw === null) { if (theirsRaw === baseRaw) continue; S.conflicts++; raw = theirsRaw; S.cache.set(key, raw); S.base.set(key, raw); toast('A file you deleted was changed on another computer, so it was kept.', 9000); changed(); return; }

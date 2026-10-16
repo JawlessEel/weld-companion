@@ -31,7 +31,8 @@ const R = require('../src/repo-store.js');
 function fakeGitHub() {
   const files = new Map(); let n = 0, puts = 0;
   const api = async (method, path, body) => {
-    const mt = path.match(/\/contents\/([^?]+)/), p = decodeURIComponent(mt[1]);
+    const mt = path.match(/\/contents\/([^?]+)/); if (!mt) return { status: 200, json: { private: path.indexOf('/pub') < 0 } };
+    const p = decodeURIComponent(mt[1]);
     if (method === 'GET') {
       if (files.has(p)) return { status: 200, json: { sha: files.get(p).sha, content: Buffer.from(files.get(p).text).toString('base64') } };
       const list = [...files].filter(([f]) => f.startsWith(p + '/') && !f.slice(p.length + 1).includes('/')).map(([f, v]) => ({ type: 'file', name: f.slice(p.length + 1), sha: v.sha }));
@@ -87,5 +88,8 @@ mk.toasts = [];
   const bad = R.create({ api: async (m, p, b) => (m === 'PUT' ? { status: 500, json: { message: 'boom' } } : gh.api(m, p, b)), config: () => ({ owner: 'o', repo: 'r', branch: 'main', token: 't' }), toast: () => { }, delay: 0 });
   await bad.load(); bad.set('z', 1); await bad.flush();
   assert.equal(bad.pending(), 1); assert.match(bad.status(), /boom/);
+  // a public repo is refused outright
+  const pub = R.create({ api: gh.api, config: () => ({ owner: 'o', repo: 'pub', branch: 'main', token: 't' }), toast: () => { }, delay: 0 });
+  await pub.load(); assert.equal(pub.ready(), false); assert.match(pub.status(), /public repo/); assert.equal(pub.set('x', 1), false);
   console.log('repo store tests passed');
 })().catch(e => { console.error(e); process.exit(1); });
