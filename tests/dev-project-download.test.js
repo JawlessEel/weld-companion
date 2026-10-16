@@ -13,7 +13,7 @@ const tests = `
     if (fail) throw new Error('disk changed');
     return { files: 4, written: 2, bytes: 12, unavailable: [] };
   } };
-  render(); await sleep(30); render(); click('Choose folder…');
+  render(); await sleep(30); render(); openSection('Folder sync'); click('Show folder sync'); await sleep(30); render(); click('Choose folder…');
   await until(() => dev.state.F.revision !== null && dev.state.F.perm === 'granted');
   render();
   assert.ok(findBtn('Download all files and assets (this generator)'));
