@@ -68,7 +68,7 @@ The source documents are in [dad-chat/](dad-chat/README.md). When they change, u
 
 Dropdown options use opaque backgrounds and text colors from Weld's adopted theme, with matching native dark/light controls (1.60.1).
 
-Every preset has a workflow and acceptance checks. The detail view distinguishes **Review only** from **Makes changes**; researched additions link to their primary sources at inspected revisions or current official provider docs. See [selection rationale and all 14 repositories](SKILLS-SOURCES.md). These are original Perchance adaptations, not installed third-party agent packages.
+Every preset, with its full task text, is listed in [SKILLS-CATALOG.md](SKILLS-CATALOG.md), together with proposed new skills. Every preset has a workflow and acceptance checks. The detail view distinguishes **Review only** from **Makes changes**; researched additions link to their primary sources at inspected revisions or current official provider docs. See [selection rationale and all 14 repositories](SKILLS-SOURCES.md). These are original Perchance adaptations, not installed third-party agent packages.
 
 ## Run a skill
 
