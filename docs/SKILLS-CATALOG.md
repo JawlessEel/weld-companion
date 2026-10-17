@@ -1,34 +1,34 @@
 # Weld skills catalog
 
-Every skill preset in **Weld > Skills** (Weld Companion 1.92.1): **259 shipped skills in 20 sections**, plus **32 new skills** at the end that are not in the userscript yet.
+Every skill preset in **Weld > Skills** (Weld Companion 1.93.0): **291 skills in 20 sections**. 32 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
 
-The shipped part is generated from `src/skills-*.js`; if the two disagree, the source wins. Section workflows and acceptance checks shown here are the ones Weld adds to each prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).
+Each entry shows the task text, the workflow and the acceptance check Weld puts in the prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).
 
 ## Contents
 
-| Section | Shipped | New |
+| Section | Skills | New in 1.93.0 |
 | --- | ---: | ---: |
-| [Dashboards & live data](#dashboards--live-data) | 9 | 2 |
+| [Dashboards & live data](#dashboards--live-data) | 11 | 2 |
 | [Prompts, models & plugins](#prompts-models--plugins) | 20 |  |
-| [Debug & repair](#debug--repair) | 8 | 4 |
-| [Design & modernize](#design--modernize) | 8 | 2 |
-| [Add features](#add-features) | 9 | 5 |
-| [AI & media](#ai--media) | 14 | 3 |
-| [Image prompts & studios](#image-prompts--studios) | 17 | 2 |
-| [Data & persistence](#data--persistence) | 13 | 1 |
-| [Performance & reliability](#performance--reliability) | 8 | 1 |
+| [Debug & repair](#debug--repair) | 12 | 4 |
+| [Design & modernize](#design--modernize) | 10 | 2 |
+| [Add features](#add-features) | 14 | 5 |
+| [AI & media](#ai--media) | 17 | 3 |
+| [Image prompts & studios](#image-prompts--studios) | 19 | 2 |
+| [Data & persistence](#data--persistence) | 14 | 1 |
+| [Performance & reliability](#performance--reliability) | 9 | 1 |
 | [Accessibility & quality](#accessibility--quality) | 10 |  |
-| [Code & planning](#code--planning) | 9 | 2 |
+| [Code & planning](#code--planning) | 11 | 2 |
 | [Create a generator](#create-a-generator) | 7 |  |
 | [Websites & site builders](#websites--site-builders) | 24 |  |
-| [Text & randomness](#text--randomness) | 5 | 2 |
-| [Stories & worlds](#stories--worlds) | 8 | 2 |
-| [Games & interaction](#games--interaction) | 5 | 3 |
-| [SillyTavern, Chub & character cards](#sillytavern-chub--character-cards) | 31 | 1 |
+| [Text & randomness](#text--randomness) | 7 | 2 |
+| [Stories & worlds](#stories--worlds) | 10 | 2 |
+| [Games & interaction](#games--interaction) | 8 | 3 |
+| [SillyTavern, Chub & character cards](#sillytavern-chub--character-cards) | 32 | 1 |
 | [Dad-Chat projects](#dad-chat-projects) | 33 |  |
-| [Rebrand, simplify & privacy](#rebrand-simplify--privacy) | 8 | 1 |
-| [AI input helpers & toolkit](#ai-input-helpers--toolkit) | 13 | 1 |
-| **Total** | **259** | **[32](#new-skills-not-yet-in-weld)** |
+| [Rebrand, simplify & privacy](#rebrand-simplify--privacy) | 9 | 1 |
+| [AI input helpers & toolkit](#ai-input-helpers--toolkit) | 14 | 1 |
+| **Total** | **291** | **32** |
 
 Modes: **Review only** asks the helper for evidence and recommendations without edits. **Makes changes** asks for the smallest complete change, preserved features and storage, and honest verification.
 
@@ -195,6 +195,38 @@ Trace stream subscriptions and REST polling through mount, symbol changes, tab v
 **Done when:** Displayed values have traceable sources and timestamps; stale or missing data is never presented as live.
 
 **Inspired by:** [Binance stream docs](https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams), [ECC](https://github.com/affaan-m/ECC/blob/ef648e01899ba3e8dc6371642deaaf64b4477775/.agents/skills/frontend-patterns/SKILL.md)
+
+### Add threshold alerts
+
+`dashboard-alerts` · **Makes changes** · Dashboards & applications · new in 1.93.0
+
+*Notify when a value crosses a level, with cooldowns and a log.*
+
+Add user-defined alerts (series, condition above/below/crosses, level, cooldown) evaluated on each fresh data point only, never on stale or missing data. Show triggered alerts in a log with time and value, and use browser notifications or Weld notify only after the user enables them. Persist alert rules, not values. These are informational alerts, not trading advice.
+
+**Workflow**
+
+1. Define rule shape and when evaluation happens.
+2. Add rule editor, evaluator with cooldown, log and opt-in notifications.
+3. Test crossing up and down, stale data, rapid flapping and reload.
+
+**Done when:** Alerts fire once per crossing within cooldown, never on stale data, and notifications are opt-in.
+
+### Add editable watchlists
+
+`dashboard-watchlist` · **Makes changes** · Dashboards & applications · new in 1.93.0
+
+*Named symbol lists with order, notes and import/export.*
+
+Add named watchlists the user can create, rename, reorder (drag and keyboard) and delete with confirmation. Validate symbols against the configured provider format, keep notes per symbol, and export or import lists as JSON with validation. Switching lists should not refetch more than the visible symbols need.
+
+**Workflow**
+
+1. Fit watchlists into workspace state.
+2. Add CRUD, reorder, notes and import/export.
+3. Test invalid symbols, duplicate names, reorder by keyboard and a malformed import.
+
+**Done when:** Watchlists persist and reorder correctly, invalid symbols are rejected, and imports are validated.
 
 ## Prompts, models & plugins
 
@@ -682,6 +714,70 @@ Reduce the failing workflow to the smallest current inputs, list references, han
 
 **Inspired by:** [Superpowers](https://github.com/obra/superpowers/blob/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/SKILL.md), [Matt Pocock skills](https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/skills/engineering/to-spec/SKILL.md)
 
+### Add a recoverable error boundary
+
+`global-error-boundary` · **Makes changes** · Any generator · new in 1.93.0
+
+*Catch uncaught errors and rejections and show a fix-or-retry message instead of a dead page.*
+
+Add one window error and unhandledrejection handler that records the message, source and a short stack in a bounded in-memory log, shows a small dismissible notice with Retry and Copy details, and restores any controls left disabled by the failed action. Never swallow errors silently: still log them to the console and keep perchanceErrors intact. Do not wrap every function in try/catch; fix the real failing path when one is found. Strip anything that looks like a key or token from copied details.
+
+**Workflow**
+
+1. Find the actions that can throw or reject and how controls are disabled during them.
+2. Add the single handler, the notice and the control-restore path.
+3. Force a sync error, a rejected promise and a failing plugin call; confirm the page stays usable.
+
+**Done when:** Uncaught failures show a recoverable notice, controls come back, the console still shows the error and no secret appears in copied details.
+
+### Find dead lists, code and styles
+
+`dead-code-audit` · **Review only** · Any generator · new in 1.93.0
+
+*Report unused lists, functions, CSS rules and imports with evidence.*
+
+Inventory every list in the Perchance panel, every function and global in the HTML panel, every CSS selector and every import. For each, find its references (including [list] calls, string-built names, onclick attributes, dynamic selectors and plugin callbacks). Report items with no reference as "likely unused", items referenced only dynamically as "uncertain", and say exactly how you searched. Do not delete anything; give a removal order from safest to riskiest.
+
+**Workflow**
+
+1. List every definition in both panels with its location.
+2. Search for direct, templated and string-built references to each.
+3. Classify each as used, likely unused or uncertain, with the search evidence.
+
+**Done when:** Every flagged item has its search evidence, dynamic references are called out, and nothing is edited.
+
+### Audit imported plugins
+
+`plugin-version-audit` · **Review only** · Any generator · new in 1.93.0
+
+*Check each imported plugin is current, maintained and called the way its page documents.*
+
+List every {import:...} and plugin call in both panels. For each plugin, open its generator page and compare the documented call shape, options and return value with how this generator uses it. Flag deprecated plugins, forks of official plugins, options that no longer exist, missing error handling and duplicated imports of the same capability. Recommend replacements only when the documented API is verified; never swap providers automatically.
+
+**Workflow**
+
+1. Inventory imports and every call site.
+2. Compare each call with the plugin page documentation.
+3. Report mismatches, deprecations and duplicates with the exact call site.
+
+**Done when:** Each plugin has a verified status, every mismatch names its call site, and no import is changed.
+
+### Fix style leaks and collisions
+
+`css-leak-audit` · **Makes changes** · Any generator · new in 1.93.0
+
+*Stop generic selectors from restyling plugins, dialogs or the page around the generator.*
+
+Find unscoped selectors (button, input, div, *, body, generic class names) and !important rules that bleed into plugin UI, dialogs or each other. Scope them under one root class or container, rename colliding classes, and keep the current look of the generator itself. Do not restyle plugin-owned elements unless the user asked. Verify every view, dialog and plugin widget before and after.
+
+**Workflow**
+
+1. List global and generic selectors and what they actually match.
+2. Scope or rename the leaking rules in small steps.
+3. Compare each view and plugin widget before and after the change.
+
+**Done when:** The generator looks the same, plugin and dialog UI is no longer restyled, and no selector depends on a global element name.
+
 ## Design & modernize
 
 ### Modernize the interface
@@ -815,6 +911,38 @@ Use the visual direction in user details, or ground a restrained direction in th
 **Done when:** No clipped controls, unreadable content or inaccessible actions at tested widths.
 
 **Inspired by:** [OhMySkills](https://github.com/NakanoSanku/OhMySkills/blob/09f1d8ec9bedf8892f20fb7d35364ce29c4b7b79/design-style/SKILL.md), [Anthropic skills](https://github.com/anthropics/skills/blob/8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4/skills/frontend-design/SKILL.md), [UI UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/blob/477bcb28c9812b385cb51a4605ddf30d7b2266e2/.claude/skills/ui-ux-pro-max/SKILL.md)
+
+### Add a clean print and PDF layout
+
+`print-layout` · **Makes changes** · Stories & worlds, Games & RPGs, Tools & utilities, Random & text, Chat, characters & memory · new in 1.93.0
+
+*Print results, stories or sheets without buttons, dark backgrounds or cut-off text.*
+
+Add a print stylesheet (@media print) that hides controls, navigation and ads-like chrome, switches to dark text on white, expands collapsed sections that hold results, avoids breaking inside cards and headings, and shows link URLs where useful. Add a Print button that prints only the chosen result or the whole page. Keep the screen layout unchanged.
+
+**Workflow**
+
+1. Decide what a printed page should contain for this generator.
+2. Add the print styles and a Print action.
+3. Check print preview with short, long and multi-page output in light and dark themes.
+
+**Done when:** Print preview shows only the content, readable on white, with no cut cards or headings, and the screen layout is unchanged.
+
+### Add keyboard shortcuts with a help sheet
+
+`keyboard-shortcuts` · **Makes changes** · Any generator · new in 1.93.0
+
+*Generate, copy, undo and navigate from the keyboard; press ? to see them all.*
+
+Add a small shortcut map for the main actions (for example Generate, Copy result, Undo, next and previous result, focus search). Ignore shortcuts while typing in inputs, textareas and contenteditable unless they use a modifier, never override browser or screen-reader keys, and show a ? help sheet listing every shortcut. Keep shortcuts in one table so the help sheet cannot drift from behavior.
+
+**Workflow**
+
+1. Pick the few actions worth a key and check for conflicts.
+2. Implement one handler driven by one shortcut table plus the help sheet.
+3. Test every key on and off text fields, with a screen reader running and on a non-US layout if possible.
+
+**Done when:** Each listed shortcut works, none fires while typing, and the help sheet matches the table.
 
 ## Add features
 
@@ -967,6 +1095,86 @@ Add undo and redo for the edits users make in this generator (text fields, items
 **Done when:** The feature works end to end and old defaults still behave as before.
 
 **Structure references:** AI field helper contract (every site field)
+
+### Add read-aloud (text to speech)
+
+`read-aloud` · **Makes changes** · Stories & worlds, Chat, characters & memory, Random & text, Tools & utilities · new in 1.93.0
+
+*Speak a result with voice, rate and stop controls.*
+
+Add a Read aloud control using the browser speechSynthesis API, feature-detected. Offer voice, rate and pitch from the voices actually available, read only the selected result, highlight or mark the current paragraph where practical, and provide Stop. Remember the chosen voice through the existing settings mechanism. Hide the control with a short note when speech is unavailable. Do not send text anywhere.
+
+**Workflow**
+
+1. Find where results are rendered and how settings are saved.
+2. Add the feature-detected control, voice settings and Stop.
+3. Test long text, switching results mid-speech, no voices, and a reload.
+
+**Done when:** Speech starts and stops reliably, the voice choice persists, and browsers without speech show a clear note instead of a broken button.
+
+### Add voice input for text fields
+
+`voice-input` · **Makes changes** · Chat, characters & memory, Stories & worlds, AI images & galleries, Tools & utilities · new in 1.93.0
+
+*Dictate prompts and messages where the browser supports speech recognition.*
+
+Add a microphone button to the main input fields using SpeechRecognition / webkitSpeechRecognition, feature-detected. Show listening state, insert interim and final text at the cursor without overwriting what was typed, stop on silence or a second click, and report permission denial clearly. Never auto-submit. Hide the button when unsupported.
+
+**Workflow**
+
+1. Choose which fields get dictation.
+2. Add the button, listening state and safe insertion.
+3. Test permission denied, unsupported browser, long dictation and typing during dictation.
+
+**Done when:** Dictated text lands at the cursor, nothing is overwritten or auto-sent, and unsupported browsers see no broken control.
+
+### Add private local usage stats
+
+`local-usage-stats` · **Makes changes** · Any generator · new in 1.93.0
+
+*Show the user their own counts (generations, favorites, time) stored only in their browser.*
+
+Add a small Stats panel with counts this generator can already observe: generations, rerolls, favorites, exports, most used settings and first and last use dates. Store only aggregate numbers locally through the existing storage, never content or identifiers, and never send them anywhere. Add Reset stats with confirmation and an off switch that stops collecting.
+
+**Workflow**
+
+1. Pick the few counts that are meaningful here.
+2. Record aggregates locally with an off switch and reset.
+3. Check counts after several actions, reset, the off switch and blocked storage.
+
+**Done when:** Counts are accurate, stored only locally as numbers, resettable and switchable off.
+
+### Add a What's new panel
+
+`whats-new-panel` · **Makes changes** · Any generator · new in 1.93.0
+
+*Tell returning users what changed since their last visit.*
+
+Add a short changelog list (version, date, one line per change) inside the generator and a dismissible notice that appears once when the stored last-seen version is older than the current one. Keep the changelog in one data block so it is easy to update. Never show the notice on a first visit; show the first-run guide instead if one exists.
+
+**Workflow**
+
+1. Add the changelog data and a last-seen version key.
+2. Show the notice once per new version and a panel to reread it.
+3. Test first visit, returning visit, dismiss, and blocked storage.
+
+**Done when:** Returning users see the notice once per version, first-time users do not, and the panel always works.
+
+### Import CSV with column mapping
+
+`csv-import-mapping` · **Makes changes** · Tools & utilities, Dashboards & applications, Random & text, Chat, characters & memory · new in 1.93.0
+
+*Bring spreadsheet rows into lists, collections or cards with a preview.*
+
+Add a CSV/TSV import that parses quoted fields, embedded commas and newlines and a BOM, detects the delimiter, shows the first rows in a preview, and lets the user map each column to a target field (or ignore it). Validate each row, show skipped rows with reasons, and append or replace only after confirmation, with undo. Keep imported text as data and render it with textContent.
+
+**Workflow**
+
+1. Define target fields and validation rules.
+2. Build parse, preview, mapping and confirm steps.
+3. Test quoted commas, multiline cells, a BOM, empty rows, wrong column counts and a 5,000-row file.
+
+**Done when:** Messy real-world CSV imports correctly, bad rows are reported not silently dropped, and the import can be undone.
 
 ## AI & media
 
@@ -1215,6 +1423,54 @@ Inspect how prompts are assembled and add a budget: estimate size with the same 
 **Done when:** No duplicate requests, stale response overwrite or stranded loading state.
 
 **Structure references:** Perchance and Weld limits that bite
+
+### Show AI rewrites as a diff before applying
+
+`ai-diff-review` · **Makes changes** · Chat, characters & memory, Stories & worlds, Random & text, Tools & utilities, Websites & site builders · new in 1.93.0
+
+*Accept or reject AI changes to long text paragraph by paragraph.*
+
+Wherever AI rewrites existing user text (rewrite, polish, continue-and-edit), show the proposal as a word or line diff against the current text with Accept all, Reject, and per-change accept where practical. Never replace the original until accepted; keep one undo step after applying. Handle the user editing the original while the request runs by refusing to apply and offering a fresh diff.
+
+**Workflow**
+
+1. Find every AI path that overwrites user text.
+2. Route them through one diff-and-confirm step.
+3. Test identical output, a full rewrite, edits made mid-request and undo.
+
+**Done when:** No AI rewrite lands without being shown and accepted, and edits made during a request are never lost.
+
+### Review prompt-injection exposure
+
+`prompt-injection-review` · **Review only** · Chat, characters & memory, Stories & worlds, Prompt studios & plugins, AI images & galleries, Websites & site builders · new in 1.93.0
+
+*Find where pasted text, cards or web content can steer the model or the page.*
+
+Trace every place untrusted text (user paste, imported cards, lore, chat logs, fetched pages, other generators via the bus) enters an AI prompt or the DOM. For each, report whether it is clearly delimited as data, whether it can change system instructions, tool or JSON schemas, and whether model output is rendered as HTML or executed. Rank by impact and give the smallest fix for each. Do not edit.
+
+**Workflow**
+
+1. Map untrusted inputs to the prompts and DOM sinks they reach.
+2. Test each with a harmless hostile string (for example an instruction to ignore rules).
+3. Rank findings and propose narrow fixes.
+
+**Done when:** Each untrusted path is listed with evidence, test strings and a concrete fix; nothing is changed.
+
+### Add user content preferences
+
+`content-preferences` · **Makes changes** · Chat, characters & memory, Stories & worlds, AI images & galleries, Random & text · new in 1.93.0
+
+*Let users choose themes, intensity and topics to include or avoid in AI output.*
+
+Add a Preferences panel with include and avoid tags, an intensity or tone setting and free-text notes, saved locally. Insert them into the prompt in one clearly labeled block built by the same function that builds the real request, and show it in any prompt preview. Defaults must leave current behavior unchanged. Do not hardcode a filter list; the user decides.
+
+**Workflow**
+
+1. Find the single place prompts are assembled.
+2. Add the panel and the labeled preferences block.
+3. Compare prompts with defaults, with several tags, and after reload.
+
+**Done when:** Default prompts are unchanged, chosen preferences reach every request, and the preview shows exactly what was added.
 
 ## Image prompts & studios
 
@@ -1558,6 +1814,42 @@ Apply the LIKENESS AND CONSENT rules from the reference to this generator. Add a
 
 **Inspired by:** [Awesome Nano Banana Pro (prompt collection)](https://github.com/ZeroLu/awesome-nanobanana-pro/blob/475f02bf67b2cd26d5d9c76ba145b47cb4500700/README.md), [Awesome Nano Banana Pro Prompts (YouMind)](https://github.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts/blob/99bf468962de7df08166543ce67dad25f41e27fb/README.md)
 
+### Add a negative-prompt manager
+
+`img-negative-prompts` · **Makes changes** · AI images & galleries · new in 1.93.0
+
+*Reusable avoid-lists per style, applied only where the image plugin supports them.*
+
+Check the actual image plugin call for a negative prompt option. If supported, add named negative presets, a per-generation edit box and a preview of the final positive and negative text. If not supported, say so and offer an "avoid" phrase appended to the positive prompt as a clearly labeled fallback. Save presets locally and keep defaults identical to current output.
+
+**Workflow**
+
+1. Verify negative-prompt support in the real plugin call.
+2. Add presets, edit box and preview, or the labeled fallback.
+3. Generate with and without a preset and confirm the request text.
+
+**Done when:** Negative prompts reach the plugin only when it supports them, the fallback is labeled, and defaults are unchanged.
+
+**Structure references:** PROMPT ANATOMY and STRUCTURED PROMPT shape for image models
+
+### Add seed lock for repeatable images
+
+`img-seed-lock` · **Makes changes** · AI images & galleries · new in 1.93.0
+
+*Reuse a seed to iterate on one image while changing the prompt.*
+
+Verify whether the image plugin accepts and returns a seed. If it does, show the seed for each image, add Lock seed and Copy seed, save the seed with gallery items and use it in rerolls when locked. If it does not, explain that and hide the controls. Never claim identical results across model changes.
+
+**Workflow**
+
+1. Confirm seed input and output in the real plugin.
+2. Add seed display, lock and storage with gallery items.
+3. Regenerate with a locked seed, an unlocked seed and a changed prompt.
+
+**Done when:** Locked seeds are reused and stored with images, and unsupported plugins show no fake seed controls.
+
+**Structure references:** PROMPT ANATOMY and STRUCTURED PROMPT shape for image models
+
 ## Data & persistence
 
 ### Remember user settings
@@ -1782,6 +2074,22 @@ Review whether this generator can be backed up from the editor and restored late
 
 **Structure references:** Perchance and Weld limits that bite
 
+### Show storage use and clean-up options
+
+`storage-quota-meter` · **Makes changes** · Any generator · new in 1.93.0
+
+*Display how much saved data there is and let users trim it safely.*
+
+Measure the size of what this generator saves (localStorage keys it owns, IndexedDB stores, and navigator.storage.estimate where available). Show a small meter with totals by kind (history, images, chats, settings), the largest items, and clean-up actions (delete oldest N, delete images only) that export first or confirm. Never touch keys the generator does not own.
+
+**Workflow**
+
+1. Inventory owned keys and stores and how to size them.
+2. Add the meter, breakdown and confirmed clean-up actions.
+3. Test near-quota data, blocked storage and clean-up then reload.
+
+**Done when:** The meter matches real saved size, clean-up removes only owned data after confirmation, and other keys are untouched.
+
 ## Performance & reliability
 
 ### Find performance bottlenecks
@@ -1915,6 +2223,22 @@ Find work that keeps running when the generator view is inactive or the document
 **Done when:** Report measured changes or explicitly state why measurement was unavailable.
 
 **Inspired by:** [ECC](https://github.com/affaan-m/ECC/blob/ef648e01899ba3e8dc6371642deaaf64b4477775/.agents/skills/frontend-patterns/SKILL.md)
+
+### Profile and report slow paths
+
+`perf-profile-report` · **Review only** · Any generator · new in 1.93.0
+
+*Measure real timings for load, generate and render and name the slowest code.*
+
+Add temporary performance.now marks (or describe DevTools Performance steps) around load, first render, generate, AI wait and result render. Run each path several times with realistic data and report median and worst timings, the functions or list evaluations that dominate, and long tasks over 50 ms. Separate network and model wait from local work. Recommend fixes ranked by measured gain; do not change behavior.
+
+**Workflow**
+
+1. Pick the user paths to measure and the data size.
+2. Collect repeated timings and long-task evidence.
+3. Report medians, worst cases and the top culprits with suggested fixes.
+
+**Done when:** Every claim has a measured number, network wait is separated from local work, and no behavior is changed.
 
 ## Accessibility & quality
 
@@ -2237,6 +2561,38 @@ Scan both panels for text that Perchance may interpret as templating inside what
 **Done when:** Deliver actionable evidence and next steps without unrelated refactoring.
 
 **Structure references:** Perchance and Weld limits that bite
+
+### Split a huge generator into imported sub-generators
+
+`split-into-imports` · **Makes changes** · Any generator · new in 1.93.0
+
+*Move big lists or modules into separate Perchance generators and import them.*
+
+Identify large self-contained parts (word lists, data tables, a plugin-like module) that can live in their own generator and be pulled in with {import:...}. Propose names, move one part at a time, keep every list name and call working through the import, and note that imported generators must be public and saved. Measure size before and after. Do not move parts with heavy shared state.
+
+**Workflow**
+
+1. Measure panel sizes and pick self-contained parts.
+2. Move one part, wire the import and confirm every reference.
+3. Reload, generate across all features and compare output with the original.
+
+**Done when:** The main generator is smaller, every moved list resolves through the import, and output is unchanged.
+
+### Write a maintainer guide inside the generator
+
+`in-app-changelog-doc` · **Makes changes** · Any generator · new in 1.93.0
+
+*A hidden help list explaining structure, storage keys and how to extend it.*
+
+Add a maintainer section (a comment block or a hidden doc list, not shown to users) that explains the panel layout, main lists and functions, storage keys and their shapes, imports and why they are needed, and how to add a new option end to end. Write it from the real source; mark anything uncertain. Do not change behavior.
+
+**Workflow**
+
+1. Read both panels and note structure, keys and imports.
+2. Write the guide next to the code it describes.
+3. Check every name in the guide exists in the source.
+
+**Done when:** Every name in the guide exists, storage keys are documented with shapes, and behavior is unchanged.
 
 ## Create a generator
 
@@ -2918,6 +3274,38 @@ Add a labeled editor for user-supplied entries with safe parsing, preview and re
 
 **Inspired by:** [ECC](https://github.com/affaan-m/ECC/blob/ef648e01899ba3e8dc6371642deaaf64b4477775/.agents/skills/frontend-patterns/SKILL.md)
 
+### Build a syllable-based name generator
+
+`syllable-names` · **Makes changes** · Random & text, Stories & worlds, Games & RPGs · new in 1.93.0
+
+*Pronounceable names from onset, vowel and coda lists with per-culture styles.*
+
+Add name generation from weighted onset, nucleus and coda lists with syllable-count weights, per-style sets (for example elvish, harsh, soft), banned clusters and a repeat filter. Keep it in plain Perchance lists where possible, show several names per roll and let users favorite them. Avoid generating real slurs by filtering a short blocklist the user can edit.
+
+**Workflow**
+
+1. Design the syllable lists and weights per style.
+2. Assemble names with cluster and repeat rules.
+3. Roll several hundred names per style and review pronounceability and repeats.
+
+**Done when:** Names are pronounceable, styles feel distinct, banned clusters never appear and repeats are rare.
+
+### Clean up lists: duplicates, typos and weights
+
+`list-hygiene` · **Review only** · Random & text, Stories & worlds, Games & RPGs · new in 1.93.0
+
+*Find duplicate entries, near-duplicates, stray whitespace and odd weights.*
+
+Scan every Perchance list for exact duplicates, case or punctuation near-duplicates, trailing spaces, mixed quote styles, broken {curly} or [square] syntax, weights that are zero or wildly out of scale, and entries that will produce bad grammar with their usual articles. Report each by list and line with a suggested fix. Do not edit; respect Perchance syntax.
+
+**Workflow**
+
+1. Read every list with its weights and syntax.
+2. Check duplicates, near-duplicates, syntax and weights.
+3. Report findings by list and line with suggested fixes.
+
+**Done when:** Each finding names list and line, Perchance syntax is not mistaken for errors, and nothing is changed.
+
 ## Stories & worlds
 
 ### Build & improve usable lorebooks
@@ -3068,6 +3456,38 @@ Inspect representative generated story paths or user-supplied transcripts. Evalu
 
 **Inspired by:** [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md), [Thinking skills](https://github.com/tjboudreaux/cc-thinking-skills/blob/7b8fece345dfaa11773be7152ccd194589cb5437/skills/thinking-pre-mortem/SKILL.md)
 
+### Add a story timeline and chronology checker
+
+`story-timeline` · **Makes changes** · Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Track events in order and flag contradictions in dates and ages.*
+
+Add a timeline of events (date or relative order, characters involved, location, short note) that the story or world can reference. Detect simple contradictions: a character in two places at once, ages that do not add up, events before their causes. Show the timeline as a sortable list, keep it editable and saved, and offer it as compact context for AI continuations within a size limit.
+
+**Workflow**
+
+1. Define the event shape and how events are added.
+2. Add the timeline view, saving and contradiction checks.
+3. Test out-of-order entries, a known contradiction and a long timeline in AI context.
+
+**Done when:** Events stay ordered and saved, known contradictions are flagged, and AI context stays within its limit.
+
+### Export a story as a book
+
+`story-ebook-export` · **Makes changes** · Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Clean HTML or EPUB with title page, chapters and contents.*
+
+Add Export as book: a title page, author line, table of contents and one chapter per section, as a single self-contained HTML file, and EPUB if it can be built in the browser without external services. Escape all text, keep paragraphs and italics, strip UI-only content and name the file from the title safely. Open the export to verify it before calling it done.
+
+**Workflow**
+
+1. Decide how chapters map from the current story data.
+2. Build the HTML (and EPUB if feasible) exporter.
+3. Open the exported file, check contents links, special characters and a long story.
+
+**Done when:** The exported book opens offline with working contents, correct chapters and no UI leftovers.
+
 ## Games & interaction
 
 ### Review game balance & economy
@@ -3159,6 +3579,54 @@ Use the requested map/encounter rules to add bounded procedural generation with 
 **Done when:** Progress remains reachable and no tested path soft-locks or duplicates rewards.
 
 **Inspired by:** [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md), [Awesome LLM Skills](https://github.com/Prat011/awesome-llm-skills/blob/35e1ea23b6c5f50c420d5591973aa8ad4f2931ff/algorithmic-art/SKILL.md)
+
+### Add a dice roller with standard notation
+
+`dice-notation` · **Makes changes** · Games & RPGs, Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Parse 2d6+3, 4d6kh3, advantage and show each die.*
+
+Add a dice roller that parses NdM, modifiers, keep highest/lowest (kh/kl), drop, exploding dice and advantage/disadvantage, with clear errors for bad input and sane limits on dice count and sides. Show each die, kept and dropped, and the total; keep a short roll history. Use one random source so seeded rerolls stay reproducible if the generator has them.
+
+**Workflow**
+
+1. Write the notation grammar and limits.
+2. Implement the parser, roller, display and history.
+3. Test valid and invalid expressions, huge numbers and repeated seeded rolls.
+
+**Done when:** Standard notation rolls correctly, bad input gets a clear message, and limits prevent runaway rolls.
+
+### Add inventory and quest log
+
+`inventory-quests` · **Makes changes** · Games & RPGs, Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Items with counts and quests with steps, saved with the game state.*
+
+Add an inventory (items with name, count, tags, optional description) and a quest log (quests with steps, status and rewards) stored inside the existing game state and save slots. Provide add, use, drop and complete actions that the game logic or AI narration can call through one function each, so state changes are validated. Show both in compact panels.
+
+**Workflow**
+
+1. Fit inventory and quests into the existing state shape.
+2. Add validated actions and the two panels.
+3. Test save and load, using the last item, completing a quest twice and a malformed save.
+
+**Done when:** Items and quests change only through validated actions, persist with saves and survive reloads.
+
+### Add branching NPC dialogue trees
+
+`dialogue-trees` · **Makes changes** · Games & RPGs, Stories & worlds · new in 1.93.0
+
+*Authored conversations with conditions, choices and consequences.*
+
+Add a data-driven dialogue tree format (nodes with speaker, text, choices, conditions on state, and effects) and a player that renders choices, applies effects and handles dead ends. Validate the tree on load: missing targets, unreachable nodes and loops without exits. Keep text as data and render with textContent. Optionally let AI fill a node text but never change structure without review.
+
+**Workflow**
+
+1. Define the node format and how state is read and changed.
+2. Build the validator and the dialogue player.
+3. Run a tree with conditions, a missing target, an unreachable node and a loop.
+
+**Done when:** Dialogues play correctly with conditions and effects, and broken trees are reported on load instead of failing mid-play.
 
 ## SillyTavern, Chub & character cards
 
@@ -3779,6 +4247,24 @@ Add chat appearance options: bubble or flat message style, per-character accent 
 **Done when:** Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.
 
 **Structure references:** Where card, lore and chat features live in a chat app
+
+### Batch import many character cards
+
+`card-batch-import` · **Makes changes** · Chat, characters & memory · new in 1.93.0
+
+*Drop a folder of PNG and JSON cards, preview, dedupe and import.*
+
+Extend card import to accept many files at once: parse each (PNG chara/ccv3 chunks and JSON V2/V3), show a preview list with name, avatar, spec version and problems, detect duplicates by name plus content hash, and import selected cards in one confirmed step with a per-card result. One bad file must never stop the batch. Keep unknown fields.
+
+**Workflow**
+
+1. Reuse the single-card parser and add a batch queue.
+2. Build preview, duplicate detection and confirmed import.
+3. Import a mix of valid, corrupt, duplicate and V3 cards.
+
+**Done when:** Every file gets a result, bad files do not stop the batch, duplicates are flagged and unknown fields survive.
+
+**Structure references:** Character Card V2 structure (annotated example), Character Card V3 differences from V2, PNG card layout (where the JSON hides)
 
 ## Dad-Chat projects
 
@@ -4572,6 +5058,22 @@ Reduce clutter by hiding rarely used panels behind a clear Advanced toggle (or r
 
 **Done when:** Old branding or social features are gone from every visible and network path, and existing saved data still loads.
 
+### Audit what leaves the browser
+
+`privacy-audit` · **Review only** · Any generator · new in 1.93.0
+
+*List every network request, tracker and third-party embed and what data it carries.*
+
+List every outbound request the generator can make: plugin calls, fetches, images, fonts, iframes, analytics or tracking scripts and social embeds. For each, say what triggers it, which host it reaches and what user data it carries (prompt text, chats, identifiers). Flag anything that sends user content to a host the user would not expect, and propose local or opt-in alternatives. Do not edit.
+
+**Workflow**
+
+1. Inventory scripts, embeds, fetches and plugin calls.
+2. Trigger each user path and note requests and payloads.
+3. Report each destination, trigger and data with a recommendation.
+
+**Done when:** Every outbound destination is listed with its trigger and data, unexpected sharing is flagged, and nothing is changed.
+
 ## AI input helpers & toolkit
 
 ### Add Rewrite & Fill buttons to prompt inputs
@@ -4782,539 +5284,9 @@ Move user-facing interface text into one lookup table with the current language 
 
 **Done when:** Every helper has loading, error, cancel and undo behavior and never overwrites user text without a way back.
 
-## New skills (not yet in Weld)
+### Recall recent prompts and inputs
 
-Proposed additions that fill gaps in the shipped catalog. They use the same fields as the shipped rows (category, id, title, description, mode, task, types, workflow, check), so they can be moved into `src/skills-*.js` as-is. Until then they are not available in the Skills tab; copy a task into the Perchance AI helper by hand.
-
-### Dashboards & live data (new)
-
-#### Add threshold alerts (new)
-
-`dashboard-alerts` · **Makes changes** · Dashboards & applications
-
-*Notify when a value crosses a level, with cooldowns and a log.*
-
-Add user-defined alerts (series, condition above/below/crosses, level, cooldown) evaluated on each fresh data point only, never on stale or missing data. Show triggered alerts in a log with time and value, and use browser notifications or Weld notify only after the user enables them. Persist alert rules, not values. These are informational alerts, not trading advice.
-
-**Workflow**
-
-1. Define rule shape and when evaluation happens.
-2. Add rule editor, evaluator with cooldown, log and opt-in notifications.
-3. Test crossing up and down, stale data, rapid flapping and reload.
-
-**Done when:** Alerts fire once per crossing within cooldown, never on stale data, and notifications are opt-in.
-
-#### Add editable watchlists (new)
-
-`dashboard-watchlist` · **Makes changes** · Dashboards & applications
-
-*Named symbol lists with order, notes and import/export.*
-
-Add named watchlists the user can create, rename, reorder (drag and keyboard) and delete with confirmation. Validate symbols against the configured provider format, keep notes per symbol, and export or import lists as JSON with validation. Switching lists should not refetch more than the visible symbols need.
-
-**Workflow**
-
-1. Fit watchlists into workspace state.
-2. Add CRUD, reorder, notes and import/export.
-3. Test invalid symbols, duplicate names, reorder by keyboard and a malformed import.
-
-**Done when:** Watchlists persist and reorder correctly, invalid symbols are rejected, and imports are validated.
-
-### Debug & repair (new)
-
-#### Add a recoverable error boundary (new)
-
-`global-error-boundary` · **Makes changes** · Any generator
-
-*Catch uncaught errors and rejections and show a fix-or-retry message instead of a dead page.*
-
-Add one window error and unhandledrejection handler that records the message, source and a short stack in a bounded in-memory log, shows a small dismissible notice with Retry and Copy details, and restores any controls left disabled by the failed action. Never swallow errors silently: still log them to the console and keep perchanceErrors intact. Do not wrap every function in try/catch; fix the real failing path when one is found. Strip anything that looks like a key or token from copied details.
-
-**Workflow**
-
-1. Find the actions that can throw or reject and how controls are disabled during them.
-2. Add the single handler, the notice and the control-restore path.
-3. Force a sync error, a rejected promise and a failing plugin call; confirm the page stays usable.
-
-**Done when:** Uncaught failures show a recoverable notice, controls come back, the console still shows the error and no secret appears in copied details.
-
-#### Find dead lists, code and styles (new)
-
-`dead-code-audit` · **Review only** · Any generator
-
-*Report unused lists, functions, CSS rules and imports with evidence.*
-
-Inventory every list in the Perchance panel, every function and global in the HTML panel, every CSS selector and every import. For each, find its references (including [list] calls, string-built names, onclick attributes, dynamic selectors and plugin callbacks). Report items with no reference as "likely unused", items referenced only dynamically as "uncertain", and say exactly how you searched. Do not delete anything; give a removal order from safest to riskiest.
-
-**Workflow**
-
-1. List every definition in both panels with its location.
-2. Search for direct, templated and string-built references to each.
-3. Classify each as used, likely unused or uncertain, with the search evidence.
-
-**Done when:** Every flagged item has its search evidence, dynamic references are called out, and nothing is edited.
-
-#### Audit imported plugins (new)
-
-`plugin-version-audit` · **Review only** · Any generator
-
-*Check each imported plugin is current, maintained and called the way its page documents.*
-
-List every {import:...} and plugin call in both panels. For each plugin, open its generator page and compare the documented call shape, options and return value with how this generator uses it. Flag deprecated plugins, forks of official plugins, options that no longer exist, missing error handling and duplicated imports of the same capability. Recommend replacements only when the documented API is verified; never swap providers automatically.
-
-**Workflow**
-
-1. Inventory imports and every call site.
-2. Compare each call with the plugin page documentation.
-3. Report mismatches, deprecations and duplicates with the exact call site.
-
-**Done when:** Each plugin has a verified status, every mismatch names its call site, and no import is changed.
-
-#### Fix style leaks and collisions (new)
-
-`css-leak-audit` · **Makes changes** · Any generator
-
-*Stop generic selectors from restyling plugins, dialogs or the page around the generator.*
-
-Find unscoped selectors (button, input, div, *, body, generic class names) and !important rules that bleed into plugin UI, dialogs or each other. Scope them under one root class or container, rename colliding classes, and keep the current look of the generator itself. Do not restyle plugin-owned elements unless the user asked. Verify every view, dialog and plugin widget before and after.
-
-**Workflow**
-
-1. List global and generic selectors and what they actually match.
-2. Scope or rename the leaking rules in small steps.
-3. Compare each view and plugin widget before and after the change.
-
-**Done when:** The generator looks the same, plugin and dialog UI is no longer restyled, and no selector depends on a global element name.
-
-### Design & modernize (new)
-
-#### Add a clean print and PDF layout (new)
-
-`print-layout` · **Makes changes** · Stories & worlds, Games & RPGs, Tools & utilities, Random & text, Chat, characters & memory
-
-*Print results, stories or sheets without buttons, dark backgrounds or cut-off text.*
-
-Add a print stylesheet (@media print) that hides controls, navigation and ads-like chrome, switches to dark text on white, expands collapsed sections that hold results, avoids breaking inside cards and headings, and shows link URLs where useful. Add a Print button that prints only the chosen result or the whole page. Keep the screen layout unchanged.
-
-**Workflow**
-
-1. Decide what a printed page should contain for this generator.
-2. Add the print styles and a Print action.
-3. Check print preview with short, long and multi-page output in light and dark themes.
-
-**Done when:** Print preview shows only the content, readable on white, with no cut cards or headings, and the screen layout is unchanged.
-
-#### Add keyboard shortcuts with a help sheet (new)
-
-`keyboard-shortcuts` · **Makes changes** · Any generator
-
-*Generate, copy, undo and navigate from the keyboard; press ? to see them all.*
-
-Add a small shortcut map for the main actions (for example Generate, Copy result, Undo, next and previous result, focus search). Ignore shortcuts while typing in inputs, textareas and contenteditable unless they use a modifier, never override browser or screen-reader keys, and show a ? help sheet listing every shortcut. Keep shortcuts in one table so the help sheet cannot drift from behavior.
-
-**Workflow**
-
-1. Pick the few actions worth a key and check for conflicts.
-2. Implement one handler driven by one shortcut table plus the help sheet.
-3. Test every key on and off text fields, with a screen reader running and on a non-US layout if possible.
-
-**Done when:** Each listed shortcut works, none fires while typing, and the help sheet matches the table.
-
-### Add features (new)
-
-#### Add read-aloud (text to speech) (new)
-
-`read-aloud` · **Makes changes** · Stories & worlds, Chat, characters & memory, Random & text, Tools & utilities
-
-*Speak a result with voice, rate and stop controls.*
-
-Add a Read aloud control using the browser speechSynthesis API, feature-detected. Offer voice, rate and pitch from the voices actually available, read only the selected result, highlight or mark the current paragraph where practical, and provide Stop. Remember the chosen voice through the existing settings mechanism. Hide the control with a short note when speech is unavailable. Do not send text anywhere.
-
-**Workflow**
-
-1. Find where results are rendered and how settings are saved.
-2. Add the feature-detected control, voice settings and Stop.
-3. Test long text, switching results mid-speech, no voices, and a reload.
-
-**Done when:** Speech starts and stops reliably, the voice choice persists, and browsers without speech show a clear note instead of a broken button.
-
-#### Add voice input for text fields (new)
-
-`voice-input` · **Makes changes** · Chat, characters & memory, Stories & worlds, AI images & galleries, Tools & utilities
-
-*Dictate prompts and messages where the browser supports speech recognition.*
-
-Add a microphone button to the main input fields using SpeechRecognition / webkitSpeechRecognition, feature-detected. Show listening state, insert interim and final text at the cursor without overwriting what was typed, stop on silence or a second click, and report permission denial clearly. Never auto-submit. Hide the button when unsupported.
-
-**Workflow**
-
-1. Choose which fields get dictation.
-2. Add the button, listening state and safe insertion.
-3. Test permission denied, unsupported browser, long dictation and typing during dictation.
-
-**Done when:** Dictated text lands at the cursor, nothing is overwritten or auto-sent, and unsupported browsers see no broken control.
-
-#### Add private local usage stats (new)
-
-`local-usage-stats` · **Makes changes** · Any generator
-
-*Show the user their own counts (generations, favorites, time) stored only in their browser.*
-
-Add a small Stats panel with counts this generator can already observe: generations, rerolls, favorites, exports, most used settings and first and last use dates. Store only aggregate numbers locally through the existing storage, never content or identifiers, and never send them anywhere. Add Reset stats with confirmation and an off switch that stops collecting.
-
-**Workflow**
-
-1. Pick the few counts that are meaningful here.
-2. Record aggregates locally with an off switch and reset.
-3. Check counts after several actions, reset, the off switch and blocked storage.
-
-**Done when:** Counts are accurate, stored only locally as numbers, resettable and switchable off.
-
-#### Add a What's new panel (new)
-
-`whats-new-panel` · **Makes changes** · Any generator
-
-*Tell returning users what changed since their last visit.*
-
-Add a short changelog list (version, date, one line per change) inside the generator and a dismissible notice that appears once when the stored last-seen version is older than the current one. Keep the changelog in one data block so it is easy to update. Never show the notice on a first visit; show the first-run guide instead if one exists.
-
-**Workflow**
-
-1. Add the changelog data and a last-seen version key.
-2. Show the notice once per new version and a panel to reread it.
-3. Test first visit, returning visit, dismiss, and blocked storage.
-
-**Done when:** Returning users see the notice once per version, first-time users do not, and the panel always works.
-
-#### Import CSV with column mapping (new)
-
-`csv-import-mapping` · **Makes changes** · Tools & utilities, Dashboards & applications, Random & text, Chat, characters & memory
-
-*Bring spreadsheet rows into lists, collections or cards with a preview.*
-
-Add a CSV/TSV import that parses quoted fields, embedded commas and newlines and a BOM, detects the delimiter, shows the first rows in a preview, and lets the user map each column to a target field (or ignore it). Validate each row, show skipped rows with reasons, and append or replace only after confirmation, with undo. Keep imported text as data and render it with textContent.
-
-**Workflow**
-
-1. Define target fields and validation rules.
-2. Build parse, preview, mapping and confirm steps.
-3. Test quoted commas, multiline cells, a BOM, empty rows, wrong column counts and a 5,000-row file.
-
-**Done when:** Messy real-world CSV imports correctly, bad rows are reported not silently dropped, and the import can be undone.
-
-### AI & media (new)
-
-#### Show AI rewrites as a diff before applying (new)
-
-`ai-diff-review` · **Makes changes** · Chat, characters & memory, Stories & worlds, Random & text, Tools & utilities, Websites & site builders
-
-*Accept or reject AI changes to long text paragraph by paragraph.*
-
-Wherever AI rewrites existing user text (rewrite, polish, continue-and-edit), show the proposal as a word or line diff against the current text with Accept all, Reject, and per-change accept where practical. Never replace the original until accepted; keep one undo step after applying. Handle the user editing the original while the request runs by refusing to apply and offering a fresh diff.
-
-**Workflow**
-
-1. Find every AI path that overwrites user text.
-2. Route them through one diff-and-confirm step.
-3. Test identical output, a full rewrite, edits made mid-request and undo.
-
-**Done when:** No AI rewrite lands without being shown and accepted, and edits made during a request are never lost.
-
-#### Review prompt-injection exposure (new)
-
-`prompt-injection-review` · **Review only** · Chat, characters & memory, Stories & worlds, Prompt studios & plugins, AI images & galleries, Websites & site builders
-
-*Find where pasted text, cards or web content can steer the model or the page.*
-
-Trace every place untrusted text (user paste, imported cards, lore, chat logs, fetched pages, other generators via the bus) enters an AI prompt or the DOM. For each, report whether it is clearly delimited as data, whether it can change system instructions, tool or JSON schemas, and whether model output is rendered as HTML or executed. Rank by impact and give the smallest fix for each. Do not edit.
-
-**Workflow**
-
-1. Map untrusted inputs to the prompts and DOM sinks they reach.
-2. Test each with a harmless hostile string (for example an instruction to ignore rules).
-3. Rank findings and propose narrow fixes.
-
-**Done when:** Each untrusted path is listed with evidence, test strings and a concrete fix; nothing is changed.
-
-#### Add user content preferences (new)
-
-`content-preferences` · **Makes changes** · Chat, characters & memory, Stories & worlds, AI images & galleries, Random & text
-
-*Let users choose themes, intensity and topics to include or avoid in AI output.*
-
-Add a Preferences panel with include and avoid tags, an intensity or tone setting and free-text notes, saved locally. Insert them into the prompt in one clearly labeled block built by the same function that builds the real request, and show it in any prompt preview. Defaults must leave current behavior unchanged. Do not hardcode a filter list; the user decides.
-
-**Workflow**
-
-1. Find the single place prompts are assembled.
-2. Add the panel and the labeled preferences block.
-3. Compare prompts with defaults, with several tags, and after reload.
-
-**Done when:** Default prompts are unchanged, chosen preferences reach every request, and the preview shows exactly what was added.
-
-### Image prompts & studios (new)
-
-#### Add a negative-prompt manager (new)
-
-`img-negative-prompts` · **Makes changes** · AI images & galleries
-
-*Reusable avoid-lists per style, applied only where the image plugin supports them.*
-
-Check the actual image plugin call for a negative prompt option. If supported, add named negative presets, a per-generation edit box and a preview of the final positive and negative text. If not supported, say so and offer an "avoid" phrase appended to the positive prompt as a clearly labeled fallback. Save presets locally and keep defaults identical to current output.
-
-**Workflow**
-
-1. Verify negative-prompt support in the real plugin call.
-2. Add presets, edit box and preview, or the labeled fallback.
-3. Generate with and without a preset and confirm the request text.
-
-**Done when:** Negative prompts reach the plugin only when it supports them, the fallback is labeled, and defaults are unchanged.
-
-#### Add seed lock for repeatable images (new)
-
-`img-seed-lock` · **Makes changes** · AI images & galleries
-
-*Reuse a seed to iterate on one image while changing the prompt.*
-
-Verify whether the image plugin accepts and returns a seed. If it does, show the seed for each image, add Lock seed and Copy seed, save the seed with gallery items and use it in rerolls when locked. If it does not, explain that and hide the controls. Never claim identical results across model changes.
-
-**Workflow**
-
-1. Confirm seed input and output in the real plugin.
-2. Add seed display, lock and storage with gallery items.
-3. Regenerate with a locked seed, an unlocked seed and a changed prompt.
-
-**Done when:** Locked seeds are reused and stored with images, and unsupported plugins show no fake seed controls.
-
-### Data & persistence (new)
-
-#### Show storage use and clean-up options (new)
-
-`storage-quota-meter` · **Makes changes** · Any generator
-
-*Display how much saved data there is and let users trim it safely.*
-
-Measure the size of what this generator saves (localStorage keys it owns, IndexedDB stores, and navigator.storage.estimate where available). Show a small meter with totals by kind (history, images, chats, settings), the largest items, and clean-up actions (delete oldest N, delete images only) that export first or confirm. Never touch keys the generator does not own.
-
-**Workflow**
-
-1. Inventory owned keys and stores and how to size them.
-2. Add the meter, breakdown and confirmed clean-up actions.
-3. Test near-quota data, blocked storage and clean-up then reload.
-
-**Done when:** The meter matches real saved size, clean-up removes only owned data after confirmation, and other keys are untouched.
-
-### Performance & reliability (new)
-
-#### Profile and report slow paths (new)
-
-`perf-profile-report` · **Review only** · Any generator
-
-*Measure real timings for load, generate and render and name the slowest code.*
-
-Add temporary performance.now marks (or describe DevTools Performance steps) around load, first render, generate, AI wait and result render. Run each path several times with realistic data and report median and worst timings, the functions or list evaluations that dominate, and long tasks over 50 ms. Separate network and model wait from local work. Recommend fixes ranked by measured gain; do not change behavior.
-
-**Workflow**
-
-1. Pick the user paths to measure and the data size.
-2. Collect repeated timings and long-task evidence.
-3. Report medians, worst cases and the top culprits with suggested fixes.
-
-**Done when:** Every claim has a measured number, network wait is separated from local work, and no behavior is changed.
-
-### Code & planning (new)
-
-#### Split a huge generator into imported sub-generators (new)
-
-`split-into-imports` · **Makes changes** · Any generator
-
-*Move big lists or modules into separate Perchance generators and import them.*
-
-Identify large self-contained parts (word lists, data tables, a plugin-like module) that can live in their own generator and be pulled in with {import:...}. Propose names, move one part at a time, keep every list name and call working through the import, and note that imported generators must be public and saved. Measure size before and after. Do not move parts with heavy shared state.
-
-**Workflow**
-
-1. Measure panel sizes and pick self-contained parts.
-2. Move one part, wire the import and confirm every reference.
-3. Reload, generate across all features and compare output with the original.
-
-**Done when:** The main generator is smaller, every moved list resolves through the import, and output is unchanged.
-
-#### Write a maintainer guide inside the generator (new)
-
-`in-app-changelog-doc` · **Makes changes** · Any generator
-
-*A hidden help list explaining structure, storage keys and how to extend it.*
-
-Add a maintainer section (a comment block or a hidden doc list, not shown to users) that explains the panel layout, main lists and functions, storage keys and their shapes, imports and why they are needed, and how to add a new option end to end. Write it from the real source; mark anything uncertain. Do not change behavior.
-
-**Workflow**
-
-1. Read both panels and note structure, keys and imports.
-2. Write the guide next to the code it describes.
-3. Check every name in the guide exists in the source.
-
-**Done when:** Every name in the guide exists, storage keys are documented with shapes, and behavior is unchanged.
-
-### Text & randomness (new)
-
-#### Build a syllable-based name generator (new)
-
-`syllable-names` · **Makes changes** · Random & text, Stories & worlds, Games & RPGs
-
-*Pronounceable names from onset, vowel and coda lists with per-culture styles.*
-
-Add name generation from weighted onset, nucleus and coda lists with syllable-count weights, per-style sets (for example elvish, harsh, soft), banned clusters and a repeat filter. Keep it in plain Perchance lists where possible, show several names per roll and let users favorite them. Avoid generating real slurs by filtering a short blocklist the user can edit.
-
-**Workflow**
-
-1. Design the syllable lists and weights per style.
-2. Assemble names with cluster and repeat rules.
-3. Roll several hundred names per style and review pronounceability and repeats.
-
-**Done when:** Names are pronounceable, styles feel distinct, banned clusters never appear and repeats are rare.
-
-#### Clean up lists: duplicates, typos and weights (new)
-
-`list-hygiene` · **Review only** · Random & text, Stories & worlds, Games & RPGs
-
-*Find duplicate entries, near-duplicates, stray whitespace and odd weights.*
-
-Scan every Perchance list for exact duplicates, case or punctuation near-duplicates, trailing spaces, mixed quote styles, broken {curly} or [square] syntax, weights that are zero or wildly out of scale, and entries that will produce bad grammar with their usual articles. Report each by list and line with a suggested fix. Do not edit; respect Perchance syntax.
-
-**Workflow**
-
-1. Read every list with its weights and syntax.
-2. Check duplicates, near-duplicates, syntax and weights.
-3. Report findings by list and line with suggested fixes.
-
-**Done when:** Each finding names list and line, Perchance syntax is not mistaken for errors, and nothing is changed.
-
-### Stories & worlds (new)
-
-#### Add a story timeline and chronology checker (new)
-
-`story-timeline` · **Makes changes** · Stories & worlds, Chat, characters & memory
-
-*Track events in order and flag contradictions in dates and ages.*
-
-Add a timeline of events (date or relative order, characters involved, location, short note) that the story or world can reference. Detect simple contradictions: a character in two places at once, ages that do not add up, events before their causes. Show the timeline as a sortable list, keep it editable and saved, and offer it as compact context for AI continuations within a size limit.
-
-**Workflow**
-
-1. Define the event shape and how events are added.
-2. Add the timeline view, saving and contradiction checks.
-3. Test out-of-order entries, a known contradiction and a long timeline in AI context.
-
-**Done when:** Events stay ordered and saved, known contradictions are flagged, and AI context stays within its limit.
-
-#### Export a story as a book (new)
-
-`story-ebook-export` · **Makes changes** · Stories & worlds, Chat, characters & memory
-
-*Clean HTML or EPUB with title page, chapters and contents.*
-
-Add Export as book: a title page, author line, table of contents and one chapter per section, as a single self-contained HTML file, and EPUB if it can be built in the browser without external services. Escape all text, keep paragraphs and italics, strip UI-only content and name the file from the title safely. Open the export to verify it before calling it done.
-
-**Workflow**
-
-1. Decide how chapters map from the current story data.
-2. Build the HTML (and EPUB if feasible) exporter.
-3. Open the exported file, check contents links, special characters and a long story.
-
-**Done when:** The exported book opens offline with working contents, correct chapters and no UI leftovers.
-
-### Games & interaction (new)
-
-#### Add a dice roller with standard notation (new)
-
-`dice-notation` · **Makes changes** · Games & RPGs, Stories & worlds, Chat, characters & memory
-
-*Parse 2d6+3, 4d6kh3, advantage and show each die.*
-
-Add a dice roller that parses NdM, modifiers, keep highest/lowest (kh/kl), drop, exploding dice and advantage/disadvantage, with clear errors for bad input and sane limits on dice count and sides. Show each die, kept and dropped, and the total; keep a short roll history. Use one random source so seeded rerolls stay reproducible if the generator has them.
-
-**Workflow**
-
-1. Write the notation grammar and limits.
-2. Implement the parser, roller, display and history.
-3. Test valid and invalid expressions, huge numbers and repeated seeded rolls.
-
-**Done when:** Standard notation rolls correctly, bad input gets a clear message, and limits prevent runaway rolls.
-
-#### Add inventory and quest log (new)
-
-`inventory-quests` · **Makes changes** · Games & RPGs, Stories & worlds, Chat, characters & memory
-
-*Items with counts and quests with steps, saved with the game state.*
-
-Add an inventory (items with name, count, tags, optional description) and a quest log (quests with steps, status and rewards) stored inside the existing game state and save slots. Provide add, use, drop and complete actions that the game logic or AI narration can call through one function each, so state changes are validated. Show both in compact panels.
-
-**Workflow**
-
-1. Fit inventory and quests into the existing state shape.
-2. Add validated actions and the two panels.
-3. Test save and load, using the last item, completing a quest twice and a malformed save.
-
-**Done when:** Items and quests change only through validated actions, persist with saves and survive reloads.
-
-#### Add branching NPC dialogue trees (new)
-
-`dialogue-trees` · **Makes changes** · Games & RPGs, Stories & worlds
-
-*Authored conversations with conditions, choices and consequences.*
-
-Add a data-driven dialogue tree format (nodes with speaker, text, choices, conditions on state, and effects) and a player that renders choices, applies effects and handles dead ends. Validate the tree on load: missing targets, unreachable nodes and loops without exits. Keep text as data and render with textContent. Optionally let AI fill a node text but never change structure without review.
-
-**Workflow**
-
-1. Define the node format and how state is read and changed.
-2. Build the validator and the dialogue player.
-3. Run a tree with conditions, a missing target, an unreachable node and a loop.
-
-**Done when:** Dialogues play correctly with conditions and effects, and broken trees are reported on load instead of failing mid-play.
-
-### SillyTavern, Chub & character cards (new)
-
-#### Batch import many character cards (new)
-
-`card-batch-import` · **Makes changes** · Chat, characters & memory
-
-*Drop a folder of PNG and JSON cards, preview, dedupe and import.*
-
-Extend card import to accept many files at once: parse each (PNG chara/ccv3 chunks and JSON V2/V3), show a preview list with name, avatar, spec version and problems, detect duplicates by name plus content hash, and import selected cards in one confirmed step with a per-card result. One bad file must never stop the batch. Keep unknown fields.
-
-**Workflow**
-
-1. Reuse the single-card parser and add a batch queue.
-2. Build preview, duplicate detection and confirmed import.
-3. Import a mix of valid, corrupt, duplicate and V3 cards.
-
-**Done when:** Every file gets a result, bad files do not stop the batch, duplicates are flagged and unknown fields survive.
-
-### Rebrand, simplify & privacy (new)
-
-#### Audit what leaves the browser (new)
-
-`privacy-audit` · **Review only** · Any generator
-
-*List every network request, tracker and third-party embed and what data it carries.*
-
-List every outbound request the generator can make: plugin calls, fetches, images, fonts, iframes, analytics or tracking scripts and social embeds. For each, say what triggers it, which host it reaches and what user data it carries (prompt text, chats, identifiers). Flag anything that sends user content to a host the user would not expect, and propose local or opt-in alternatives. Do not edit.
-
-**Workflow**
-
-1. Inventory scripts, embeds, fetches and plugin calls.
-2. Trigger each user path and note requests and payloads.
-3. Report each destination, trigger and data with a recommendation.
-
-**Done when:** Every outbound destination is listed with its trigger and data, unexpected sharing is flagged, and nothing is changed.
-
-### AI input helpers & toolkit (new)
-
-#### Recall recent prompts and inputs (new)
-
-`prompt-history-recall` · **Makes changes** · Chat, characters & memory, AI images & galleries, Stories & worlds, Tools & utilities
+`prompt-history-recall` · **Makes changes** · Chat, characters & memory, AI images & galleries, Stories & worlds, Tools & utilities · new in 1.93.0
 
 *Up-arrow or a dropdown brings back what you typed before.*
 

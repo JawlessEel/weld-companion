@@ -1203,6 +1203,14 @@ entries, warning: 3 assets not used" -> user confirms -> saved as a NEW characte
 extensions kept in a retained blob.
 Bad result: executing HTML in description, overwriting an existing "Mara Quill" silently, or
 failing the whole import because one lore entry has an unknown field.`,
+    'card-batch-import': String.raw`
+Request: "Import these 40 cards I dropped in."
+Good result: queue of 40 -> each parsed on its own (PNG ccv3 preferred over chara, JSON V2/V3)
+-> preview list: 36 ok, 2 "duplicate of Mara Quill (same name and content hash)", 1 "not a
+card: no chara/ccv3 chunk", 1 "JSON parse error at byte 812" -> user unticks the duplicates
+-> one confirm -> per-card result list, unknown extensions kept on every imported card.
+Bad result: stopping at file 7 because it is corrupt, importing duplicates silently, or
+merging two different characters that only share a name.`,
     'card-field-map': String.raw`
 Good result is a table like:
   app field        | card field            | status  | note
@@ -1568,6 +1576,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
   const links = {
     'card-spec-export': ['st-layout', 'st-card-v2', 'st-card-png', 'st-card-v3'],
     'card-spec-import': ['st-layout', 'st-card-v2', 'st-card-v3', 'st-card-png'],
+    'card-batch-import': ['st-card-v2', 'st-card-v3', 'st-card-png'],
     'card-field-map': ['st-card-v2', 'st-card-v3', 'st-lore'],
     'card-validator': ['st-card-v2', 'st-lore'],
     'token-diet': ['st-prompt-order', 'st-card-v2'],
@@ -1597,6 +1606,8 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     'img-storyboard-keyframes': ['img-recipes', 'img-anatomy'],
     'img-diorama-presets': ['img-recipes'],
     'img-prompt-lint': ['img-anatomy'],
+    'img-negative-prompts': ['img-anatomy'],
+    'img-seed-lock': ['img-anatomy'],
     'img-ab-variations': ['img-anatomy'],
     'img-aspect-presets': ['img-recipes'],
     'img-import-credit': ['img-templates', 'img-consent'],

@@ -11,6 +11,7 @@
   const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
   const Web = viaRequire ? require('./skills-web.js') : (host.WeldSkillsWeb || { rows: [] });
   const ImagePrompts = viaRequire ? require('./skills-image.js') : (host.WeldSkillsImage || { rows: [] });
+  const Extra = viaRequire ? require('./skills-extra.js') : (host.WeldSkillsExtra || { rows: [] });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
@@ -458,11 +459,11 @@
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows, ImagePrompts.rows).map(([category, id, title, description, mode, task, fit, origin]) =>
+  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows, ImagePrompts.rows, Extra.rows).map(([category, id, title, description, mode, task, fit, origin, ownSteps, ownCheck]) =>
     Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
       refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',
-      steps: sections.find(c => c.id === category).steps, check: guides[category][4] })));
+      steps: ownSteps ? Object.freeze(ownSteps.slice()) : sections.find(c => c.id === category).steps, check: ownCheck || guides[category][4] })));
   const get = id => presets.find(p => p.id === id) || null;
   function search(query, category, favorites, filters) {
     const f = filters || {};

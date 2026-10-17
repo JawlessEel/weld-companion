@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 259);
+assert.equal(C.presets.length, 291);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
 assert.equal(C.categories.length, 20);
 for (const p of C.presets) {
@@ -122,7 +122,7 @@ assert.ok(Refs.packs.filter(p => /^dad-skill-/.test(p.id)).every(p => !p.text.in
 assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000')));
 // Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
-assert.equal(cardSkills.length, 31);
+assert.equal(cardSkills.length, 32);
 assert.equal(dadSkills.length, 33);
 for (const p of cardSkills.concat(dadSkills)) {
   assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
@@ -227,7 +227,8 @@ assert.ok(specText && JSON.parse(specText[0].replace(/"single" \| "multi"/, '"si
 for (const p of C.presets) assert.ok(C.estimateTokens(C.buildPrompt(p.id, { slug: 'a-long-generator-name', concise: true })) <= 4500, p.id + ' prompt too large');
 
 // Image prompt skills adapted from public Nano Banana prompt collections (1.77.0).
-const imgSkills = C.presets.filter(p => p.category === 'imagegen');
+const extraIds = new Set(require('../src/skills-extra.js').rows.map(r => r[1]));
+const imgSkills = C.presets.filter(p => p.category === 'imagegen' && !extraIds.has(p.id));
 assert.equal(imgSkills.length, 17);
 assert.equal(C.sections.find(s => s.id === 'imagegen').title, 'Image prompts & studios');
 for (const p of imgSkills) {
@@ -240,7 +241,8 @@ assert.match(C.buildPrompt('img-prompt-slots'), /SLOT SYNTAX/);
 assert.match(C.buildPrompt('img-reference-edit'), /LIKENESS AND CONSENT/);
 assert.match(C.buildPrompt('img-json-prompt-builder'), /negative_prompt/);
 assert.ok(C.get('img-prompt-lint').mode === 'review');
-assert.ok(C.search('', 'imagegen', null, { type: 'image' }).length === imgSkills.length);
+assert.ok(C.search('', 'imagegen', null, { type: 'image' }).length === C.presets.filter(p => p.category === 'imagegen').length);
+assert.ok(C.get('img-negative-prompts').refs.includes('img-anatomy') && C.get('img-seed-lock').refs.includes('img-anatomy'));
 assert.ok(C.search('', 'imagegen', null, { type: 'dashboard' }).length === 0);
 assert.ok(C.search('infographic').some(p => p.id === 'img-infographic-studio'));
 const slotText = Refs.byId['img-templates'].text.match(/^\{\n  "id"[\s\S]*?\n\}$/m);
@@ -259,3 +261,15 @@ for (const file of ['main.pjs', 'pjs-globals.js', 'agent-core.js', 'providers.js
 for (const key of ['dad_roleplay', 'lorebookArchive', 'lastLoreRun', 'excludeRecursion', 'vectorized', 'reminderMessage', 'userOverride'])
   assert.ok(formatDoc.includes(key) && Refs.packs.some(p => p.text.includes(key)), 'format drift: ' + key);
 console.log('Skills catalog, scope, search and prompt composition passed');
+
+// Rows from skills-extra.js carry their own workflow and acceptance check instead of the section defaults.
+const extraRow = C.get('dice-notation');
+assert.ok(extraRow && extraRow.category === 'games');
+assert.equal(extraRow.steps.length, 3);
+assert.ok(extraRow.steps[0].startsWith('Write the notation grammar'));
+assert.ok(extraRow.check.startsWith('Standard notation rolls correctly'));
+assert.notDeepEqual(extraRow.steps, C.get('game-balance').steps);
+const extraPrompt = C.buildPrompt('privacy-audit', {});
+assert.ok(extraPrompt.includes('MODE: REVIEW ONLY'));
+assert.ok(extraPrompt.includes('Inventory scripts, embeds, fetches and plugin calls.'));
+assert.ok(C.get('fix-bugs').steps === C.sections.find(s => s.id === 'repair').steps);
