@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.92.0
+// @version      1.92.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -1066,11 +1066,11 @@
     if (!hasSrc) return Promise.resolve(none);
     return ghCollectBackup(name, dslP, htmlP, dsl, html, true, false).then(function (b) {
       if (!b || !b.manifest || !b.manifest.files || !b.manifest.files.length) return none;
-      var paths = b.manifest.files.map(function (r) { return r.path; }), commits = Math.ceil(b.bytes * 4 / 3 / 4500000);
+      var paths = b.manifest.files.map(function (r) { return r.path; }), commits = Math.ceil(b.bytes * 4 / 3 / 2000000);
       var note = '\n\nAlso commits ' + paths.length + ' src file(s), ' + (b.bytes / 1048576).toFixed(2) + ' MiB (' + b.files.length + ' GitHub file(s) incl. manifest):\n'
         + paths.slice(0, 15).map(function (x) { return '  ' + x; }).join('\n') + (paths.length > 15 ? '\n  … and ' + (paths.length - 15) + ' more' : '')
         + '\nUnchanged files are skipped; nothing is deleted. Files over 4 MiB are stored as verified parts.'
-        + (commits > 1 ? '\n\n⚠ Up to ' + commits + ' commits are needed (about 4.5 MB each), so this is NOT one atomic commit; the two panels go in the last one. If it stops midway, the earlier commits stay and a retry skips them.' : '');
+        + (commits > 1 ? '\n\n⚠ Up to ' + commits + ' commits are needed (about 2 MB each), so this is NOT one atomic commit; the two panels go in the last one. If it stops midway, press Push again: the commits already made stay and are skipped.' : '');
       return { files: b.files, validate: b.validate, note: note };
     }, function (e) {
       return { files: panels, validate: null, note: '\n\n⚠ src files NOT included: ' + ((e && e.message) || 'could not read them') + '. Only the two panels will be committed.' };
@@ -1244,11 +1244,11 @@
     });
     }
     // Src push: a first push can be hundreds of files and every Tampermonkey-relayed request costs ~20-30s, so files
-    // go in through GraphQL createCommitOnBranch (base64 additions) in batches under ~4.5 MB, not one blob each. The
+    // go in through GraphQL createCommitOnBranch (base64 additions) in batches under ~2 MB / 150 files, not one blob each. The
     // existing hashes of the generator folder come from ONE recursive tree read, so unchanged files are skipped.
     // opts.last lists paths (the two panels) that go in the final commit. More than one batch means more than one commit.
     function ghPushBatched(fallback) {
-      var LIMIT = 4500000, target = (opts && opts.newBranch) || branch, last = (opts && opts.last) || [];
+      var LIMIT = 2000000, MAXFILES = 150, target = (opts && opts.newBranch) || branch, last = (opts && opts.last) || [];
       function gql(query, variables, done, tries) { call('POST', '/graphql', { query: query, variables: variables }, done, tries); }
       var hq = 'query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){target{oid ...on Commit{url parents(first:1){nodes{oid}}}}}}}';
       function readHead(ref, done) {
@@ -1282,25 +1282,40 @@
         function planAndCommit(items, skipped) {
           try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
           if (!items.length) return cb(null, 'unchanged', info(head.oid, head.url));
-          var batches = ghPlanBatches(items, LIMIT), done = 0, expected = head.oid, lastInfo = null;
-          progress(items.length + ' changed file(s), ' + skipped + ' unchanged, in ' + batches.length + ' commit(s)…');
+          var queue = ghPlanBatches(items, LIMIT, MAXFILES), done = 0, expected = head.oid, lastInfo = null, delay = (opts && opts.retryDelayMs != null) ? opts.retryDelayMs : 3000;
+          progress(items.length + ' changed file(s), ' + skipped + ' unchanged, in ' + queue.length + ' commit(s)…');
+          function retryable(err, st) { return !!err || st === 499 || st === 502 || st === 503 || st === 504 || st === 408 || st === 429; }
+          function resume() { return ' ' + done + ' of ' + (done + queue.length) + ' commit(s) are already on ' + target + (opts && opts.newBranch ? '. Press Push as pull request again to start a new branch.' : '. Press Push again to resume: unchanged files are skipped, only the remaining files are sent, and the two panels go in the last commit.'); }
           function commitNext() {
-            if (done >= batches.length) return cb(null, (opts && opts.newBranch) ? 'created' : 'updated', lastInfo);
-            var b = batches[done++], n = batches.length;
-            progress('Committing batch ' + done + ' of ' + n + ' (' + b.length + ' file(s))…');
-            var input = { branch: { repositoryNameWithOwner: o + '/' + repo, branchName: target }, message: { headline: n > 1 ? msg + ' (part ' + done + ' of ' + n + ')' : msg }, expectedHeadOid: expected,
+            if (!queue.length) return cb(null, (opts && opts.newBranch) ? 'created' : 'updated', lastInfo);
+            send(queue.shift(), 0);
+          }
+          // One commit, with retries: a 499/5xx/timeout is first checked (did it land after all?), then the same
+          // batch is sent again up to 2 more times, then split in half (batches of one file are only retried).
+          function send(b, attempt) {
+            var n = done + queue.length + 1;
+            progress('Committing batch ' + (done + 1) + ' of ' + n + ' (' + b.length + ' file(s))' + (attempt ? ', retry ' + attempt : '') + '…');
+            var input = { branch: { repositoryNameWithOwner: o + '/' + repo, branchName: target }, message: { headline: n > 1 ? msg + ' (part ' + (done + 1) + ' of ' + n + ')' : msg }, expectedHeadOid: expected,
               fileChanges: { additions: b.map(function (it) { return { path: it.path, contents: it.b64 }; }) } };
             gql('mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid url}}}', { input: input }, function (err, st, json) {
               var c = !err && st === 200 && json && !json.errors && json.data && json.data.createCommitOnBranch && json.data.createCommitOnBranch.commit;
-              if (c && c.oid) { expected = c.oid; lastInfo = info(c.oid, c.url); return commitNext(); }
-              var later = done > 1 ? ' ' + (done - 1) + ' earlier commit(s) are already on ' + target + '.' : '';
-              if (!err && done === 1 && !(opts && opts.newBranch)) return fallback();   // refused before anything was written: REST retries cleanly
-              if (!err) return cb(new Error('Commit refused by GitHub: ' + ((json && json.errors && json.errors[0] && json.errors[0].message) || ('HTTP ' + st)) + '.' + later));
-              progress('No reply from GitHub; checking whether ' + target + ' was updated…');
+              if (c && c.oid) { expected = c.oid; lastInfo = info(c.oid, c.url); done++; return commitNext(); }
+              if (!retryable(err, st)) {
+                if (done === 0 && !(opts && opts.newBranch)) return fallback();   // refused before anything was written: REST retries cleanly
+                return cb(new Error('Commit refused by GitHub: ' + ((json && json.errors && json.errors[0] && json.errors[0].message) || ('HTTP ' + st)) + '.' + resume()));
+              }
+              var why = err ? err.message : 'HTTP ' + st;
+              progress('GitHub did not confirm the commit (' + why + '); checking ' + target + '…');
               readHead(target, function (e2, now) {
-                if (now && now.oid !== expected && now.parent === expected) { expected = now.oid; lastInfo = info(now.oid, now.url); return commitNext(); }
-                if (now && now.oid === expected) return cb(new Error('Commit: ' + err.message + ' The batch was not applied.' + later));
-                cb(new Error('Commit: ' + err.message + ' GitHub could not confirm whether the push landed; open the repo to check before retrying.' + later));
+                if (now && now.oid !== expected && now.parent === expected) { expected = now.oid; lastInfo = info(now.oid, now.url); done++; return commitNext(); }   // it landed
+                if (attempt < 2) { progress('Retrying the same batch (' + (attempt + 1) + ' of 2) after ' + why + '…'); return setTimeout(function () { send(b, attempt + 1); }, delay * (attempt + 1)); }
+                if (b.length > 1) {
+                  var half = Math.ceil(b.length / 2);
+                  progress('Splitting the batch into smaller commits after repeated ' + why + '…');
+                  queue.unshift(b.slice(0, half), b.slice(half));
+                  return commitNext();
+                }
+                cb(new Error('Commit of ' + b[0].path + ' failed after retries (' + why + ').' + resume()));
               });
             }, 1);
           }
@@ -1369,10 +1384,10 @@
   }
   // Split changed files into commits of at most ~limit base64 chars; items flagged last (the panels) go in the final commit.
   // A file larger than the limit gets a commit of its own.
-  function ghPlanBatches(items, limit) {
+  function ghPlanBatches(items, limit, maxFiles) {
     var ordered = items.filter(function (x) { return !x.last; }).concat(items.filter(function (x) { return x.last; })), out = [], cur = [], size = 0;
     ordered.forEach(function (it) {
-      if (cur.length && size + it.b64.length > limit) { out.push(cur); cur = []; size = 0; }
+      if (cur.length && (size + it.b64.length > limit || (maxFiles && cur.length >= maxFiles))) { out.push(cur); cur = []; size = 0; }
       cur.push(it); size += it.b64.length;
     });
     if (cur.length) out.push(cur);

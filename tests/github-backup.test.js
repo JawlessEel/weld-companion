@@ -237,12 +237,18 @@ const B = require('../src/github-backup');
     const gitSha = s => require('crypto').createHash('sha1').update(Buffer.concat([Buffer.from('blob ' + Buffer.byteLength(s) + '\0'), Buffer.from(s)])).digest('hex');
     async function batchPush(files, onGitHub, mock = {}, o = {}) {
       const calls = [], progress = [];
-      const context = { console, Promise, setInterval, clearInterval, crypto: webcrypto, TextEncoder, atob, btoa, Uint8Array, ghApi(method, url, token, body, cb) {
+      let headNow = 'head0', prevHead = 'p', okCount = 0;
+      const context = { console, Promise, setTimeout, setInterval, clearInterval, crypto: webcrypto, TextEncoder, atob, btoa, Uint8Array, ghApi(method, url, token, body, cb) {
         calls.push({ method, url, body });
-        if (url === '/graphql' && /^query/.test(body.query)) return cb(null, 200, { data: { repository: { ref: { target: { oid: 'head0', url: 'u', parents: { nodes: [{ oid: 'p' }] } } } } } });
+        if (url === '/graphql' && /^query/.test(body.query)) return cb(null, 200, { data: { repository: { ref: { target: { oid: headNow, url: 'u', parents: { nodes: [{ oid: prevHead }] } } } } } });
         if (url === '/graphql') {
-          const n = calls.filter(c => c.url === '/graphql' && /^mutation/.test(c.body.query)).length;
+          const attempt = calls.filter(c => c.url === '/graphql' && /^mutation/.test(c.body.query)).length, act = mock.script && mock.script[attempt - 1];
           if (mock.refuse) return cb(null, 200, { errors: [{ message: 'nope' }] });
+          if (typeof act === 'number') return cb(null, act, {});
+          if (act === 'stall') return cb(Object.assign(new Error('GitHub request timed out.'), { stalled: true }), 0, null);
+          if (act === 'landed') { prevHead = headNow; headNow = 'cL'; return cb(null, 499, {}); }
+          if (typeof act === 'function' && act(body.variables.input)) return cb(null, 499, {});
+          const n = ++okCount; prevHead = headNow; headNow = 'c' + n;
           return cb(null, 200, { data: { createCommitOnBranch: { commit: { oid: 'c' + n, url: 'https://github.com/o/r/commit/c' + n } } } });
         }
         if (method === 'GET' && url.includes('?recursive=1')) return cb(null, 200, { tree: Object.entries(onGitHub).map(([p, c]) => ({ path: p, type: 'blob', sha: gitSha(c) })) });
@@ -252,11 +258,11 @@ const B = require('../src/github-backup');
         cb(null, method === 'POST' ? 201 : 200, { sha: 'new' });
       } };
       vm.createContext(context); vm.runInContext(uploader, context);
-      const [error, result, info] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'msg', (e, res, i) => r([e, res, i]), { last: ['dad/p.txt', 'dad/h.html'], onProgress: t => progress.push(t), ...o }));
+      const [error, result, info] = await new Promise(r => context.ghPushFilesAtomic('o', 'r', 'main', files, 't', 'msg', (e, res, i) => r([e, res, i]), { last: ['dad/p.txt', 'dad/h.html'], retryDelayMs: 0, onProgress: t => progress.push(t), ...o }));
       const commits = calls.filter(c => c.url === '/graphql' && /^mutation/.test(c.body.query)).map(c => c.body.variables.input);
       return { error, result, info, calls, commits, progress, requests: calls.length };
     }
-    const big = () => 'A'.repeat(3000000);
+    const big = () => 'A'.repeat(1200000);
     const mk = () => [{ path: 'dad/p.txt', content: 'panel' }, { path: 'dad/h.html', content: '<p>h</p>' },
       { path: 'dad/src/same.bin', encoding: 'base64', read: async () => 'AP8B' }, { path: 'dad/src/new.bin', encoding: 'base64', read: async () => 'AQID' },
       { path: 'dad/src/big1.bin', encoding: 'base64', read: async () => big() }, { path: 'dad/src/big2.bin', encoding: 'base64', read: async () => big() }];
@@ -270,7 +276,7 @@ const B = require('../src/github-backup');
     assert.match(two.commits[0].message.headline, /part 1 of 2/); assert.equal(two.info.sha, 'c2');
     assert.ok(two.calls.every(c => c.method !== 'DELETE' && !/_weld-data/.test(JSON.stringify(c.body || {}))), 'no deletions, no _weld-data');
     assert.ok(two.calls.filter(c => c.url.includes('/blobs')).length === 0, 'no per-file blob requests');
-    assert.ok(two.requests <= 6, 'few requests: ' + two.requests);
+    assert.ok(two.requests <= 7, 'few requests: ' + two.requests);
     assert.ok(two.progress.some(t => /Committing batch 1 of 2/.test(t)));
     const small = await batchPush([mk()[0], mk()[1], mk()[2], mk()[3]], gh);
     assert.equal(small.commits.length, 1); assert.equal(small.commits[0].message.headline, 'msg');
@@ -282,6 +288,37 @@ const B = require('../src/github-backup');
     assert.ok(pr.calls.some(c => c.method === 'POST' && c.url.endsWith('/refs') && c.body.sha === 'head0'));
     const refused = await batchPush(mk().slice(0, 4), gh, { refuse: true });
     assert.ok(refused.calls.some(c => c.method === 'PATCH') || refused.error, 'refused first commit falls back to REST');
+    // Retries: 499/5xx/timeouts retry the same batch, then split it; a commit that landed anyway is not repeated.
+    const flaky = await batchPush(mk(), gh, { script: [499, 499] });
+    assert.equal(flaky.error, null); assert.equal(flaky.result, 'updated'); assert.equal(flaky.commits.length, 4, 'two failed attempts + the rest');
+    assert.ok(flaky.progress.some(t => t.includes('Retrying the same batch (1 of 2)')));
+    const stalled = await batchPush(mk(), gh, { script: ['stall', 503] });
+    assert.equal(stalled.error, null); assert.equal(stalled.result, 'updated');
+    const landedAnyway = await batchPush(mk(), gh, { script: ['landed'] });
+    assert.equal(landedAnyway.error, null); assert.equal(landedAnyway.commits.length, 2, 'the commit that landed despite the 499 is not sent again');
+    assert.equal(landedAnyway.commits[1].expectedHeadOid, 'cL', 'the next batch builds on the landed commit');
+    const splitFiles = [{ path: 'dad/p.txt', content: 'panel' }, { path: 'dad/h.html', content: '<p>h</p>' }]
+      .concat([1, 2, 3, 4].map(i => ({ path: 'dad/src/s' + i + '.bin', encoding: 'base64', read: async () => ['AQID', 'AQIE', 'AQIF', 'AQIG'][i - 1] })));
+    const failBigBatch = input => input.fileChanges.additions.length > 3;
+    const halved = await batchPush(splitFiles, {}, { script: [failBigBatch, failBigBatch, failBigBatch].map(f => f) });
+    assert.equal(halved.error, null, 'a persistently failing batch is split in halves');
+    assert.ok(halved.progress.some(t => /Splitting the batch/.test(t)));
+    const lastFiles = halved.commits[halved.commits.length - 1].fileChanges.additions.map(a => a.path);
+    assert.deepEqual(JSON.parse(JSON.stringify(lastFiles.slice(-2))), ['dad/p.txt', 'dad/h.html'], 'panels still go in the last commit after splitting');
+    const dead = await batchPush(mk().slice(0, 3), gh, { script: [499, 499, 499, 499, 499, 499, 499, 499, 499, 499] });
+    assert.ok(dead.error && /Press Push again to resume/.test(dead.error.message), 'failure tells you to press Push again');
+    const midFail = await batchPush(mk(), gh, { script: [null, 499, 499, 499, 499, 499, 499, 499, 499, 499, 499, 499] });
+    assert.ok(/^Commit of .* failed after retries/.test(midFail.error.message) && midFail.error.message.includes(' commit(s) are already on main'), midFail.error.message);
+    // Resume after that partial failure: what landed is on GitHub now, so only the rest is sent and the panels still end it.
+    const resumed = await batchPush(mk(), Object.assign({}, gh, { 'src/new.bin': Buffer.from([1, 2, 3]), 'src/big1.bin': Buffer.alloc(900000) }));
+    assert.equal(resumed.error, null);
+    const resumedPaths = resumed.commits.flatMap(c => c.fileChanges.additions.map(a => a.path));
+    assert.ok(!resumedPaths.includes('dad/src/new.bin') && !resumedPaths.includes('dad/src/same.bin'), 'already-pushed files are not sent again');
+    assert.deepEqual(JSON.parse(JSON.stringify(resumed.commits[resumed.commits.length - 1].fileChanges.additions.slice(-2).map(a => a.path))), ['dad/p.txt', 'dad/h.html']);
+    // Batches stay small: many small files are capped per commit.
+    const many = [{ path: 'dad/p.txt', content: 'panel' }, { path: 'dad/h.html', content: 'h' }].concat(Array.from({ length: 320 }, (_, i) => ({ path: 'dad/src/f' + i, encoding: 'base64', read: async () => 'AQID' })));
+    const capped = await batchPush(many, {});
+    assert.equal(capped.commits.length, 3); assert.ok(capped.commits.every(c => c.fileChanges.additions.length <= 150));
     let guard = 0;
     const guarded = await batchPush(mk().slice(0, 4), gh, {}, { validate: () => { guard++; throw new Error('changed'); } });
     assert.match(guarded.error.message, /changed/); assert.equal(guarded.commits.length, 0); assert.equal(guard, 1);
