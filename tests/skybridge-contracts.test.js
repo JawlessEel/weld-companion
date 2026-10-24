@@ -65,6 +65,7 @@ assert.equal(fetchGuard.sbFetchGuard('https://example.com/resource').ok, true);
     const env = {
       PROVIDERS: { localai: { noKey: true, defaultEndpoint: 'http://localhost:1234', defaultModel: 'm', headers: () => ({}), body: () => '{"stream":false}' } },
       sbApplyMaxTokens() {}, sbApplyTemperature() {}, aiUserForProvider: (p, u) => u, aiErr: (s) => 'http ' + s, JSON, String, Array, Object,
+      aiCooldownMsg: () => "", aiNoteRateLimit() {},
       GM_xmlhttpRequest: (o) => { setTimeout(() => { o.onprogress({ status: 200, responseText: text }); o.onload({ status: 200, responseText: text }); }, 0); },
     };
     const f = load(['callOwnAIStream'], between('var STREAM = {', 'var AI_WORKSPACE'), env);
@@ -505,6 +506,38 @@ console.log('skybridge and GitHub push contract tests passed');
     const snap = ctx.sbPresence.snapshot();
     assert.deepEqual(Object.assign({}, snap.tabs), { alpha: 1 }); assert.equal(snap.ignored, 3);   // bad publish + duplicate + bad vault-updated
     console.log('Skybridge bus envelope validation and presence tests passed');
+  };
+  run().catch((e) => { console.error(e); process.exit(1); });
+}
+// Generator sb.ai calls are capped (2 at once, 8 queued, 10 a minute to a cloud key) and a 429 pauses the provider.
+{
+  const run = async () => {
+    const toasts = [], started = [];
+    let cfg = { provider: 'google', keys: { google: 'k' } };
+    const env = { aiConfig: () => cfg, toast: (m) => toasts.push(String(m)), Date, Promise, String, JSON, Math,
+      sbNoModel: () => ({ ok: false, code: 'no-own-model' }), callOwnAIStream() {},
+      callOwnAI: (c, s, u, done) => { started.push(done); } };
+    const ctx = load(['sbServiceAI', 'SB_AI_LIMIT'], between('var SB_AI_LIMIT', 'function sbServiceFetch('), env);
+    const calls = []; for (let i = 0; i < 11; i++) calls.push(ctx.sbServiceAI({ prompt: 'p' + i }));
+    assert.equal(started.length, 2, 'only two bridge calls run at once');
+    const eleventh = await calls[10];
+    assert.deepEqual([eleventh.ok, eleventh.code], [false, 'rate-limited'], 'the 11th call in a minute is refused');
+    assert.equal(toasts.length, 1);
+    started[0](null, 'a'); await calls[0]; await new Promise((r) => setImmediate(r));
+    assert.equal(started.length, 3, 'a finished call lets the next queued one start');
+    cfg = { provider: 'localai', keys: {} };
+    ctx.SB_AI_LIMIT.queue.length = 0; ctx.SB_AI_LIMIT.active = 0;
+    for (let i = 0; i < 12; i++) ctx.sbServiceAI({ prompt: 'local' + i });
+    assert.ok(started.length > 3, 'local models are not held to the per-minute cap');
+
+    const cool = load(['aiCooldownMsg', 'aiNoteRateLimit'], between('var AI_COOL', '// Big context goes BEFORE'), { Date, Math, String });
+    assert.equal(cool.aiCooldownMsg('google'), '');
+    cool.aiNoteRateLimit('google', 500, {});
+    assert.equal(cool.aiCooldownMsg('google'), '', 'only a 429 starts a pause');
+    cool.aiNoteRateLimit('google', 429, { responseText: '{"error":{"details":[{"retryDelay":"42s"}]}}' });
+    assert.match(cool.aiCooldownMsg('google'), /pausing calls to your model for 4[12]s/);
+    assert.equal(cool.aiCooldownMsg('openai'), '', 'another provider is not paused');
+    console.log('Skybridge AI rate limit and 429 back-off tests passed');
   };
   run().catch((e) => { console.error(e); process.exit(1); });
 }

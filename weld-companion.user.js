@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.93.0
+// @version      1.93.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -2982,6 +2982,7 @@
   function callOwnAI(cfg, sys, user, cb, json, maxTokens, temperature) {
     var p = PROVIDERS[cfg.provider]; if (!p) return cb('Unknown provider', null);
     var key = (cfg.keys || {})[cfg.provider]; if (!key && !p.noKey) return cb('No API key set for ' + p.label, null);
+    var cool = aiCooldownMsg(cfg.provider); if (cool) return cb(cool, null);
     var endpoint = (cfg.endpoints || {})[cfg.provider] || p.defaultEndpoint;
     var model = (cfg.models || {})[cfg.provider] || p.defaultModel;
     var bodyStr = p.body(model, sys, aiUserForProvider(cfg.provider, user), json);
@@ -2989,7 +2990,7 @@
     return GM_xmlhttpRequest({
       method: 'POST', url: p.url(model, key, endpoint), headers: p.headers(key), data: bodyStr, timeout: 120000,
       onload: function (res) {
-        if (res.status && (res.status < 200 || res.status >= 300)) return cb(aiErr(res.status, res.responseText, cfg.provider), null);
+        if (res.status && (res.status < 200 || res.status >= 300)) { aiNoteRateLimit(cfg.provider, res.status, res); return cb(aiErr(res.status, res.responseText, cfg.provider), null); }
         try { var j = JSON.parse(res.responseText); var txt = p.extract(j, json);
           var finish = j && j.choices && j.choices[0] && j.choices[0].finish_reason;
           if (finish === 'length' || (j && (j.stop_reason === 'max_tokens' || j.done_reason === 'length')) ||
@@ -3004,6 +3005,22 @@
       onerror: function (res) { cb(aiErr((res && res.status) || 0, (res && res.responseText) || '', cfg.provider), null); },
       ontimeout: function () { cb((cfg.provider === 'ollama' || cfg.provider === 'localai') ? 'Timed out — a local model can be slow on its first (cold) call; try again once it is loaded.' : 'Timed out contacting ' + p.label, null); }
     });
+  }
+  // Provider back-off: after a 429, every own-model call (workspace, bridge, drafts) waits out the provider's
+  // retry delay instead of piling more requests onto a key that is already throttled.
+  var AI_COOL = { until: 0, provider: '' };
+  function aiCooldownMsg(provider) {
+    var left = AI_COOL.until - Date.now();
+    if (left <= 0 || AI_COOL.provider !== provider) return '';
+    return 'Rate limited by the provider (HTTP 429). Weld is pausing calls to your model for ' + Math.ceil(left / 1000) + 's.';
+  }
+  function aiNoteRateLimit(provider, status, res) {
+    if (status !== 429) return;
+    var secs = 60;
+    var ra = /retry-after:\s*(\d+)/i.exec(String((res && res.responseHeaders) || ''));
+    var rd = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(String((res && res.responseText) || ''));   // Gemini sends it in the body
+    if (ra) secs = +ra[1]; else if (rd) secs = Math.ceil(+rd[1]);
+    AI_COOL.until = Date.now() + Math.max(15, Math.min(600, secs)) * 1000; AI_COOL.provider = provider;
   }
 
   // Big context goes BEFORE the request, split by this marker. Anthropic gets it as a cacheable block (repeat
@@ -3075,6 +3092,7 @@
     var p = PROVIDERS[prov]; if (!p) return cb('Unknown provider', null);
     var key = (cfg.keys || {})[prov]; if (!key && !p.noKey) return cb('No API key set for ' + p.label, null);
     var st = STREAM[prov]; if (!st) return callOwnAI(cfg, sys, user, cb, json, maxTokens, temperature);   // no stream cfg (e.g. Ollama NDJSON) -> single-shot
+    var cool = aiCooldownMsg(prov); if (cool) return cb(cool, null);
     var endpoint = (cfg.endpoints || {})[prov] || p.defaultEndpoint;
     var model = (cfg.models || {})[prov] || p.defaultModel;
     var bodyStr = st.body(model, sys, aiUserForProvider(prov, user), json);
@@ -3108,7 +3126,7 @@
         method: 'POST', url: st.url(model, key, endpoint), headers: p.headers(key), data: bodyStr,
         timeout: 120000,
         onprogress: function (res) { try { pump(res.responseText); } catch (e) {} },
-        onload: function (res) { if (res.status && (res.status < 200 || res.status >= 300)) return finish(aiErr(res.status, res.responseText, prov)); try { pump(res.responseText); } catch (e) {} finish(null); },
+        onload: function (res) { if (res.status && (res.status < 200 || res.status >= 300)) { aiNoteRateLimit(prov, res.status, res); return finish(aiErr(res.status, res.responseText, prov)); } try { pump(res.responseText); } catch (e) {} finish(null); },
         onerror: function (res) { finish(aiErr((res && res.status) || 0, (res && res.responseText) || '', prov)); },
         ontimeout: function () { finish((prov === 'ollama' || prov === 'localai') ? 'Timed out — a local model can be slow on its first (cold) call.' : 'timeout'); }
       });
@@ -3667,9 +3685,32 @@
     if (Date.now() - sbNoModelToastAt > 60000) { sbNoModelToastAt = Date.now(); try { toast('Skybridge: a generator asked for your AI model. ' + hint, 9000); } catch (e) {} }
     return { ok: false, reason: reason, code: 'no-own-model', hint: hint };   // reason strings are kept: existing generators match on them
   }
+  // Generators can call sb.ai in loops (agent swarms, retries, a probe on every reconnect). Run at most 2 bridge
+  // calls at once, queue up to 8 more, and allow 10 a minute to a cloud provider (local models skip the minute cap).
+  var SB_AI_LIMIT = { active: 0, max: 2, queue: [], maxQueue: 8, perMinute: 10, recent: [], toastAt: 0 };
+  function sbAiLimited(why) {
+    var L = SB_AI_LIMIT;
+    if (Date.now() - L.toastAt > 60000) { L.toastAt = Date.now(); try { toast('Skybridge: a generator is calling your AI model too fast (' + why + '). Extra calls were refused to protect your API key.', 9000); } catch (e) {} }
+    return { ok: false, code: 'rate-limited', reason: 'rate-limited' };
+  }
   function sbServiceAI(payload, emit) {
+    var L = SB_AI_LIMIT, cfg = aiConfig(), now = Date.now();
+    if (!cfg || cfg.provider === 'builtin' || !cfg.provider) return sbServiceAICall(cfg, payload, emit);
+    var local = cfg.provider === 'ollama' || cfg.provider === 'localai';
+    L.recent = L.recent.filter(function (t) { return now - t < 60000; });
+    if (!local && L.recent.length >= L.perMinute) return Promise.resolve(sbAiLimited(L.perMinute + ' per minute'));
+    if (L.active >= L.max && L.queue.length >= L.maxQueue) return Promise.resolve(sbAiLimited('too many at once'));
+    if (!local) L.recent.push(now);
     return new Promise(function (resolve) {
-      var cfg = aiConfig();
+      function start() {
+        L.active++;
+        sbServiceAICall(aiConfig(), payload, emit).then(function (r) { L.active--; resolve(r); var next = L.queue.shift(); if (next) next(); });
+      }
+      if (L.active < L.max) start(); else L.queue.push(start);
+    });
+  }
+  function sbServiceAICall(cfg, payload, emit) {
+    return new Promise(function (resolve) {
       if (!cfg || cfg.provider === 'builtin' || !cfg.provider) {
         return resolve(sbNoModel('no-own-model'));   // user hasn't set up their own model
       }
