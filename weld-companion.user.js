@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.93.3
+// @version      1.93.4
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -3630,6 +3630,19 @@
     try { source.postMessage({ channel: SB, type: 'reply', nonce: nonce, result: result }, origin && origin !== 'null' ? origin : '*'); } catch (e) {}
   }
 
+  // Generator storage can end up in the GitHub repo (sbk:* keys), so like vault saves it gets a budget:
+  // 60 writes a minute and 1000 keys per generator.
+  var sbStoreLimit = null, SB_STORE_MAX_KEYS = 1000;
+  function sbStoreRefusal(gen, key) {
+    var X = window.WeldBridgeExtras;
+    if (X && X.rateLimiter) { if (!sbStoreLimit) sbStoreLimit = X.rateLimiter(60, 60000); if (!sbStoreLimit.allow(gen)) return { ok: false, code: 'rate-limited', reason: 'too many storage writes from this generator; try again in a minute' }; }
+    if (gget(sbStoreKey(gen, key), undefined) !== undefined) return null;
+    var prefix = sbStoreKey(gen, ''), seen = {}, n = 0;
+    try { (typeof GM_listValues === 'function' ? GM_listValues() : []).forEach(function (k) { if (typeof k === 'string' && k.indexOf(NS + ':' + prefix) === 0 && !seen[k.slice(NS.length + 1)]) { seen[k.slice(NS.length + 1)] = 1; n++; } }); } catch (e) {}
+    var rk = (typeof folderFiles === 'function') ? folderFiles() : null;
+    if (rk && rk.ready()) rk.keys().forEach(function (k) { if (k.indexOf(prefix) === 0 && !seen[k]) { seen[k] = 1; n++; } });
+    return n >= SB_STORE_MAX_KEYS ? { ok: false, code: 'storage-full', reason: 'this generator already has ' + SB_STORE_MAX_KEYS + ' stored keys; delete some first' } : null;
+  }
   function sbServiceStorage(gen, payload) {
     return new Promise(function (resolve) {
       var op = payload && payload.op;
@@ -3652,6 +3665,7 @@
           return pt.set(gen, payload.key, payload.value).then(resolve, function () { resolve({ ok: false, code: 'folder-write-failed', reason: 'could not write to the backup folder' }); });
         }
         if (!autoSaveOn()) return resolve({ ok: false, code: 'autosave-off', reason: 'automatic saving into Weld storage is off (Settings > Skybridge)' });
+        var refusal = sbStoreRefusal(gen, payload.key); if (refusal) return resolve(refusal);
         resolve(gset(sbStoreKey(gen, payload.key), payload.value) ? { ok: true } : { ok: false, code: 'quota', reason: 'storage-full' });
       } else if (op === 'list') {
         // gset() stores every key under the NS prefix (NS + ':' + key), so match the real stored name.
