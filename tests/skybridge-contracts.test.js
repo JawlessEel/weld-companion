@@ -516,7 +516,7 @@ console.log('skybridge and GitHub push contract tests passed');
     let cfg = { provider: 'google', keys: { google: 'k' } };
     const env = { aiConfig: () => cfg, toast: (m) => toasts.push(String(m)), Date, Promise, String, JSON, Math,
       sbNoModel: () => ({ ok: false, code: 'no-own-model' }), callOwnAIStream() {},
-      callOwnAI: (c, s, u, done) => { started.push(done); } };
+      setTimeout: () => 0, callOwnAI: (c, s, u, done) => { if (u === 'throw') throw new Error('boom'); started.push(done); } };
     const ctx = load(['sbServiceAI', 'SB_AI_LIMIT'], between('var SB_AI_LIMIT', 'function sbServiceFetch('), env);
     const calls = []; for (let i = 0; i < 11; i++) calls.push(ctx.sbServiceAI({ prompt: 'p' + i }));
     assert.equal(started.length, 2, 'only two bridge calls run at once');
@@ -529,6 +529,10 @@ console.log('skybridge and GitHub push contract tests passed');
     ctx.SB_AI_LIMIT.queue.length = 0; ctx.SB_AI_LIMIT.active = 0;
     for (let i = 0; i < 12; i++) ctx.sbServiceAI({ prompt: 'local' + i });
     assert.ok(started.length > 3, 'local models are not held to the per-minute cap');
+    ctx.SB_AI_LIMIT.queue.length = 0; ctx.SB_AI_LIMIT.active = 0;
+    const thrown = await ctx.sbServiceAI({ prompt: 'throw' });
+    assert.equal(thrown.ok, false);
+    assert.equal(ctx.SB_AI_LIMIT.active, 0, 'a call that throws frees its slot');
 
     const cool = load(['aiCooldownMsg', 'aiNoteRateLimit'], between('var AI_COOL', '// Big context goes BEFORE'), { Date, Math, String });
     assert.equal(cool.aiCooldownMsg('google'), '');

@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.93.1
+// @version      1.93.2
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -3704,7 +3704,12 @@
     return new Promise(function (resolve) {
       function start() {
         L.active++;
-        sbServiceAICall(aiConfig(), payload, emit).then(function (r) { L.active--; resolve(r); var next = L.queue.shift(); if (next) next(); });
+        var released = false;
+        function release(r) { if (released) return; released = true; L.active--; resolve(r); var next = L.queue.shift(); if (next) next(); }
+        // A throw, a rejection or a request that never calls back (aborted) must still free the slot.
+        setTimeout(function () { release({ ok: false, code: 'timeout', reason: 'timeout' }); }, 150000);
+        var call; try { call = sbServiceAICall(aiConfig(), payload, emit); } catch (e) { call = Promise.reject(e); }
+        call.then(release, function (e) { release({ ok: false, code: 'error', reason: String((e && e.message) || e).slice(0, 120) }); });
       }
       if (L.active < L.max) start(); else L.queue.push(start);
     });
