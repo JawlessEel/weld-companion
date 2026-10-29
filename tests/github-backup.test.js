@@ -197,15 +197,17 @@ const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : 'pytho
         if (url === '/graphql' && /^query/.test(body.query)) {
           reads++;
           if (mock.noBranch) return cb(null, 200, { data: { repository: { ref: null } } });
-          const landed = reads > 1 && mock.landed, repo = { ref: { target: { oid: landed ? 'head2' : 'head1', url: 'https://github.com/o/r/commit/x' } } };
+          const landed = reads > 1 && mock.landed, moved = reads > 1 && mock.movedBy, repo = { ref: { target: { oid: landed || moved ? 'head2' : 'head1', url: 'https://github.com/o/r/commit/x' } } };
           files.forEach((f, n) => { const c = landed ? f.content : onGitHub[f.path]; repo['f' + n] = c == null ? null : { oid: gitSha(c) }; });
           return cb(null, 200, { data: { repository: repo } });
         }
         if (url === '/graphql') {
           if (mock.stallCommit) return cb(Object.assign(new Error('GitHub request timed out.'), { stalled: true }), 0, null);
           if (mock.refuse) return cb(null, 200, { errors: [{ message: 'Expected branch to point to head1' }] });
+          if (mock.movedBy && body.variables.input.expectedHeadOid === 'head1') return cb(null, 200, { errors: [{ message: 'Expected branch to point to "head1" but it did not. Pull and try again!' }] });
           return cb(null, 200, { data: { createCommitOnBranch: { commit: { oid: 'c0ffee', url: 'https://github.com/o/r/commit/c0ffee' } } } });
         }
+        if (method === 'GET' && url.includes('/compare/')) return cb(null, 200, { status: 'ahead', files: mock.movedBy.map(filename => ({ filename })) });
         if (method === 'GET' && url.includes('/ref/')) return cb(null, 200, { object: { sha: 'parent' } });
         if (method === 'GET' && url.includes('/commits/')) return cb(null, 200, { tree: { sha: 'tree' } });
         if (method === 'POST' && url.endsWith('/trees')) return cb(null, 201, { sha: 'tree2' });
@@ -229,9 +231,15 @@ const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : 'pytho
     const noBranch = await gqlPush(pair, {}, { noBranch: true });
     assert.ok(noBranch.rest.length > 0, 'missing branch falls back to REST for its diagnostics');
     const refused = await gqlPush(pair, {}, { refuse: true });
-    assert.equal(refused.result, 'updated'); assert.equal(refused.gql.length, 2); assert.ok(refused.rest.some(c => c.method === 'PATCH'), 'refused commit retried via REST');
+    assert.equal(refused.result, 'updated'); assert.equal(refused.gql.length, 3, 'one re-read: the head did not move, so REST takes over'); assert.ok(refused.rest.some(c => c.method === 'PATCH'), 'refused commit retried via REST');
     const landedLate = await gqlPush(pair, {}, { stallCommit: true, landed: true });
     assert.equal(landedLate.error, null); assert.equal(landedLate.result, 'updated'); assert.equal(landedLate.rest.length, 0);
+    // The branch moved under the push because Weld saved its own data: continue on the new head, never via per-file REST.
+    const weldMoved = await gqlPush(pair, {}, { movedBy: ['_weld-data/favorites-1a2b3c4d.json'] });
+    assert.equal(weldMoved.error, null); assert.equal(weldMoved.result, 'updated'); assert.equal(weldMoved.rest.length, 0);
+    assert.equal(weldMoved.gql.filter(c => /^mutation/.test(c.body.query)).pop().body.variables.input.expectedHeadOid, 'head2');
+    const otherMoved = await gqlPush(pair, {}, { movedBy: ['_weld-data/x.json', 'dad/a.txt'] });
+    assert.match(otherMoved.error.message, /changed on GitHub during the push \(dad\/a\.txt\)/); assert.equal(otherMoved.rest.length, 0, 'someone else changed the files: stop, do not overwrite');
     const lostCommit = await gqlPush(pair, {}, { stallCommit: true });
     assert.match(lostCommit.error.message, /branch was not changed/); assert.equal(lostCommit.rest.length, 0, 'a commit that may have landed is never resent');
   }
@@ -243,10 +251,13 @@ const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : 'pytho
       let headNow = 'head0', prevHead = 'p', okCount = 0;
       const context = { console, Promise, setTimeout, setInterval, clearInterval, crypto: webcrypto, TextEncoder, atob, btoa, Uint8Array, ghApi(method, url, token, body, cb) {
         calls.push({ method, url, body });
-        if (url === '/graphql' && /^query/.test(body.query)) return cb(null, 200, { data: { repository: { ref: { target: { oid: headNow, url: 'u', parents: { nodes: [{ oid: prevHead }] } } } } } });
+        if (url === '/graphql' && /^query/.test(body.query)) return mock.silent ? cb(Object.assign(new Error('GitHub request timed out.'), { stalled: true }), 0, null) : cb(null, 200, { data: { repository: { ref: { target: { oid: headNow, url: 'u', parents: { nodes: [{ oid: prevHead }] } } } } } });
+        if (method === 'GET' && url.includes('/compare/')) return cb(null, 200, { status: 'ahead', files: mock.movedBy.map(filename => ({ filename })) });
         if (url === '/graphql') {
           const attempt = calls.filter(c => c.url === '/graphql' && /^mutation/.test(c.body.query)).length, act = mock.script && mock.script[attempt - 1];
           if (mock.refuse) return cb(null, 200, { errors: [{ message: 'nope' }] });
+          if (mock.movedBy && body.variables.input.expectedHeadOid === 'head0') { headNow = 'w1'; prevHead = 'head0'; return cb(null, 200, { errors: [{ message: 'Expected branch to point to "head0" but it did not. Pull and try again!' }] }); }
+          if (mock.dead && attempt > 0) { mock.silent = true; return cb(Object.assign(new Error('GitHub request timed out.'), { stalled: true }), 0, null); }
           if (typeof act === 'number') return cb(null, act, {});
           if (act === 'stall') return cb(Object.assign(new Error('GitHub request timed out.'), { stalled: true }), 0, null);
           if (act === 'landed') { prevHead = headNow; headNow = 'cL'; return cb(null, 499, {}); }
@@ -318,6 +329,16 @@ const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : 'pytho
     const resumedPaths = resumed.commits.flatMap(c => c.fileChanges.additions.map(a => a.path));
     assert.ok(!resumedPaths.includes('dad/src/new.bin') && !resumedPaths.includes('dad/src/same.bin'), 'already-pushed files are not sent again');
     assert.deepEqual(JSON.parse(JSON.stringify(resumed.commits[resumed.commits.length - 1].fileChanges.additions.slice(-2).map(a => a.path))), ['dad/p.txt', 'dad/h.html']);
+    // Weld's own data moved the branch mid-push: the batch is resent on the new head, no REST fallback.
+    const dataMoved = await batchPush(mk(), gh, { movedBy: ['_weld-data/scrapbook-00000000.json'] });
+    assert.equal(dataMoved.error, null); assert.equal(dataMoved.result, 'updated');
+    assert.ok(dataMoved.commits.some(c => c.expectedHeadOid === 'w1') && !dataMoved.calls.some(c => c.url.includes('/blobs')));
+    assert.ok(dataMoved.progress.some(t => /Weld data was saved/.test(t)));
+    const othersMoved = await batchPush(mk(), gh, { movedBy: ['dad/src/app.js'] });
+    assert.match(othersMoved.error.message, /changed on GitHub during the push \(dad\/src\/app\.js\)/);
+    // GitHub stops answering entirely: report it instead of splitting batches for hours.
+    const silent = await batchPush(mk(), gh, { dead: true });
+    assert.match(silent.error.message, /not answering through Tampermonkey/); assert.ok(!silent.progress.some(t => /Splitting/.test(t)));
     // Batches stay small: many small files are capped per commit.
     const many = [{ path: 'dad/p.txt', content: 'panel' }, { path: 'dad/h.html', content: 'h' }].concat(Array.from({ length: 320 }, (_, i) => ({ path: 'dad/src/f' + i, encoding: 'base64', read: async () => 'AQID' })));
     const capped = await batchPush(many, {});

@@ -65,7 +65,7 @@
     const API = opt.api, cfg = opt.config, toast = opt.toast || (() => {}), DELAY = opt.delay == null ? 1500 : opt.delay;
     const enc = opt.encode || (s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(s)))));
     const dec = opt.decode || (b => (typeof Buffer !== 'undefined' ? Buffer.from(b, 'base64').toString('utf8') : decodeURIComponent(escape(atob(b)))));
-    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false };
+    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false, hold: 0 };
     const changed = () => S.listeners.forEach(f => { try { f(); } catch (e) { } });
     const ident = x => x.owner + '/' + x.repo + '@' + String(x.branch || 'main');
     const c0 = () => { const x = cfg(); return x && x.token && x.owner && x.repo ? x : null; };
@@ -172,7 +172,11 @@
       }
       throw new Error('Could not save ' + key + ': it kept changing on GitHub. Try again.');
     }
+    // While a generator Push runs, writes wait (each one is a commit on the same branch and would move it under the push).
+    function hold() { S.hold++; }
+    function release() { if (S.hold > 0) S.hold--; if (!S.hold && S.pending.size && !S.timer) S.timer = setTimeout(() => { S.timer = null; flush().catch(() => { }); }, DELAY); }
     async function flush() {
+      if (S.hold) return;   // kept in pending; release() sends them
       if (S.flushing) { await S.flushing; if (S.pending.size && !S.timer) return flush(); return; }
       S.flushing = (async () => {
         const x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return;
@@ -203,7 +207,7 @@
       if (S.error) return S.error;
       return S.loaded ? 'Saved in GitHub: ' + x.owner + '/' + x.repo + '/' + DIR : 'Loading from GitHub...';
     }
-    return { get, set, load, flush, importLegacy, status, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
+    return { get, set, load, flush, importLegacy, status, hold, release, held: () => S.hold > 0, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
       pending: () => S.pending.size, truncated: () => S.truncated, onChange: f => { S.listeners.push(f); }, _state: S };
   }
   return { create, merge, fileName, DIR, canon };

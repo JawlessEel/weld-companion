@@ -97,5 +97,15 @@ mk.toasts = [];
   await sw.load(); sw.set('pending-key', 1); assert.equal(sw.pending(), 1);
   cur = { owner: 'o', repo: 'other', branch: 'main', token: 't' };
   assert.equal(sw.set('x', 1), false, 'not loaded for the new repo'); assert.equal(sw.pending(), 0); assert.equal(sw.get('pending-key', 'none'), 'none');
+  // A generator Push holds writes (each would be a commit moving the branch under the push); release sends them.
+  {
+    const g2 = fakeGitHub(), H2 = mk(g2, 'H'); await H2.load();
+    H2.hold(); assert.equal(H2.held(), true);
+    assert.equal(H2.set('favorites', ['a']), true); await H2.flush(); await new Promise(r => setTimeout(r, 20));
+    assert.equal(g2.puts(), 0, 'nothing is written while held'); assert.equal(H2.pending(), 1); assert.deepEqual(H2.get('favorites'), ['a'], 'reads see the edit');
+    H2.release(); await new Promise(r => setTimeout(r, 30));
+    assert.equal(g2.puts(), 1, 'released writes go out'); assert.equal(H2.pending(), 0); assert.equal(H2.held(), false);
+    H2.release(); assert.equal(H2.held(), false, 'an extra release is harmless');
+  }
   console.log('repo store tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

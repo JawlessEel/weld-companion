@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.95.0
+// @version      1.95.1
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -56,7 +56,7 @@
 (function () {
   'use strict';
 
-  var WC_VERSION = '1.95.0';   // keep equal to @version (self-test report, working-copy README)
+  var WC_VERSION = '1.95.1';   // keep equal to @version (self-test report, working-copy README)
 
   // Top-frame only. With @noframes removed (so the Data Manager agent can run inside
   // generator sandbox frames), every existing module below must stay in the top frame.
@@ -1102,6 +1102,13 @@
     // A stray space or a pasted label ("owner = name") in a custom mapping reads as a 404.
     function clean(v, label) { return String(v || '').replace(new RegExp('^\\s*' + label + '\\s*[=:]\\s*', 'i'), '').trim(); }
     o = clean(o, 'owner'); repo = clean(repo, 'repo'); branch = clean(branch, 'branch');
+    // Weld's own data (src/repo-store.js) commits to the repo too; each save would move the branch under this push.
+    // Its writes wait until the push ends (safety release after 45 min), then go out as usual.
+    var held = null;
+    try { var rpS = window.weldBackup && window.weldBackup.repo; if (rpS && typeof rpS.hold === 'function') { rpS.hold(); held = rpS; } } catch (e) {}
+    var holdTimer = held ? setTimeout(function () { unhold(); }, 45 * 60000) : null;
+    function unhold() { if (!held) return; var h = held; held = null; clearTimeout(holdTimer); try { h.release(); } catch (e) {} }
+    var cbOuter = cb; cb = function () { unhold(); cbOuter.apply(null, arguments); };
     var base = '/repos/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/git/';
     var lastStep = '';
     function emit(text) { if (opts && typeof opts.onProgress === 'function') { try { opts.onProgress(text); } catch (e) {} } }
@@ -1138,6 +1145,16 @@
       })();
     }
     function info(sha, htmlUrl) { return { sha: sha, url: htmlUrl || ('https://github.com/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/commit/' + sha) }; }
+    // GitHub refused a commit because the branch moved. When every commit since `from` only touched _weld-data/ (Weld's
+    // own saves), the push may safely continue on the new head; anything else stops it. done(ok, otherPaths)
+    var headMovedRe = /expected branch to point to|but it did not|expectedHeadOid/i, MOVES = 5;
+    function onlyWeldData(from, to, done) {
+      call('GET', '/repos/' + encodeURIComponent(o) + '/' + encodeURIComponent(repo) + '/compare/' + encodeURIComponent(from) + '...' + encodeURIComponent(to), null, function (e, st, j) {
+        if (e || st !== 200 || !j || j.status !== 'ahead' || !Array.isArray(j.files) || j.files.length >= 300) return done(false, '');
+        var other = j.files.map(function (f) { return String(f && f.filename || ''); }).filter(function (p) { return p.indexOf('_weld-data/') !== 0; });
+        done(!other.length, other.slice(0, 5).join(', '));
+      }, 2);
+    }
     function fail(action, err, st, json) { cb(err ? new Error(action + ': ' + err.message) : ghApiError(action, st, json)); }
     var branchPath = ghBranchPath(branch);
     if (!branchPath) return cb(new Error('Branch is required'));
@@ -1296,7 +1313,7 @@
         function planAndCommit(items, skipped) {
           try { if (opts && opts.validate) opts.validate(); } catch (e) { return cb(e); }
           if (!items.length) return cb(null, 'unchanged', info(head.oid, head.url));
-          var queue = ghPlanBatches(items, LIMIT, MAXFILES), done = 0, expected = head.oid, lastInfo = null, delay = (opts && opts.retryDelayMs != null) ? opts.retryDelayMs : 3000;
+          var queue = ghPlanBatches(items, LIMIT, MAXFILES), done = 0, expected = head.oid, lastInfo = null, moved = 0, delay = (opts && opts.retryDelayMs != null) ? opts.retryDelayMs : 3000;
           progress(items.length + ' changed file(s), ' + skipped + ' unchanged, in ' + queue.length + ' commit(s)…');
           function retryable(err, st) { return !!err || st === 499 || st === 502 || st === 503 || st === 504 || st === 408 || st === 429; }
           function resume() { return ' ' + done + ' of ' + (done + queue.length) + ' commit(s) are already on ' + target + (opts && opts.newBranch ? '. Press Push as pull request again to start a new branch.' : '. Press Push again to resume: unchanged files are skipped, only the remaining files are sent, and the two panels go in the last commit.'); }
@@ -1315,14 +1332,30 @@
               var c = !err && st === 200 && json && !json.errors && json.data && json.data.createCommitOnBranch && json.data.createCommitOnBranch.commit;
               if (c && c.oid) { expected = c.oid; lastInfo = info(c.oid, c.url); done++; return commitNext(); }
               if (!retryable(err, st)) {
-                if (done === 0 && !(opts && opts.newBranch)) return fallback();   // refused before anything was written: REST retries cleanly
-                return cb(new Error('Commit refused by GitHub: ' + ((json && json.errors && json.errors[0] && json.errors[0].message) || ('HTTP ' + st)) + '.' + resume()));
+                var why0 = (json && json.errors && json.errors[0] && json.errors[0].message) || ('HTTP ' + st);
+                function refused() {
+                  if (done === 0 && !(opts && opts.newBranch)) return fallback();   // refused before anything was written: REST retries cleanly
+                  return cb(new Error('Commit refused by GitHub: ' + why0 + '.' + resume()));
+                }
+                if (!headMovedRe.test(why0) || moved >= MOVES) return refused();
+                // The branch moved (usually Weld's own data saving meanwhile): continue on top of it when that is all it was.
+                return readHead(target, function (e3, now) {
+                  if (!now || now.oid === expected) return refused();
+                  onlyWeldData(expected, now.oid, function (ok, other) {
+                    if (!ok) return cb(new Error(target + ' changed on GitHub during the push' + (other ? ' (' + other + ')' : '') + ', so nothing more was committed. Check those changes, then press Push again.' + resume()));
+                    moved++; expected = now.oid;
+                    progress('Weld data was saved to ' + target + ' meanwhile; continuing on top of it…');
+                    send(b, attempt);
+                  });
+                });
               }
               var why = err ? err.message : 'HTTP ' + st;
               progress('GitHub did not confirm the commit (' + why + '); checking ' + target + '…');
               readHead(target, function (e2, now) {
                 if (now && now.oid !== expected && now.parent === expected) { expected = now.oid; lastInfo = info(now.oid, now.url); done++; return commitNext(); }   // it landed
                 if (attempt < 2) { progress('Retrying the same batch (' + (attempt + 1) + ' of 2) after ' + why + '…'); return setTimeout(function () { send(b, attempt + 1); }, delay * (attempt + 1)); }
+                // Splitting only helps when GitHub answers but rejects the size; if it cannot even be read, stop here.
+                if (!now) return cb(new Error('GitHub is not answering through Tampermonkey (' + why + '). Reload this tab, then press Push again.' + resume()));
                 if (b.length > 1) {
                   var half = Math.ceil(b.length / 2);
                   progress('Splitting the batch into smaller commits after repeated ' + why + '…');
@@ -1369,8 +1402,10 @@
           done({ head: r.ref.target.oid, url: r.ref.target.url, oids: names.map(function (n) { return r[n] && r[n].oid || null; }) });
         }, 2);
       }
+      var movedG = 0;
       progress('Checking ' + o + '/' + repo + '@' + branch + '…');
-      readState(function (s) {
+      readState(commitOn);
+      function commitOn(s) {
         if (!s) return fallback();   // branch missing, no access, or GraphQL unavailable: REST explains it properly
         head = s.head;
         Promise.all(files.map(function (f) { return ghBlobSha(f.content); })).then(function (shas) {
@@ -1383,7 +1418,18 @@
           gql('mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid url}}}', { input: input }, function (err, st, json) {
             var c = !err && st === 200 && json && !json.errors && json.data && json.data.createCommitOnBranch && json.data.createCommitOnBranch.commit;
             if (c && c.oid) return cb(null, 'updated', info(c.oid, c.url));
-            if (!err) return fallback();   // GitHub refused it (permission, branch moved...): nothing was written; REST retries cleanly
+            if (!err && headMovedRe.test(gqlErr(st, json)) && movedG < MOVES) {
+              // Branch moved: continue on the new head when only Weld's own data changed meanwhile.
+              var from = head;
+              return readState(function (now) {
+                if (!now || now.head === from) return fallback();
+                onlyWeldData(from, now.head, function (ok, other) {
+                  if (!ok) return cb(new Error(branch + ' changed on GitHub during the push' + (other ? ' (' + other + ')' : '') + '. Nothing was committed; check those changes, then press Push again.'));
+                  movedG++; progress('Weld data was saved to ' + branch + ' meanwhile; continuing on top of it…'); commitOn(now);
+                });
+              });
+            }
+            if (!err) return fallback();   // GitHub refused it (permission...): nothing was written; REST retries cleanly
             // No reply to the commit request: it may still have landed. Re-read before reporting anything.
             progress('No reply from GitHub; checking whether ' + branch + ' was updated…');
             readState(function (now) {
@@ -1393,7 +1439,7 @@
             });
           }, 1);
         });
-      });
+      }
     }
   }
   // Split changed files into commits of at most ~limit base64 chars; items flagged last (the panels) go in the final commit.
@@ -18771,7 +18817,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     const API = opt.api, cfg = opt.config, toast = opt.toast || (() => {}), DELAY = opt.delay == null ? 1500 : opt.delay;
     const enc = opt.encode || (s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(s)))));
     const dec = opt.decode || (b => (typeof Buffer !== 'undefined' ? Buffer.from(b, 'base64').toString('utf8') : decodeURIComponent(escape(atob(b)))));
-    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false };
+    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false, hold: 0 };
     const changed = () => S.listeners.forEach(f => { try { f(); } catch (e) { } });
     const ident = x => x.owner + '/' + x.repo + '@' + String(x.branch || 'main');
     const c0 = () => { const x = cfg(); return x && x.token && x.owner && x.repo ? x : null; };
@@ -18878,7 +18924,11 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
       }
       throw new Error('Could not save ' + key + ': it kept changing on GitHub. Try again.');
     }
+    // While a generator Push runs, writes wait (each one is a commit on the same branch and would move it under the push).
+    function hold() { S.hold++; }
+    function release() { if (S.hold > 0) S.hold--; if (!S.hold && S.pending.size && !S.timer) S.timer = setTimeout(() => { S.timer = null; flush().catch(() => { }); }, DELAY); }
     async function flush() {
+      if (S.hold) return;   // kept in pending; release() sends them
       if (S.flushing) { await S.flushing; if (S.pending.size && !S.timer) return flush(); return; }
       S.flushing = (async () => {
         const x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return;
@@ -18909,7 +18959,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
       if (S.error) return S.error;
       return S.loaded ? 'Saved in GitHub: ' + x.owner + '/' + x.repo + '/' + DIR : 'Loading from GitHub...';
     }
-    return { get, set, load, flush, importLegacy, status, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
+    return { get, set, load, flush, importLegacy, status, hold, release, held: () => S.hold > 0, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
       pending: () => S.pending.size, truncated: () => S.truncated, onChange: f => { S.listeners.push(f); }, _state: S };
   }
   return { create, merge, fileName, DIR, canon };
