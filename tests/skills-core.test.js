@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 291);
+assert.equal(C.presets.length, 304);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
 assert.equal(C.categories.length, 20);
 for (const p of C.presets) {
@@ -122,8 +122,8 @@ assert.ok(Refs.packs.filter(p => /^dad-skill-/.test(p.id)).every(p => !p.text.in
 assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000')));
 // Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
-assert.equal(cardSkills.length, 32);
-assert.equal(dadSkills.length, 33);
+assert.equal(cardSkills.length, 33);
+assert.equal(dadSkills.length, 34);
 for (const p of cardSkills.concat(dadSkills)) {
   assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
   assert.ok(p.example.length > 80, p.id + ' needs a worked example');
@@ -273,3 +273,23 @@ const extraPrompt = C.buildPrompt('privacy-audit', {});
 assert.ok(extraPrompt.includes('MODE: REVIEW ONLY'));
 assert.ok(extraPrompt.includes('Inventory scripts, embeds, fetches and plugin calls.'));
 assert.ok(C.get('fix-bugs').steps === C.sections.find(s => s.id === 'repair').steps);
+// 1.95.0: roleplay/story engine skills and per-skill workflows (Extra.upgrades) for existing skills.
+const Extra = require('../src/skills-extra.js');
+for (const id of ['antislop-director', 'model-output-cleanup', 'update-wipes-state', 'story-state-sideband', 'rpg-hud', 'lore-injection-guard', 'scene-sheet-tracker', 'cast-extractor', 'chat-replay-tests', 'img-story-scenes', 'discoverability', 'chat-layout-essentials', 'dad-runtime-eval']) {
+  const p = C.get(id); assert.ok(p, id);
+  assert.equal(p.steps.length, 3, id); assert.ok(p.check.length > 60, id);
+  if (p.category !== 'dad') assert.notDeepEqual(p.steps, C.sections.find(s => s.id === p.category).steps, id + ' has its own workflow');
+}
+assert.deepEqual(Object.keys(Extra.upgrades).filter(id => !C.get(id)), [], 'every upgrade names a shipped skill');
+for (const [id, up] of Object.entries(Extra.upgrades)) {
+  const p = C.get(id), section = C.sections.find(s => s.id === p.category);
+  assert.equal(up.steps.length, 3, id); assert.ok(up.check.length > 60, id);
+  assert.deepEqual([...p.steps], up.steps, id + ' uses its upgraded steps'); assert.equal(p.check, up.check);
+  assert.notEqual(p.steps, section.steps, id + ' no longer uses the section defaults');
+  assert.ok(C.buildPrompt(id).includes(up.check) && C.buildPrompt(id).includes('1. ' + up.steps[0]), id + ' prompt carries the upgrade');
+}
+assert.ok(!Extra.upgrades['fix-bugs'], 'fix-bugs keeps the section defaults');
+assert.match(C.buildPrompt('lore-injection-guard'), /WORKED EXAMPLE[^]*left exactly as written/);
+assert.match(C.buildPrompt('dad-runtime-eval'), /PROJECT CONTEXT: DAD-CHAT[^]*MODE: REVIEW ONLY/);
+assert.ok(C.search('godmoding').some(p => p.id === 'antislop-director') && C.search('think').some(p => p.id === 'model-output-cleanup'));
+assert.ok(C.search('update()').some(p => p.id === 'update-wipes-state'));

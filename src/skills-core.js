@@ -459,11 +459,15 @@
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows, ImagePrompts.rows, Extra.rows).map(([category, id, title, description, mode, task, fit, origin, ownSteps, ownCheck]) =>
-    Object.freeze({ category, id, title, description, mode, task,
+  // Extra.upgrades: per-skill workflow and acceptance check (and optionally task) for rows that used the section defaults.
+  const upgrades = Extra.upgrades || {};
+  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows, ImagePrompts.rows, Extra.rows).map(([category, id, title, description, mode, task, fit, origin, ownSteps, ownCheck]) => {
+    const up = upgrades[id] || {}; ownSteps = up.steps || ownSteps; ownCheck = up.check || ownCheck; task = up.task || task;
+    return Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
       refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',
-      steps: ownSteps ? Object.freeze(ownSteps.slice()) : sections.find(c => c.id === category).steps, check: ownCheck || guides[category][4] })));
+      steps: ownSteps ? Object.freeze(ownSteps.slice()) : sections.find(c => c.id === category).steps, check: ownCheck || guides[category][4] });
+  }));
   const get = id => presets.find(p => p.id === id) || null;
   function search(query, category, favorites, filters) {
     const f = filters || {};

@@ -1,6 +1,6 @@
 # Weld skills catalog
 
-Every skill preset in **Weld > Skills** (Weld Companion 1.93.0): **291 skills in 20 sections**. 32 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
+Every skill preset in **Weld > Skills** (Weld Companion 1.95.0): **304 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
 
 Each entry shows the task text, the workflow and the acceptance check Weld puts in the prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).
 
@@ -10,25 +10,25 @@ Each entry shows the task text, the workflow and the acceptance check Weld puts 
 | --- | ---: | ---: |
 | [Dashboards & live data](#dashboards--live-data) | 11 | 2 |
 | [Prompts, models & plugins](#prompts-models--plugins) | 20 |  |
-| [Debug & repair](#debug--repair) | 12 | 4 |
-| [Design & modernize](#design--modernize) | 10 | 2 |
+| [Debug & repair](#debug--repair) | 13 | 5 |
+| [Design & modernize](#design--modernize) | 11 | 3 |
 | [Add features](#add-features) | 14 | 5 |
-| [AI & media](#ai--media) | 17 | 3 |
-| [Image prompts & studios](#image-prompts--studios) | 19 | 2 |
+| [AI & media](#ai--media) | 18 | 4 |
+| [Image prompts & studios](#image-prompts--studios) | 20 | 3 |
 | [Data & persistence](#data--persistence) | 14 | 1 |
 | [Performance & reliability](#performance--reliability) | 9 | 1 |
-| [Accessibility & quality](#accessibility--quality) | 10 |  |
+| [Accessibility & quality](#accessibility--quality) | 12 | 2 |
 | [Code & planning](#code--planning) | 11 | 2 |
 | [Create a generator](#create-a-generator) | 7 |  |
 | [Websites & site builders](#websites--site-builders) | 24 |  |
 | [Text & randomness](#text--randomness) | 7 | 2 |
-| [Stories & worlds](#stories--worlds) | 10 | 2 |
-| [Games & interaction](#games--interaction) | 8 | 3 |
-| [SillyTavern, Chub & character cards](#sillytavern-chub--character-cards) | 32 | 1 |
-| [Dad-Chat projects](#dad-chat-projects) | 33 |  |
+| [Stories & worlds](#stories--worlds) | 14 | 6 |
+| [Games & interaction](#games--interaction) | 9 | 4 |
+| [SillyTavern, Chub & character cards](#sillytavern-chub--character-cards) | 33 | 2 |
+| [Dad-Chat projects](#dad-chat-projects) | 34 |  |
 | [Rebrand, simplify & privacy](#rebrand-simplify--privacy) | 9 | 1 |
 | [AI input helpers & toolkit](#ai-input-helpers--toolkit) | 14 | 1 |
-| **Total** | **291** | **32** |
+| **Total** | **304** | **44** |
 
 Modes: **Review only** asks the helper for evidence and recommendations without edits. **Makes changes** asks for the smallest complete change, preserved features and storage, and honest verification.
 
@@ -778,6 +778,22 @@ Find unscoped selectors (button, input, div, *, body, generic class names) and !
 
 **Done when:** The generator looks the same, plugin and dialog UI is no longer restyled, and no selector depends on a global element name.
 
+### Stop update() from wiping inputs, chat or streams
+
+`update-wipes-state` · **Makes changes** · Any generator · new in 1.93.0
+
+*Refresh only the part that changed instead of re-rendering the whole page.*
+
+Find every update() call and what it re-renders. In this generator, check whether a bare update() resets typed text, scroll position, open panels, event listeners or a message that is still streaming. Where it does, split the page into regions (for example status/HUD, chat log, input controls), refresh only the region whose data changed (update(element) or a direct DOM write), and keep the chat log and inputs out of re-rendered templates. Keep [list] output that genuinely should reroll on update working as before.
+
+**Workflow**
+
+1. List each update() call, what triggers it and what it resets today.
+2. Scope each call to the region it needs, moving chat and inputs out of re-rendered markup.
+3. Type a draft, start a stream, scroll the log, then trigger every refresh path and confirm nothing is lost.
+
+**Done when:** Typed text, scroll position, open panels and an active stream survive every refresh, and intended rerolls still work.
+
 ## Design & modernize
 
 ### Modernize the interface
@@ -943,6 +959,22 @@ Add a small shortcut map for the main actions (for example Generate, Copy result
 3. Test every key on and off text fields, with a screen reader running and on a non-US layout if possible.
 
 **Done when:** Each listed shortcut works, none fires while typing, and the help sheet matches the table.
+
+### Make a chat that stays scrolled, readable and tappable
+
+`chat-layout-essentials` · **Makes changes** · Chat, characters & memory, Stories & worlds · new in 1.93.0
+
+*Stick to the newest message, keep the input above the keyboard and give every state a look.*
+
+Make the chat view follow the newest message while the user is at the bottom, but stop auto-scrolling when they scroll up (show a Jump to latest button). Keep the input bar visible above phone keyboards, give tap targets at least about 44px, and give every async view four distinct states: idle, loading, empty and error (with a retry). Keep message width readable on wide screens and let long words and code wrap. Use the generator's existing colors and fonts.
+
+**Workflow**
+
+1. Check scrolling, the input bar and tap sizes on a phone width and a desktop width.
+2. Add stick-to-bottom with Jump to latest, keyboard-safe input, tap sizes and the four states.
+3. Stream a long reply while scrolled up and at the bottom, open the phone keyboard, and trigger empty and error states.
+
+**Done when:** The view follows new messages only at the bottom, the input stays visible with the keyboard open, controls are easy to tap, and idle, loading, empty and error each look different.
 
 ## Add features
 
@@ -1204,11 +1236,11 @@ Improve an existing AI chat or add one if it fits the requested generator. Verif
 
 **Workflow**
 
-1. Inspect actual plugin calls, prompt construction and response handling.
-2. Work within the existing provider and documented capabilities.
-3. Check normal output, failure, cancellation and repeated requests.
+1. Read the plugin call, history building, and the Send, Continue and Regenerate handlers.
+2. Fix history, stop strings for the user name, loading, error and cancel paths; route every option through Continue and Regenerate too.
+3. Run normal turns, an error, a cancel, Continue and Regenerate, then reload.
 
-**Done when:** No duplicate requests, stale response overwrite or stranded loading state.
+**Done when:** Turns never speak for the user, every setting reaches Send, Continue and Regenerate alike, errors recover without losing the draft, and history survives reload.
 
 ### Add or improve an image gallery
 
@@ -1304,11 +1336,11 @@ Map the actual conversation tree, message identity, parent links and active bran
 
 **Workflow**
 
-1. Inspect actual plugin calls, prompt construction and response handling.
-2. Work within the existing provider and documented capabilities.
-3. Check normal output, failure, cancellation and repeated requests.
+1. Map message ids, parents, swipes and the active path.
+2. Store a state snapshot per message so edit, delete, regenerate and branch switches restore the right state.
+3. Branch, edit an early message, regenerate, switch during streaming and reload.
 
-**Done when:** No duplicate requests, stale response overwrite or stranded loading state.
+**Done when:** Sibling branches are never overwritten, each branch restores its own state, and replies land on the branch that asked.
 
 **Inspired by:** [ECC](https://github.com/affaan-m/ECC/blob/ef648e01899ba3e8dc6371642deaaf64b4477775/.agents/skills/frontend-patterns/SKILL.md), [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md)
 
@@ -1360,11 +1392,11 @@ Inspect current history and prompt/context construction. Preserve original saved
 
 **Workflow**
 
-1. Inspect actual plugin calls, prompt construction and response handling.
-2. Work within the existing provider and documented capabilities.
-3. Check normal output, failure, cancellation and repeated requests.
+1. Map what history, summaries and pinned facts go into each request today.
+2. Add a bounded rolling summary or memory list that the user can read and edit, built by the same function the request uses.
+3. Run a chat past the context limit and confirm early facts survive and the memory stays within its cap.
 
-**Done when:** No duplicate requests, stale response overwrite or stranded loading state.
+**Done when:** Early facts survive long chats, memory is visible, editable and capped, and original messages are never rewritten.
 
 **Inspired by:** [ECC](https://github.com/affaan-m/ECC/blob/ef648e01899ba3e8dc6371642deaaf64b4477775/.agents/skills/frontend-patterns/SKILL.md), [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md)
 
@@ -1416,11 +1448,11 @@ Inspect how prompts are assembled and add a budget: estimate size with the same 
 
 **Workflow**
 
-1. Inspect actual plugin calls, prompt construction and response handling.
-2. Work within the existing provider and documented capabilities.
-3. Check normal output, failure, cancellation and repeated requests.
+1. List every prompt part and measure each with one shared estimator.
+2. Fill in priority order (system and character, then pinned lore and memory, then newest history), trimming oldest history first and reporting what was cut.
+3. Check a short chat, a very long chat and an oversized lore set.
 
-**Done when:** No duplicate requests, stale response overwrite or stranded loading state.
+**Done when:** Requests stay under the limit, the most important parts survive, trimming is visible, and the estimate matches the real request.
 
 **Structure references:** Perchance and Weld limits that bite
 
@@ -1450,11 +1482,11 @@ Trace every place untrusted text (user paste, imported cards, lore, chat logs, f
 
 **Workflow**
 
-1. Map untrusted inputs to the prompts and DOM sinks they reach.
-2. Test each with a harmless hostile string (for example an instruction to ignore rules).
-3. Rank findings and propose narrow fixes.
+1. Trace every untrusted text source into the prompt and the page.
+2. Check for role tokens, override phrases and secret requests matched as multi-word phrases, plus HTML and template escaping on output.
+3. Report each source and sink with a harmless test string and a fix.
 
-**Done when:** Each untrusted path is listed with evidence, test strings and a concrete fix; nothing is changed.
+**Done when:** Every untrusted source is traced to its prompt or page sink, findings carry a test string, harmless story wording is not flagged, and nothing is changed.
 
 ### Add user content preferences
 
@@ -1471,6 +1503,22 @@ Add a Preferences panel with include and avoid tags, an intensity or tone settin
 3. Compare prompts with defaults, with several tags, and after reload.
 
 **Done when:** Default prompts are unchanged, chosen preferences reach every request, and the preview shows exactly what was added.
+
+### Clean reasoning leaks, role tags & self-replies
+
+`model-output-cleanup` · **Makes changes** · Chat, characters & memory, Stories & worlds, Prompt studios & plugins · new in 1.93.0
+
+*Strip <think> blocks, template tokens and invented user turns from replies and from history.*
+
+Add one cleanup step between the model and both the screen and saved history. It removes complete reasoning blocks (<think>...</think> and similar), raw template tokens (<|im_start|>, <|eot_id|>, [INST] and the like) and anything from a new line that starts the user's turn (the user name, "User:", "You:"). Check the joined stream text on every chunk, not each chunk alone, because a stop marker can arrive split across two chunks. Clean earlier assistant turns before they go back into the prompt so reasoning never snowballs. Keep the raw text available in a debug view if the generator has one. Do not touch user messages.
+
+**Workflow**
+
+1. Find every place model text is displayed, saved or re-sent.
+2. Add one shared cleanup function plus a streaming check that works across chunk boundaries.
+3. Feed replies with think blocks, template tokens and a fake "User:" turn, streamed in small chunks; check display, history and the next prompt.
+
+**Done when:** No reasoning block, template token or invented user turn reaches the screen, saved history or the next request, and user messages are untouched.
 
 ## Image prompts & studios
 
@@ -1849,6 +1897,22 @@ Verify whether the image plugin accepts and returns a seed. If it does, show the
 **Done when:** Locked seeds are reused and stored with images, and unsupported plugins show no fake seed controls.
 
 **Structure references:** PROMPT ANATOMY and STRUCTURED PROMPT shape for image models
+
+### Add consistent portraits & scene illustrations
+
+`img-story-scenes` · **Makes changes** · AI images & galleries, Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Illustrate story moments with the same character look every time.*
+
+Add an Illustrate action for the current scene. Keep a per-character appearance description (and seed or reference image where the image plugin supports one) and build each image prompt from that fixed description plus the scene's place, time and action. Escape or literal-wrap any story or AI text before it goes into an image prompt so Perchance never reads its brackets or braces as template syntax. Show images beside the message they illustrate, keep the prompt with each image, and generate only on request.
+
+**Workflow**
+
+1. Find the image plugin call and where character data lives.
+2. Add stored appearance, scene prompt building with escaping, and per-message images.
+3. Illustrate three scenes with the same character, a scene containing [brackets] and {braces}, and a failed generation.
+
+**Done when:** The same character looks consistent across scenes, bracket and brace text cannot break generation, images stay attached to their messages, and nothing generates unasked.
 
 ## Data & persistence
 
@@ -2410,6 +2474,38 @@ Test and fix text handling with right-to-left scripts (dir=auto or per-field dir
 
 **Structure references:** Edge cases checklist for AI-built sites
 
+### Record & replay chat turns to catch regressions
+
+`chat-replay-tests` · **Makes changes** · Chat, characters & memory, Stories & worlds, Games & RPGs · new in 1.93.0
+
+*Save a test conversation, replay it after changes and compare state, lore and prompts.*
+
+Add a developer-only recorder that saves a conversation as a list of turns, each with its swipes, the active swipe, a deep copy of game or memory state and which lore entries fired. Add Replay (re-send the user turns, or reuse the recorded replies for a deterministic run) and Rollback to a turn, which restores that turn's state snapshot and drops later turns. Compare a replay with the recording and report differences in state, triggered lore and prompt size. Export and import recordings as files; never include API keys.
+
+**Workflow**
+
+1. Find where turns, swipes, state and lore activations live.
+2. Add record, deep-copied snapshots, rollback, deterministic replay and the diff report.
+3. Record ten turns, roll back to turn four, replay, and export and re-import the recording.
+
+**Done when:** Rollback restores exact earlier state, deterministic replay reproduces the recording, differences are reported per turn, and files round trip without secrets.
+
+### Help people find and understand the generator
+
+`discoverability` · **Review only** · Any generator · new in 1.93.0
+
+*Better title, description, examples and first screen, without fake claims.*
+
+Review how a new visitor finds and understands this generator: its title, description and tags in Perchance, the first screen, example inputs, empty states and share text. Separate what the generator source can change from what only Perchance settings or the outer page control; metadata placed inside the preview frame does not reach search engines or link previews. Propose concrete wording that describes real features only, with no keyword stuffing, fake reviews or promised rankings, and never suggest making a private generator public or exposing chats, lore or keys.
+
+**Workflow**
+
+1. Read the current title, description, first screen and examples as a first-time visitor.
+2. Sort each improvement by where it can be made (source, Perchance settings, outside Perchance).
+3. Give exact proposed text and how the user can check the effect.
+
+**Done when:** Every suggestion names where it can be made, describes only real features, respects privacy, and nothing is changed.
+
 ## Code & planning
 
 ### Explain this generator
@@ -2554,11 +2650,11 @@ Scan both panels for text that Perchance may interpret as templating inside what
 
 **Workflow**
 
-1. Map both panels, contracts, imports and persisted state.
-2. Identify a bounded improvement with explicit acceptance criteria.
-3. Compare changed behavior against the existing workflows and contracts.
+1. Scan both panels and every AI or user text that is rendered through a template or sent to a plugin prompt.
+2. Escape or literal-wrap brackets and braces in data, keep JavaScript out of single-line list items, and escape HTML on output.
+3. Render and send text containing [x], {a|b}, <b> and quotes.
 
-**Done when:** Deliver actionable evidence and next steps without unrelated refactoring.
+**Done when:** Text with brackets, braces, HTML or quotes displays and generates literally, and no template expression comes from data.
 
 **Structure references:** Perchance and Weld limits that bite
 
@@ -3318,11 +3414,11 @@ Use the requested source material to build or improve lore entries in the actual
 
 **Workflow**
 
-1. Map characters, facts, narrative state and the current content structure.
-2. Make story rules explicit and retain established lore and saved progress.
-3. Walk representative scenes, branches, restarts and resumed sessions.
+1. Read the lore format, key matching and budget the generator actually uses.
+2. Write or improve entries with specific keys, one fact cluster each, and short content that does not restate the card.
+3. Test which entries fire on sample messages and that the total fits the budget.
 
-**Done when:** No missing branches, contradictory tracked facts or lost progress in tested paths.
+**Done when:** Each entry fires on its intended messages and not on unrelated ones, content is short and non-duplicated, and the set fits the lore budget.
 
 **Structure references:** Lorebook shapes: card character_book and World Info JSON
 
@@ -3338,11 +3434,11 @@ Trace how the actual chat bot matches lore keys and chooses entries for the acti
 
 **Workflow**
 
-1. Map characters, facts, narrative state and the current content structure.
-2. Make story rules explicit and retain established lore and saved progress.
-3. Walk representative scenes, branches, restarts and resumed sessions.
+1. Trace key matching, recursion, priority and budget for the active chat or branch.
+2. Run sample messages and record which entries fire, which are cut and why.
+3. Report misses, false fires and budget waste with the entry and a fix.
 
-**Done when:** No missing branches, contradictory tracked facts or lost progress in tested paths.
+**Done when:** Every reported issue names the entry, the message that shows it and the cause, and nothing is changed.
 
 **Structure references:** Lorebook shapes: card character_book and World Info JSON, Prompt assembly order with depth injection
 
@@ -3376,11 +3472,11 @@ Map the story facts currently tracked and find actual continuity breaks. Retain 
 
 **Workflow**
 
-1. Map characters, facts, narrative state and the current content structure.
-2. Make story rules explicit and retain established lore and saved progress.
-3. Walk representative scenes, branches, restarts and resumed sessions.
+1. List the facts the story must keep (names, wounds, items, places, time, relationships) and where each lives.
+2. Store changed facts per turn and feed a short current-facts block into each request.
+3. Run a story where facts change, then regenerate and branch.
 
-**Done when:** No missing branches, contradictory tracked facts or lost progress in tested paths.
+**Done when:** Changed facts are remembered across turns, regenerate and branches keep the right version, and the facts block stays small.
 
 **Inspired by:** [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md)
 
@@ -3430,11 +3526,11 @@ Add the requested character profile using existing character state and output. C
 
 **Workflow**
 
-1. Map characters, facts, narrative state and the current content structure.
-2. Make story rules explicit and retain established lore and saved progress.
-3. Walk representative scenes, branches, restarts and resumed sessions.
+1. Separate fixed canon (the card) from things that change in play.
+2. Add the sheet view and store changing fields per chat, never inside the card.
+3. Change state in one chat, open another chat with the same character, and reload.
 
-**Done when:** No missing branches, contradictory tracked facts or lost progress in tested paths.
+**Done when:** Canon stays unchanged, play state belongs to its chat, and the sheet shows both clearly.
 
 **Inspired by:** [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md)
 
@@ -3488,6 +3584,70 @@ Add Export as book: a title page, author line, table of contents and one chapter
 
 **Done when:** The exported book opens offline with working contents, correct chapters and no UI leftovers.
 
+### Stop godmoding, stock phrases & stalled scenes
+
+`antislop-director` · **Makes changes** · Chat, characters & memory, Stories & worlds · new in 1.93.0
+
+*Keep the AI out of the user's character, cut repetitive cliches and give scenes momentum.*
+
+Fix three common roleplay failures in the existing generation path. Godmoding: the reply must stop before it speaks, thinks or acts for the user; add stop strings for the user's name and role labels, and a streaming check that ends the turn and trims the last partial line when one slips through. Stock phrases: keep a short, editable list of overused phrases and a style note (concrete sensory detail, varied sentence openings, fixed point of view) placed close to the end of the prompt, where it carries the most weight; do not post-edit the model text except to trim. Stalled scenes: add an optional Director beat (a complication, a consequence or a time skip) the user can pick or leave on Auto. Check whether the plugin trims a prefill (startWith) before relying on a trailing space. Every new control must also reach Continue and Regenerate.
+
+**Workflow**
+
+1. Read how the request is built and streamed, including Continue and Regenerate.
+2. Add the stop strings, the trim-on-detect check, the phrase list and style note, and the optional Director beat.
+3. Run turns that tempt the model to speak for the user and to repeat itself; check Continue and Regenerate honor the new settings.
+
+**Done when:** Replies end before acting for the user, the phrase list and Director beat are editable and optional, Continue and Regenerate use the same settings, and default output is otherwise unchanged.
+
+### Let each story turn update stats, inventory & location
+
+`story-state-sideband` · **Makes changes** · Stories & worlds, Chat, characters & memory, Games & RPGs · new in 1.93.0
+
+*The AI writes prose plus a small hidden state block that the page applies safely.*
+
+Ask the model to end each turn with one fenced state block (for example ```json:state) holding only changes: location, items added and removed, numeric stat deltas, relationship deltas and the current quest. Hide the block from the visible text while streaming (cut at its opening fence), parse it once the turn finishes, validate it against a fixed schema, clamp numbers to their ranges, ignore unknown keys and keep the old state when the block is missing or broken. Store a snapshot of the state with each turn so Regenerate, Edit and Delete roll back to the state before that turn instead of applying deltas twice.
+
+**Workflow**
+
+1. Define the state schema, ranges and the instruction that asks for the block.
+2. Add hide-while-streaming, parse-on-finish, validation, clamping and per-turn snapshots.
+3. Test a normal turn, a missing block, broken JSON, an out-of-range delta and regenerating an earlier turn.
+
+**Done when:** The reader never sees the state block, bad or missing blocks leave state intact, values stay in range, and regenerating a turn restores the state from before it.
+
+### Keep per-scene character state apart from canon
+
+`scene-sheet-tracker` · **Makes changes** · Chat, characters & memory, Stories & worlds · new in 1.93.0
+
+*Track injuries, mood, items and attitude per chat without rewriting the character card.*
+
+Add a per-chat (per-branch, if branches exist) scene sheet for each active character: physical condition, emotional state, items, location and attitude toward the user. Update it from recent turns on request or after each turn, as a short reviewable summary rather than silent edits. Store it beside the chat, never inside the base character card, inject it as a small labeled block, and let the user edit, clear or pin entries. A new chat starts from the clean card.
+
+**Workflow**
+
+1. Find where characters, chats and branches are stored and how prompts include them.
+2. Add the per-chat sheet, the update step, the prompt block and the edit controls.
+3. Run a scene with an injury and a mood change, branch or start a new chat, and confirm the base card never changed.
+
+**Done when:** Scene state follows the chat and branch, is visible and editable, reaches the prompt within a small cap, and the base character card is never modified.
+
+### Turn a story passage into characters & places
+
+`cast-extractor` · **Makes changes** · Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Pull the main cast and locations out of pasted text as editable entries.*
+
+Add an Extract cast action that reads a pasted passage, chat log or the recent story and proposes up to a small fixed number of characters (most active first) and locations, each with a short description, speech style and relationships, in the generator's own character and lore format. Show the proposals for review before anything is saved, never overwrite an existing character with the same name (offer merge or rename), and do not carry the source chat text or its file name into the new entries.
+
+**Workflow**
+
+1. Find the character and lore formats and their save paths.
+2. Add extraction (rule-based or AI), the capped review list and safe save with name conflict handling.
+3. Extract from dialogue-heavy text, narration-only text and text naming an existing character.
+
+**Done when:** Proposals are capped and reviewable, nothing saves without confirmation, existing characters are never overwritten, and entries hold no copied chat text.
+
 ## Games & interaction
 
 ### Review game balance & economy
@@ -3518,11 +3678,11 @@ Trace game state from start through turns, rewards, completion and restart. Find
 
 **Workflow**
 
-1. Identify the rules, win/loss states and actual game loop.
-2. Keep transitions, probabilities, controls and saved state consistent.
-3. Play start-to-finish and test restart, invalid actions and boundaries.
+1. Trace state from start through turns, rewards, completion and restart.
+2. Put changes in one validated apply function, clamp values and snapshot per turn for undo.
+3. Play to completion, undo, restart and reload mid-game.
 
-**Done when:** Progress remains reachable and no tested path soft-locks or duplicates rewards.
+**Done when:** No invalid transition or double reward is possible, undo restores earlier state exactly, and restart and reload behave.
 
 **Inspired by:** [ECC](https://github.com/affaan-m/ECC/blob/ef648e01899ba3e8dc6371642deaaf64b4477775/.agents/skills/frontend-patterns/SKILL.md), [Game Studios](https://github.com/Donchitos/Claude-Code-Game-Studios/blob/b21fa0f7f289fc3e726cf36fb12b9bc1e7a51e4d/.claude/skills/balance-check/SKILL.md)
 
@@ -3627,6 +3787,22 @@ Add a data-driven dialogue tree format (nodes with speaker, text, choices, condi
 3. Run a tree with conditions, a missing target, an unreachable node and a loop.
 
 **Done when:** Dialogues play correctly with conditions and effects, and broken trees are reported on load instead of failing mid-play.
+
+### Add a stats & inventory HUD with state-driven odds
+
+`rpg-hud` · **Makes changes** · Games & RPGs, Stories & worlds, Chat, characters & memory · new in 1.93.0
+
+*Show HP, items, location and time, and let random events depend on that state.*
+
+Add one game-state object with defaults and a schema, a compact HUD that renders it, and save/load through the existing storage plus Export/Import as a file. Refresh only the HUD when state changes (never the chat or inputs). Where events are random, weight them by state using Perchance dynamic odds (for example ^[state.danger > 50]) so lists react to the story without extra code. Clamp every value, keep state changes in one apply function, and snapshot state per turn or action so undo and regenerate cannot stack effects.
+
+**Workflow**
+
+1. Decide the few stats and items that matter here and their limits.
+2. Add the state object, apply function, HUD, state-weighted lists and save/load.
+3. Play several turns, undo or regenerate one, reload, and export and re-import a save.
+
+**Done when:** The HUD matches the state after every action, odds shift with state, undo and regenerate never double-apply, and saves survive reload and a file round trip.
 
 ## SillyTavern, Chub & character cards
 
@@ -3780,11 +3956,11 @@ Add a small, pure macro expander for card and prompt text: {{user}}, {{char}} an
 
 **Workflow**
 
-1. Read the actual chat, character and lore code, plus real sample cards or logs where supplied; use the STRUCTURE REFERENCE in the prompt to map each field to the target convention.
-2. Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.
-3. Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.
+1. Find every place card, lore or prompt text is sent or shown.
+2. Add one pure expander for {{user}}, {{char}}, <USER>, <BOT> and optional {{random:a,b}} / {{roll:d20}}, applied at send and display time only.
+3. Expand nested, unknown and malformed macros, and confirm saved cards keep the raw macros.
 
-**Done when:** Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.
+**Done when:** Known macros expand the same way everywhere, unknown ones are left as written, randomness is per send, and saved data keeps the raw macro text.
 
 **Structure references:** Macro list and safe expansion rules
 
@@ -3880,11 +4056,11 @@ Add three actions with clear buttons: Continue (extend the last AI message inste
 
 **Workflow**
 
-1. Read the actual chat, character and lore code, plus real sample cards or logs where supplied; use the STRUCTURE REFERENCE in the prompt to map each field to the target convention.
-2. Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.
-3. Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.
+1. Read Send, Continue, Regenerate and how the last message is stored.
+2. Make Continue extend the same message (prefill with its text, minding any trimming), Regenerate add a swipe, Impersonate draft into the input only.
+3. Use each action after changing every setting, and while a reply is streaming.
 
-**Done when:** Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.
+**Done when:** Continue extends the same message, Regenerate keeps earlier swipes, Impersonate never sends, and all three use the current settings.
 
 **Structure references:** Prompt assembly order with depth injection, Chat log JSONL structure
 
@@ -4265,6 +4441,24 @@ Extend card import to accept many files at once: parse each (PNG chara/ccv3 chun
 **Done when:** Every file gets a result, bad files do not stop the batch, duplicates are flagged and unknown fields survive.
 
 **Structure references:** Character Card V2 structure (annotated example), Character Card V3 differences from V2, PNG card layout (where the JSON hides)
+
+### Defang instructions hidden in imported cards & lore
+
+`lore-injection-guard` · **Makes changes** · Chat, characters & memory, Stories & worlds · new in 1.93.0
+
+*Stop a downloaded card, lorebook or chat log from overriding the prompt or asking for secrets.*
+
+On import (and when a shared generator accepts user text), scan card fields, lore entries and chat logs for text that tries to act as instructions: chat-template tokens and role markers (<|im_start|>system, <<SYS>>, [INST], "### System"), override phrases ("ignore all previous instructions", "you are no longer", developer/DAN mode) and requests to print the system prompt or keys. Match multi-word phrases only, so story text like "ignore the noise" or "star system" is never flagged. Neutralize matches in place (quote and label them as inert story text) rather than deleting entries, show what was changed before saving, and let the user keep the original. Always place imported text inside clearly labeled data sections of the prompt.
+
+**Workflow**
+
+1. Find every import path and where imported text enters the prompt.
+2. Add the scanner, in-place neutralizing, a review notice and labeled data sections.
+3. Import a clean card, a card with role tokens and override phrases, and lore with harmless look-alike words; compare prompts before and after.
+
+**Done when:** Injection attempts are neutralized and shown to the user, harmless story wording is untouched, entries are kept, and imported text always sits in labeled data sections.
+
+**Structure references:** Lorebook shapes: card character_book and World Info JSON, Character Card V2 structure (annotated example)
 
 ## Dad-Chat projects
 
@@ -4928,6 +5122,26 @@ Review the prompt assembly described in USER DETAILS against the curated density
 
 **Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
 
+### Run a zero-error runtime check after an edit
+
+`dad-runtime-eval` · **Review only** · Chat, characters & memory, Stories & worlds
+
+*Reload, then prove no console errors, no perchanceErrors, every window handle present and the active branch renders.*
+
+After the edit in USER DETAILS (or the most recent change), reload the generator and run a runtime pass: count console errors and window.perchanceErrors (both must be zero), confirm each window.* handle the layout lists is defined in its documented file and load order, confirm config is a top-level lexical binding and not window.config, and walk the active thread path (getRenderPath or its current equivalent) to check it renders only the selected branch. Then open each modal or studio the edit touched, send one message and check the counts again. Report every check as passed, failed (with the message and file) or not run, and do not change code.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat project layout and load order, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
 ## Rebrand, simplify & privacy
 
 ### Audit where branding appears
@@ -5166,11 +5380,11 @@ First verify from the actual plugin source whether it supports streaming, partia
 
 **Workflow**
 
-1. Derive the generator purpose, inputs and available text/AI plugins from the actual source.
-2. Keep helpers opt-in, reversible, bounded and clearly labeled; never auto-run paid or slow calls.
-3. Test empty, filled, failing, cancelled and repeated actions on each input.
+1. Confirm from the plugin source whether streaming and stopping are supported.
+2. Render chunks into one message node, check stop markers on the joined text, and make Stop end the request and keep the partial reply.
+3. Stream long replies, stop midway, send a stop marker split across chunks, and reload.
 
-**Done when:** Every helper has loading, error, cancel and undo behavior and never overwrites user text without a way back.
+**Done when:** Text appears as it streams, Stop ends the request and keeps a usable partial reply, split stop markers are caught, and controls always come back.
 
 ### Add a usage counter & cost guard
 
