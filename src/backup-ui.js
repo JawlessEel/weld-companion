@@ -634,6 +634,14 @@
   }
   let repoTimer = null;
   async function repoRefresh() { try { await RP.load(); } catch (e) {} if (host) scheduleDraw(); }
+  // Weld > GitHub "Sync now" and a newly saved token: read the repo, run the one-time move if it never ran, send queued edits.
+  async function repoSync() {
+    if (!RP.configured()) return RP.status();
+    await RP.load();
+    if (RP.ready()) { if (!migrating) migrating = repoMigrate().catch(() => {}).then(() => { migrating = null; }); await migrating; await RP.flush(); }
+    if (host) scheduleDraw();
+    return RP.status();
+  }
   async function repoBoot() {
     RP.onChange(() => { try { if (typeof H.refreshTab === 'function') H.refreshTab(); } catch (e) {} });
     if (RP.configured()) { await RP.load(); if (RP.ready()) await repoMigrate(); }
@@ -705,8 +713,127 @@
     if (F.last && F.last.held.length) card.appendChild(E('div', { 'data-held': '1', style: { fontSize: '12px', marginTop: '6px', color: '#e0a030' }, text: 'Held back (plaintext secret-shaped values; not copied to your folder): ' + F.last.held.join(', ') }));
     return card;
   }
+  // ---- working copy: the open generator's page and source files, saved on this computer in one click. Either one
+  // .zip download, or a dated folder inside the backup folder (better for big model files: written file by file).
+  // Contents: both editor panels (unsaved edits included), the src/ files, a snapshot of the rendered page, optionally
+  // the cached models/assets, and a README. Without the editor open, the published copy is used instead.
+  const W = { busy: false, models: false, status: '', error: '' };
+  const ZIP_MEM_MAX = 1.5 * 1024 * 1024 * 1024;   // a zip download is built in memory: keep a tab from running out
+  const utf8 = t => new TextEncoder().encode(String(t == null ? '' : t));
+  const unb64 = t => Uint8Array.from(atob(t), ch => ch.charCodeAt(0));
+  function joinBytes(chunks) {
+    if (chunks.length === 1) return chunks[0];
+    const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0)); let at = 0;
+    chunks.forEach(c => { out.set(c, at); at += c.length; }); return out;
+  }
+  // Calls emit(relativePath, chunks) for every file of the working copy; chunks is a list of async () => Uint8Array.
+  async function workingFiles(slug, emit, progress) {
+    const B = H.backup, notes = [], listed = [];
+    const paths = { dsl: slug + '/' + slug + '-top-panel.txt', html: slug + '/' + slug + '-html-panel.html' };
+    const rel = p => p.slice(slug.length + 1).replace(/^\.weld-backup\/assets\//, 'cached-assets/');
+    const put = async (path, chunks, size) => { listed.push([path, size]); await emit(path, chunks); };
+    let live = typeof H.isEdit === 'function' && H.isEdit() && typeof H.live === 'function' ? H.live() : null, source;
+    const fromEditor = !!(live && live.dsl != null);
+    if (fromEditor) source = 'the open editor (unsaved changes included)';
+    else {
+      progress('Fetching the published copy…');
+      const pub = await B.published(slug); live = { dsl: pub.dsl, html: pub.html || '' };
+      source = 'the published copy on perchance.org (open the editor to include unsaved changes and src/ files)';
+    }
+    let backup = null;
+    if (fromEditor && (W.models || (typeof B.hasSrc === 'function' && B.hasSrc()))) {
+      progress(W.models ? 'Reading src/ files and cached models…' : 'Reading src/ files…');
+      try { backup = await B.collect(slug, paths, live, true, W.models); }
+      catch (e) { notes.push('src/ files and cached assets NOT included: ' + ((e && e.message) || e)); }
+    }
+    if (backup) {
+      const byPath = new Map(backup.files.map(f => [f.path, f])), partPaths = new Set();
+      const reader = f => async () => { const c = f.read ? await f.read() : f.content; return f.encoding === 'base64' ? unb64(c) : utf8(c); };
+      for (const [i, r] of backup.manifest.files.entries()) {
+        progress('Saving file ' + (i + 1) + ' of ' + backup.manifest.files.length + '…');
+        r.parts.forEach(p => partPaths.add(p.path));
+        await put(rel(r.path), r.parts.map(p => reader(byPath.get(p.path))), r.size);
+      }
+      for (const f of backup.files) if (!partPaths.has(f.path) && f.path.indexOf('/.weld-backup/') === -1) await put(rel(f.path), [reader(f)], null);
+      backup.validate();   // the editor or src changed while it was read: stop rather than save a mixed copy
+      if (backup.manifest.unavailable && backup.manifest.unavailable.length) notes.push('Unavailable: ' + backup.manifest.unavailable.join('; '));
+    } else {
+      await put(rel(paths.dsl), [async () => utf8(live.dsl)], null);
+      await put(rel(paths.html), [async () => utf8(live.html)], null);
+    }
+    progress('Taking a snapshot of the rendered page…');
+    let page = null;
+    try { page = typeof B.pageHtml === 'function' ? await B.pageHtml() : null; } catch (e) { notes.push('Rendered page NOT included: ' + ((e && e.message) || e)); }
+    if (page) await put('page/rendered-page.html', [async () => utf8(page)], null);
+    const readme = ['Weld working copy of ' + slug, 'Saved ' + new Date().toString() + ' by Weld Companion ' + (H.version || ''), 'Source: ' + source, '',
+      'Files', ...listed.map(x => '  ' + x[0] + (x[1] != null ? '  (' + C.fmtBytes(x[1]) + ')' : '')), '',
+      'Restore', '  ' + slug + '-top-panel.txt   -> paste into the top (lists) panel of the Perchance editor',
+      '  ' + slug + '-html-panel.html  -> paste into the HTML panel, then Save',
+      '  src/                          -> add back through the editor\'s file panel (same paths)',
+      '  page/rendered-page.html       -> a static snapshot of the page as it looked; open it in a browser to view (scripts that need perchance.org will not run)',
+      '  cached-assets/                -> model and asset files from the browser cache (only when "Include cached models" was on)', '',
+      'Not included: chats and settings the generator keeps in its own browser storage, cookies, passwords, API keys.',
+      ...(notes.length ? ['', 'Notes', ...notes.map(n => '  ' + n)] : [])].join('\n') + '\n';
+    await put('README.txt', [async () => utf8(readme)], null);
+    return { files: listed.length, notes, source };
+  }
+  async function workingCopy(toFolder) {
+    if (W.busy) return;
+    const slug = typeof H.slug === 'function' ? H.slug() : '';
+    W.error = ''; W.status = '';
+    if (!H.backup || typeof H.backup.collect !== 'function') { W.error = 'The working-copy module is unavailable. Update the complete Weld userscript.'; return draw(); }
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(String(slug || ''))) { W.error = 'Open a generator page first.'; return draw(); }
+    if (toFolder && !ptReady()) { W.error = 'Choose a backup folder and allow access first (Backup location below).'; return draw(); }
+    W.busy = true; draw();
+    const at = Date.now(), name = C.workingCopyName(slug, at), progress = t => { W.status = t; draw(); };
+    try {
+      let res;
+      if (toFolder) {
+        const root = await dirAt(F.handle, [slug, 'working-copies', name], true);
+        res = await workingFiles(slug, async (path, chunks) => {
+          const bits = path.split('/'), file = bits.pop(), dir = await dirAt(root, bits, true);
+          const w = await (await dir.getFileHandle(file, { create: true })).createWritable();
+          try { for (const c of chunks) await w.write(await c()); await w.close(); } catch (e) { await w.abort().catch(() => {}); throw e; }
+        }, progress);
+        W.status = 'Saved ' + res.files + ' files to ' + F.name + '/' + slug + '/working-copies/' + name + '.';
+      } else {
+        const entries = []; let total = 0;
+        res = await workingFiles(slug, async (path, chunks) => {
+          const parts = []; for (const c of chunks) { const b = await c(); total += b.length; if (total > ZIP_MEM_MAX) throw new Error('This working copy is too large for a download (over 1.5 GB). Untick "Include cached models" or use Save to backup folder.'); parts.push(b); }
+          entries.push({ path: name + '/' + path, bytes: joinBytes(parts) });
+        }, progress);
+        progress('Building the zip…');
+        H.backup.download(name + '.zip', C.zip(entries, at), 'application/zip');
+        W.status = 'Downloaded ' + name + '.zip (' + res.files + ' files, ' + C.fmtBytes(total) + ').';
+      }
+      if (res.notes.length) W.status += ' ' + res.notes.join(' ');
+      try { H.toast(W.status, 8000); } catch (e) {}
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') { F.perm = 'prompt'; armRegrant(); }
+      W.error = 'Working copy stopped: ' + ((e && e.message) || e); W.status = '';
+    }
+    W.busy = false; draw();
+  }
+  function workingCard() {
+    const card = E('div', { 'data-working-copy': '1', style: { border: '1px solid var(--wc-line,#555)', borderRadius: '8px', padding: '10px', margin: '8px 0' } });
+    const slug = typeof H.slug === 'function' ? H.slug() : '', editing = typeof H.isEdit === 'function' && H.isEdit();
+    card.appendChild(E('div', { text: 'Working copy of this generator', style: { fontWeight: '600' } }));
+    card.appendChild(E('div', { style: Object.assign({ marginBottom: '6px' }, small), text: slug
+      ? 'Saves ' + slug + ' on this computer: both panels' + (editing ? ' as they are in the editor now (unsaved changes included), its src/ files' : ' (published copy; open the editor to include unsaved changes and src/ files)') + ', a snapshot of the rendered page and a README. Nothing is sent anywhere.'
+      : 'Open a generator page to save a copy of it on this computer.' }));
+    const row = E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '6px 0' } });
+    row.appendChild(btn(W.busy ? 'Working…' : 'Download working copy (.zip)', () => { workingCopy(false); }, { disabled: W.busy || !slug }));
+    row.appendChild(btn('Save working copy to backup folder', () => { workingCopy(true); }, { disabled: W.busy || !slug || !ptReady(), title: ptReady() ? 'Writes a dated folder inside ' + F.name : 'Choose a backup folder and allow access first' }));
+    card.appendChild(row);
+    const models = E('input', { type: 'checkbox', 'aria-label': 'Include cached models and assets' }); models.checked = W.models;
+    models.addEventListener('change', () => { W.models = !!models.checked; draw(); });
+    card.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px' } }, [models, E('span', { text: 'Include cached models and assets (can be very large; needs the editor open)' })]));
+    if (W.status) card.appendChild(E('div', { role: 'status', 'data-working-status': '1', style: { fontSize: '12px', marginTop: '6px' }, text: W.status }));
+    if (W.error) card.appendChild(E('div', { role: 'alert', style: { fontSize: '12px', marginTop: '6px', color: '#ff9e92' }, text: W.error }));
+    return card;
+  }
   function render(parent) {
-    host = parent; S.msg = '';
+    host = parent; shown = null; S.msg = '';
     load();
     if (unsub) { try { unsub(); } catch (e) {} unsub = null; }
     const v = V();
@@ -716,8 +843,12 @@
   // Redraws keep the reader where they were: scroll offsets of the panel and every opened section are restored.
   function scrolled(n) { const out = []; for (let x = n; x && x.nodeType === 1; x = x.parentNode) if (x.scrollTop > 0) out.push([x, x.scrollTop]); return out; }
   function remembered(d, id) { if (S.openGens.has(id)) d.open = true; d.addEventListener('toggle', () => { if (d.open) S.openGens.add(id); else S.openGens.delete(id); }); return d; }
+  // Every Weld tab renders into the same panel body. Redraw only while this tab's own content is still what it shows:
+  // otherwise a background redraw (repo refresh, focus, a vault save) would replace whichever tab is open now.
+  let shown = null;
   function draw() {
     const parent = host; if (!parent) return;
+    if (shown && shown.parentNode !== parent) { host = null; shown = null; if (unsub) { try { unsub(); } catch (e) {} unsub = null; } return; }
     const keepScroll = scrolled(parent);
     while (parent.firstChild) parent.removeChild(parent.firstChild);
     try { build(parent); } finally { keepScroll.forEach(x => { x[0].scrollTop = x[1]; }); }
@@ -734,12 +865,13 @@
     top.appendChild(btn(S.busy ? 'Purging...' : 'Purge all Weld-stored backups', () => { purgeAll(); }, { disabled: S.busy, title: 'Removes every vault backup and the Project tab copies and snapshots from browser storage. Anything not yet on disk is saved to your backup folder (or downloaded) first.' }));
     wrap.appendChild(top);
     if (S.msg) wrap.appendChild(E('div', { role: 'status', 'aria-live': 'polite', style: { fontSize: '12px', margin: '4px 0', color: S.msgErr ? '#ff9e92' : '' }, text: S.msg }));
-    if (S.error) { wrap.appendChild(E('div', { role: 'alert', style: { color: '#ff9e92', margin: '8px 0' }, text: S.error })); parent.appendChild(wrap); return; }
+    wrap.appendChild(workingCard());   // works even when the storage listing below fails
+    if (S.error) { wrap.appendChild(E('div', { role: 'alert', style: { color: '#ff9e92', margin: '8px 0' }, text: S.error })); shown = parent.appendChild(wrap); return; }
     const inv = S.inv, info = (V() && V().info && V().info()) || {};
     wrap.appendChild(E('div', { 'data-summary': '1', style: Object.assign({ margin: '4px 0 10px' }, small), text:
       (info.backend || 'Userscript storage') + ' · ' + inv.count + ' backup key' + (inv.count === 1 ? '' : 's') + ' still in browser storage · ' + C.fmtBytes(inv.bytes) +
       (info.quota ? ' · browser storage ' + C.fmtBytes(info.usage || 0) + ' of ' + C.fmtBytes(info.quota) : '') }));
-    if (!inv.count) wrap.appendChild(note('Nothing is held in Weld storage. Generator vault saves land in your backup folder.'));
+    if (!inv.count) wrap.appendChild(note('Nothing is held in Weld storage. Generator vault saves go to your GitHub repo (_weld-data/).'));
     wrap.appendChild(folderCard());
     wrap.appendChild(cleanupCard());
     wrap.appendChild(familyCard(rerender));
@@ -769,11 +901,11 @@
       S.secrets.forEach(h => wrap.appendChild(E('div', { 'data-secret': '1', style: { fontSize: '12px' }, text: '⚠ ' + h.key + ': ' + h.paths.join(', ') + ' (value hidden)' })));
     }
     wrap.appendChild(inspector(rerender));
-    parent.appendChild(wrap);
+    shown = parent.appendChild(wrap);
   }
   bootFolder().catch(() => {});
   // vault: the pass-through store Skybridge storage uses for weld:genvault: keys (see sbServiceStorage).
   // files: the folder store behind Weld's storage helpers for Studio projects and the Scrapbook (see gget/gset).
   window.weldBackup = { render, purge: purgeAll, _sync: syncToFolder, _state: F, vault: { ready: vaultReady, set: rpVaultSet, get: rpVaultGet, list: rpVaultList, noFolder: 'Weld keeps your data in your GitHub repo. Set owner, repo and token in Weld > GitHub.' },
-    files: repoFiles, repo: RP };
+    files: repoFiles, repo: RP, sync: repoSync, workingCopy };
 })();

@@ -11,7 +11,7 @@ class Element {
     if (attrs.onclick) this.events.click = attrs.onclick;
   }
   appendChild(c) { if (c) { c.parentNode = this; this.children.push(c); } return c; }
-  removeChild(c) { this.children = this.children.filter(x => x !== c); return c; }
+  removeChild(c) { this.children = this.children.filter(x => x !== c); if (c.parentNode === this) c.parentNode = null; return c; }
   get firstChild() { return this.children[0] || null; }
   addEventListener(type, fn) { this.events[type] = fn; }
   get isConnected() { return true; }
@@ -124,7 +124,7 @@ assert.equal(C.checkStoreWrite('', {}).reason, 'bad-key'); assert.equal(C.checkS
 // ---- UI against a fake host
 const bytes = () => JSON.stringify([...store].sort());
 const listeners = [], downloads = []; let listFail = false, removed = [];
-class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += x; }, close: async () => { this.text = b; this.lastModified = ++FakeFile.clock; } }; } async getFile() { const t = this.text, m = this.lastModified || 0; return { size: t.length, lastModified: m, text: async () => t }; } }
+class FakeFile { constructor(n) { this.name = n; this.kind = 'file'; this.text = ''; } async createWritable() { let b = ''; return { write: async x => { b += typeof x === 'string' ? x : Buffer.from(x).toString('utf8'); }, abort: async () => {}, close: async () => { this.text = b; this.lastModified = ++FakeFile.clock; } }; } async getFile() { const t = this.text, m = this.lastModified || 0; return { size: t.length, lastModified: m, text: async () => t }; } }
 FakeFile.clock = 1000;
 class FakeDir {
   constructor(n) { this.name = n; this.kind = 'directory'; this.items = new Map(); this.perm = 'granted'; }
@@ -195,7 +195,7 @@ const host = {
   }
 };
 const window = { WeldBackupCore: C, WeldRepoStore: R, weldProjectHost: host }; window.top = window;
-vm.runInNewContext(fs.readFileSync('src/backup-ui.js', 'utf8'), { window, console, setTimeout, clearTimeout, setInterval, clearInterval, btoa, atob, escape, unescape });
+vm.runInNewContext(fs.readFileSync('src/backup-ui.js', 'utf8'), { window, console, setTimeout, clearTimeout, setInterval, clearInterval, btoa, atob, escape, unescape, TextEncoder });
 const parent = new Element('main');
 const btn = label => walk(parent).find(n => n.tagName === 'button' && (n.attrs.text === label || n.attrs['aria-label'] === label));
 const click = label => { const b = btn(label); assert.ok(b, 'missing ' + label); b.click(); };
@@ -471,6 +471,75 @@ for (const f of ['src/backup-core.js', 'src/backup-ui.js']) assert.ok(!/console\
     assert.deepEqual(J2(window.weldBackup.files.get('scrapbook', [])), before, 'the repo copy is untouched');
     assert.ok(gh.paths().some(f => /^_weld-data\/legacy\/scrapbook-.*-browser-/.test(f)), 'the older copy is kept as a file: ' + gh.paths().join(', '));
     assert.ok(!JSON.stringify(window.weldBackup.files.get('scrapbook', [])).includes('old-1'));
+  }
+  // working copy: one zip of the editor panels, src/ files, rendered page and a README; or a dated folder in the backup folder
+  {
+    const zips = [], collects = [];
+    let editing = true, page = '<html>live</html>', src = true;
+    host.isEdit = () => editing; host.live = () => ({ dsl: 'title\n  x', html: '<p>[title]</p>' }); host.version = '9.9.9';
+    host.backup = {
+      hasSrc: () => src,
+      collect: async (slug, paths, live, quiet, models) => {
+        collects.push(models);
+        const big = Buffer.alloc(5, 7).toString('base64');
+        return { bytes: 9, validate: () => {}, manifest: { unavailable: [], files: [
+          { path: slug + '/src/app.js', size: 4, kind: 'project', parts: [{ path: slug + '/src/app.js', size: 4 }] }].concat(models ? [
+          { path: slug + '/.weld-backup/assets/0/model.gguf', size: 10, kind: 'opfs', parts: [{ path: slug + '/.weld-backup/parts/1/000000', size: 5 }, { path: slug + '/.weld-backup/parts/1/000001', size: 5 }] }] : []) },
+          files: [{ path: paths.dsl, content: live.dsl }, { path: paths.html, content: live.html },
+            { path: slug + '/src/app.js', encoding: 'base64', read: async () => Buffer.from('a=1;').toString('base64') },
+            { path: slug + '/.weld-backup/parts/1/000000', encoding: 'base64', read: async () => big },
+            { path: slug + '/.weld-backup/parts/1/000001', encoding: 'base64', read: async () => big },
+            { path: slug + '/.weld-backup/manifest.json', read: () => '{}' }, { path: slug + '/.weld-backup/restore.py', content: '' }] };
+      },
+      pageHtml: async () => { if (!page) throw new Error('Load the generator preview first'); return page; },
+      published: async () => ({ dsl: 'published', html: '<p>pub</p>' }),
+      download: (n, parts, type) => zips.push({ n, type, buf: Buffer.concat(parts.map(p => Buffer.from(p))) })
+    };
+    window.weldBackup.render(parent);
+    assert.ok(walk(parent).some(n => n.attrs['data-working-copy']), 'working copy card is shown');
+    const unzip = buf => { const out = {}; let i = 0; while (buf.readUInt32LE(i) === 0x04034b50) { const size = buf.readUInt32LE(i + 18), nl = buf.readUInt16LE(i + 26), name = buf.slice(i + 30, i + 30 + nl).toString(); out[name] = buf.slice(i + 30 + nl, i + 30 + nl + size); i += 30 + nl + size; } return out; };
+    click('Download working copy (.zip)'); await until(() => zips.length === 1, 'zip downloaded');
+    assert.match(zips[0].n, /^alpha-working-copy-\d{8}-\d{6}\.zip$/); assert.equal(zips[0].type, 'application/zip');
+    const z = unzip(zips[0].buf), root = zips[0].n.slice(0, -4) + '/';
+    assert.deepEqual(Object.keys(z).sort(), ['README.txt', 'alpha-html-panel.html', 'alpha-top-panel.txt', 'page/rendered-page.html', 'src/app.js'].map(p => root + p).sort(), 'no cached models unless asked, no .weld-backup internals');
+    assert.equal(z[root + 'alpha-top-panel.txt'].toString(), 'title\n  x'); assert.equal(z[root + 'src/app.js'].toString(), 'a=1;');
+    assert.equal(z[root + 'page/rendered-page.html'].toString(), '<html>live</html>');
+    assert.match(z[root + 'README.txt'].toString(), /open editor \(unsaved changes included\)[^]*9\.9\.9|9\.9\.9[^]*open editor/);
+    assert.deepEqual(collects, [false]);
+    // models box: cached assets are reassembled from their parts; a missing preview is a note, not a failure
+    const box = walk(parent).find(n => n.attrs['aria-label'] === 'Include cached models and assets'); box.checked = true; box.events.change();
+    page = null; click('Download working copy (.zip)'); await until(() => zips.length === 2, 'second zip');
+    const z2 = unzip(zips[1].buf), r2 = zips[1].n.slice(0, -4) + '/';
+    assert.deepEqual([...z2[r2 + 'cached-assets/0/model.gguf']], Array(10).fill(7));
+    assert.ok(!z2[r2 + 'page/rendered-page.html']); assert.match(z2[r2 + 'README.txt'].toString(), /Rendered page NOT included/);
+    assert.deepEqual(collects, [false, true]);
+    // not editing: the published copy, no src read
+    editing = false; page = '<p/>'; box.checked = false; box.events.change();
+    click('Download working copy (.zip)'); await until(() => zips.length === 3, 'third zip');
+    const z3 = unzip(zips[2].buf), r3 = zips[2].n.slice(0, -4) + '/';
+    assert.equal(z3[r3 + 'alpha-top-panel.txt'].toString(), 'published'); assert.equal(collects.length, 2, 'no src read without the editor');
+    // backup folder: a dated folder, file by file
+    editing = true; window.weldBackup.render(parent);
+    click('Save working copy to backup folder'); await until(() => pickedDir.files().some(f => /^alpha\/working-copies\/.*\/README\.txt$/.test(f)), 'folder copy written');
+    const wc = pickedDir.files().filter(f => f.startsWith('alpha/working-copies/'));
+    assert.ok(wc.some(f => /\/src\/app\.js$/.test(f)) && wc.some(f => /\/page\/rendered-page\.html$/.test(f)), wc.join(', '));
+    // a secret-shaped src file stops the src read; the panels are still saved and the README says why
+    host.backup.collect = async () => { throw new Error('Secret-shaped project content detected'); };
+    click('Download working copy (.zip)'); await until(() => zips.length === 4, 'fourth zip');
+    const z4 = unzip(zips[3].buf), r4 = zips[3].n.slice(0, -4) + '/';
+    assert.ok(z4[r4 + 'alpha-top-panel.txt'] && !Object.keys(z4).some(k => k.includes('/src/')));
+    assert.match(z4[r4 + 'README.txt'].toString(), /src\/ files and cached assets NOT included: Secret-shaped/);
+    delete host.backup; delete host.isEdit; delete host.live;
+  }
+  // another tab took the panel body: a background redraw (repo refresh, vault save) must not paint Backups over it
+  {
+    window.weldBackup.render(parent);
+    while (parent.firstChild) parent.removeChild(parent.firstChild);
+    const other = new Element('div', { text: 'GitHub tab' }); parent.appendChild(other);
+    for (const fn of listeners.slice()) fn();
+    await window.weldBackup.sync(); await new Promise(r => setTimeout(r, 500));
+    assert.equal(parent.children.length, 1); assert.equal(parent.firstChild, other, 'the open tab is left alone');
+    window.weldBackup.render(parent); assert.ok(walk(parent).some(n => n.attrs['data-working-copy']), 'Backups draws again once reopened');
   }
   console.log('backup tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

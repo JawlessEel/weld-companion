@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const B = require('../src/github-backup');
+const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : 'python';
 
 (async () => {
   for (const p of ['../x', 'a/../x', 'a//x', 'C:/x', 'a\\x', '.git/config', '/x', 'src/.env', 'src/private.pem']) assert.equal(B.safePath(p), false);
@@ -31,14 +32,14 @@ const B = require('../src/github-backup');
   const rec = result.manifest.files.find(f => f.kind === 'opfs');
   assert.equal(rec.parts.length, 2); assert.ok(rec.parts.every(p => /^[a-f0-9]{64}$/.test(p.sha256)));
   const out = path.join(tmp, 'restored');
-  const restored = spawnSync('python', [path.join(root, '.weld-backup/restore.py'), '--output', out], { encoding: 'utf8' });
+  const restored = spawnSync(PY, [path.join(root, '.weld-backup/restore.py'), '--output', out], { encoding: 'utf8' });
   assert.equal(restored.status, 0, restored.stderr);
   assert.deepEqual(fs.readFileSync(path.join(out, '.weld-backup/assets/0/model.gguf')), model);
   assert.deepEqual(fs.readFileSync(path.join(out, 'src/main.js')), Buffer.from([0, 255, 13, 10]));
-  const again = spawnSync('python', [path.join(root, '.weld-backup/restore.py'), '--output', out], { encoding: 'utf8' });
+  const again = spawnSync(PY, [path.join(root, '.weld-backup/restore.py'), '--output', out], { encoding: 'utf8' });
   assert.notEqual(again.status, 0, 'restore never overwrites existing files');
   fs.writeFileSync(path.join(tmp, rec.parts[0].path), 'broken');
-  const broken = spawnSync('python', [path.join(root, '.weld-backup/restore.py'), '--output', path.join(tmp, 'bad')], { encoding: 'utf8' });
+  const broken = spawnSync(PY, [path.join(root, '.weld-backup/restore.py'), '--output', path.join(tmp, 'bad')], { encoding: 'utf8' });
   assert.notEqual(broken.status, 0); assert.match(broken.stderr, /integrity/);
   listing = { 'main.js': { size: 4, rev: 2 } };
   assert.throws(result.validate, /changed/);
@@ -66,10 +67,12 @@ const B = require('../src/github-backup');
   vm.runInContext(shipped.slice(shipped.indexOf('function ghCollectBackup('), shipped.indexOf('function ghBackupNote(')), collectorContext);
   await collectorContext.ghCollectBackup('dad', opts.dslPath, opts.htmlPath, opts.dsl, opts.html);
   assert.equal(collected[0].includeCache, false, 'shared collector disables cache capture unless requested');
-  const localAdapter = shipped.match(/backup:\s*\{\s*collect:\s*(function[^\n]+),\s*\n\s*crypto:/)[1];
+  const localAdapter = shipped.match(/backup:\s*\{[^]*?collect:\s*(function[^\n]+),\s*\n/)[1];
   vm.runInContext('var localCollect = ' + localAdapter, collectorContext);
   await collectorContext.localCollect('dad', { dsl: opts.dslPath, html: opts.htmlPath }, { dsl: opts.dsl, html: opts.html }, true);
   assert.equal(collected[1].includeCache, true, 'local download continues to capture requested assets');
+  await collectorContext.localCollect('dad', { dsl: opts.dslPath, html: opts.htmlPath }, { dsl: opts.dsl, html: opts.html }, true, false);
+  assert.equal(collected[2].includeCache, false, 'a working copy without the models box skips cached assets');
   // Push / Push as pull request commit the panels plus the generator's src files (when it has a src store).
   const tick = () => new Promise(r => setTimeout(r, 5));
   async function pushFlow(mock) {
