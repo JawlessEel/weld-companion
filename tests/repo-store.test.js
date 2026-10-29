@@ -107,5 +107,78 @@ mk.toasts = [];
     assert.equal(g2.puts(), 1, 'released writes go out'); assert.equal(H2.pending(), 0); assert.equal(H2.held(), false);
     H2.release(); assert.equal(H2.held(), false, 'an extra release is harmless');
   }
+  // 1.96.0: one commit per save cycle through GraphQL createCommitOnBranch, with the same merge rules.
+  {
+    const crypto = require('node:crypto');
+    const gitSha = t => crypto.createHash('sha1').update(Buffer.concat([Buffer.from('blob ' + Buffer.byteLength(t) + '\0'), Buffer.from(t)])).digest('hex');
+    function fakeGql() {
+      const files = new Map(); let head = 'h0', n = 0, moveOnce = false;
+      const stats = { commits: [], fileGets: 0, refused: 0 };
+      const put = (p, text) => files.set(p, { text, sha: gitSha(text) });
+      const api = async (method, path, body) => {
+        if (path === '/graphql') {
+          if (/^query/.test(body.query)) {
+            const v = body.variables, repo = { ref: { target: { oid: head } } };
+            Object.keys(v).filter(k => /^e\d+$/.test(k)).forEach(k => { const f = files.get(v[k].slice(v[k].indexOf(':') + 1)); repo['f' + k.slice(1)] = f ? { oid: f.sha, text: f.text, isBinary: false } : null; });
+            return { status: 200, json: { data: { repository: repo } } };
+          }
+          const input = body.variables.input;
+          if (moveOnce) { moveOnce = false; head = 'h' + (++n); }   // someone else committed just before this one
+          if (input.expectedHeadOid !== head) { stats.refused++; return { status: 200, json: { errors: [{ message: 'Expected branch to point to "' + input.expectedHeadOid + '" but it did not. Pull and try again!' }] } }; }
+          (input.fileChanges.additions || []).forEach(a => put(a.path, Buffer.from(a.contents, 'base64').toString('utf8')));
+          (input.fileChanges.deletions || []).forEach(d => files.delete(d.path));
+          head = 'h' + (++n); stats.commits.push(input);
+          return { status: 200, json: { data: { createCommitOnBranch: { commit: { oid: head } } } } };
+        }
+        const mt = path.match(/\/contents\/([^?]+)/); if (!mt) return { status: 200, json: { private: true } };
+        const p = decodeURIComponent(mt[1]);
+        if (method === 'GET') {
+          if (files.has(p)) { stats.fileGets++; return { status: 200, json: { sha: files.get(p).sha, content: Buffer.from(files.get(p).text).toString('base64') } }; }
+          const list = [...files].filter(([f]) => f.startsWith(p + '/') && !f.slice(p.length + 1).includes('/')).map(([f, v]) => ({ type: 'file', name: f.slice(p.length + 1), sha: v.sha }));
+          return list.length ? { status: 200, json: list } : { status: 404, json: null };
+        }
+        throw new Error('REST write used: ' + method + ' ' + p);
+      };
+      return { files, api, stats, put, move: () => { moveOnce = true; } };
+    }
+    const toasts = [];
+    const mkG = g => R.create({ api: g.api, config: () => ({ owner: 'o', repo: 'r', branch: 'main', token: 't' }), toast: m => toasts.push(m), delay: 100000 });
+    const g = fakeGql(), A = mkG(g), B = mkG(g);
+    await A.load(); await B.load();
+    ['favorites', 'pins:x', 'scrapbook', 'genNotes', 'studio:index:v1'].forEach((k, i) => A.set(k, k === 'scrapbook' ? [{ id: 'a', t: 1 }] : [i]));
+    await A.flush();
+    assert.equal(g.stats.commits.length, 1, 'five saves, one commit');
+    assert.match(g.stats.commits[0].message.headline, /^Weld: save 5 items \(favorites, pins:x, scrapbook, \.\.\.\)$/);
+    assert.equal([...g.files.keys()].filter(f => f.startsWith('_weld-data/')).length, 5); assert.equal(A.pending(), 0);
+    const before = g.stats.fileGets; await A.load();
+    assert.equal(g.stats.fileGets, before, 'own writes are recognized by blob hash and not re-read');
+    await B.load(); assert.deepEqual(B.get('favorites'), [0]);
+    // Both computers edit the scrapbook: merged in one commit, no REST, both entries kept.
+    B.set('scrapbook', [{ id: 'b', t: 2 }, { id: 'a', t: 1 }]); await B.flush();
+    A.set('scrapbook', [{ id: 'a', t: 1 }, { id: 'c', t: 3 }]); A.set('favorites', [9]); await A.flush();
+    assert.equal(g.stats.commits.length, 3);
+    const sb = JSON.parse(g.files.get('_weld-data/' + R.fileName('scrapbook')).text).value.map(x => x.id).sort();
+    assert.deepEqual(sb, ['a', 'b', 'c']); assert.ok(toasts.some(t => /merged/.test(t)));
+    // The branch moves under the commit (another computer, or a generator push): re-read and commit on the new head.
+    g.move(); A.set('genNotes', ['moved']); await A.flush();
+    assert.equal(g.stats.refused, 1); assert.equal(g.stats.commits.length, 4); assert.equal(A.pending(), 0);
+    // Deletion travels in the same kind of commit.
+    A.set('pins:x', null); await A.flush();
+    assert.ok(!g.files.has('_weld-data/' + R.fileName('pins:x'))); assert.deepEqual(g.stats.commits.at(-1).fileChanges.deletions, [{ path: '_weld-data/' + R.fileName('pins:x') }]);
+    // One-time migration: new keys imported and a differing copy filed, all in one commit.
+    const before2 = g.stats.commits.length;
+    const res = await A.importLegacyMany([['capsules', [1]], ['sessions', [2]], ['ratings', { a: 1 }], ['favorites', ['older']]], 'browser');
+    assert.deepEqual([...res.values()], ['moved', 'moved', 'moved', 'filed']);
+    assert.equal(g.stats.commits.length, before2 + 1, 'migration is one commit');
+    assert.ok([...g.files.keys()].some(f => /^_weld-data\/legacy\/favorites-.*-browser-/.test(f)));
+    assert.deepEqual(A.get('favorites'), [9], 'the repo copy wins');
+    // A file name owned by another key is never overwritten, and the other saves still go out.
+    g.put('_weld-data/' + R.fileName('boundaries'), JSON.stringify({ format: 'weld-data', v: 1, key: 'not-boundaries', value: 1 }));
+    A.set('boundaries', [1]); A.set('outRules', [2]); await A.flush();
+    assert.equal(JSON.parse(g.files.get('_weld-data/' + R.fileName('boundaries')).text).key, 'not-boundaries');
+    assert.deepEqual(JSON.parse(g.files.get('_weld-data/' + R.fileName('outRules')).text).value, [2]);
+    assert.equal(A.pending(), 1); assert.match(A.status(), /boundaries.*taken by another key/);
+    assert.ok(g.stats.commits.every(c => c.fileChanges.additions.every(a => a.path.startsWith('_weld-data/'))), 'only _weld-data is ever written');
+  }
   console.log('repo store tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

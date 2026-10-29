@@ -65,18 +65,30 @@
     const API = opt.api, cfg = opt.config, toast = opt.toast || (() => {}), DELAY = opt.delay == null ? 1500 : opt.delay;
     const enc = opt.encode || (s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(s)))));
     const dec = opt.decode || (b => (typeof Buffer !== 'undefined' ? Buffer.from(b, 'base64').toString('utf8') : decodeURIComponent(escape(atob(b)))));
-    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false, hold: 0 };
+    const S = { cache: new Map(), base: new Map(), sha: new Map(), pending: new Map(), names: new Map(), loaded: false, loading: null, timer: null, flushing: null, error: '', conflicts: 0, listeners: [], verified: '', truncated: false, hold: 0, extras: [], gql: true };
     const changed = () => S.listeners.forEach(f => { try { f(); } catch (e) { } });
     const ident = x => x.owner + '/' + x.repo + '@' + String(x.branch || 'main');
     const c0 = () => { const x = cfg(); return x && x.token && x.owner && x.repo ? x : null; };
     // Writes need a repo that passed the private check. If the configured repo, branch or token changes, everything read
     // from the old one is dropped (including queued edits) so it can never be written to the new one.
-    function reset() { S.cache.clear(); S.base.clear(); S.sha.clear(); S.pending.clear(); S.names.clear(); S.loaded = false; S.verified = ''; S.truncated = false; if (S.timer) { clearTimeout(S.timer); S.timer = null; } }
+    function reset() { S.cache.clear(); S.base.clear(); S.sha.clear(); S.pending.clear(); S.names.clear(); S.extras = []; S.gql = true; S.loaded = false; S.verified = ''; S.truncated = false; if (S.timer) { clearTimeout(S.timer); S.timer = null; } }
     const c = () => { const x = c0(); if (x && S.verified && S.verified !== ident(x)) reset(); return x; };
     const base = x => '/repos/' + encodeURIComponent(x.owner) + '/' + encodeURIComponent(x.repo);
     const q = x => '?ref=' + encodeURIComponent(String(x.branch || 'main').replace(/^refs\/heads\//, ''));
     const fpath = (x, sub, name) => base(x) + '/contents/' + DIR + (sub ? '/' + sub : '') + '/' + name;
     const docText = (key, raw) => '{"format":"weld-data","v":1,"key":' + JSON.stringify(key) + ',"savedAt":' + Date.now() + ',"value":' + raw + '}';
+    const stampNow = () => new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+    const branchOf = x => String(x.branch || 'main').replace(/^refs\/heads\//, '');
+    // Git's blob hash of what was written, so the next load knows the file is ours (null: the next read re-learns it).
+    const subtle = opt.subtle || (typeof crypto !== 'undefined' && crypto && crypto.subtle) || null;
+    async function gitSha(text) {
+      if (!subtle || typeof TextEncoder === 'undefined') return null;
+      try {
+        const body = new TextEncoder().encode(text), head = new TextEncoder().encode('blob ' + body.length + '\0'), all = new Uint8Array(head.length + body.length);
+        all.set(head); all.set(body, head.length);
+        return Array.from(new Uint8Array(await subtle.digest('SHA-1', all)), b => b.toString(16).padStart(2, '0')).join('');
+      } catch (e) { return null; }
+    }
 
     async function readFile(x, entry) {   // -> { sha, doc } | null
       let r = await API('GET', fpath(x, '', entry.name) + q(x));
@@ -139,7 +151,7 @@
     }
     async function writeConflict(x, key, value, why) {
       try {
-        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15), name = fileName(key).replace(/\.json$/, '') + '-' + why + '-' + stamp + '.json';
+        const stamp = stampNow(), name = fileName(key).replace(/\.json$/, '') + '-' + why + '-' + stamp + '.json';
         await API('PUT', fpath(x, 'conflicts', name), { message: 'Weld: keep a version that lost a merge (' + key + ')', content: enc(docText(key, JSON.stringify(value === undefined ? null : value))), branch: String(x.branch || 'main') });
       } catch (e) { }
     }
@@ -174,32 +186,157 @@
     }
     // While a generator Push runs, writes wait (each one is a commit on the same branch and would move it under the push).
     function hold() { S.hold++; }
-    function release() { if (S.hold > 0) S.hold--; if (!S.hold && S.pending.size && !S.timer) S.timer = setTimeout(() => { S.timer = null; flush().catch(() => { }); }, DELAY); }
+    function release() { if (S.hold > 0) S.hold--; if (!S.hold && (S.pending.size || S.extras.length) && !S.timer) S.timer = setTimeout(() => { S.timer = null; flush().catch(() => { }); }, DELAY); }
+
+    // ---- one commit per save cycle (1.96.0). Every waiting key, plus any conflict/legacy copies, goes into ONE GraphQL
+    // createCommitOnBranch commit instead of a commit per key. One read first returns the branch head and each file's
+    // current blob (oid + text), so the same three-way merge as writeKey runs before anything is sent. The commit names
+    // that head (expectedHeadOid): if the branch moved meanwhile, GitHub refuses it and the cycle re-reads and retries.
+    // No GraphQL (old token, API refusal): the per-key REST writes below are used instead.
+    const MAX_FILES = 60, MAX_CHARS = 1500000;
+    function takeBatch() {
+      const out = []; let size = 0;
+      for (const [key, raw] of S.pending) {
+        const n = raw === null ? 0 : raw.length;
+        if (out.length && (out.length >= MAX_FILES || size + n > MAX_CHARS)) break;
+        out.push([key, raw]); size += n;
+      }
+      out.forEach(([key]) => S.pending.delete(key));
+      return out;
+    }
+    const gqlOk = r => r && r.status === 200 && r.json && !r.json.errors && r.json.data;
+    async function readState(x, names) {   // -> { head, files: [{ oid, text } | null] } | null (no GraphQL or no branch)
+      const vars = { owner: x.owner, name: x.repo, ref: 'refs/heads/' + branchOf(x) }, decl = ['$owner:String!', '$name:String!', '$ref:String!'];
+      let sel = 'ref(qualifiedName:$ref){target{oid}}';
+      names.forEach((n, i) => { vars['e' + i] = branchOf(x) + ':' + DIR + '/' + n; decl.push('$e' + i + ':String!'); sel += ' f' + i + ':object(expression:$e' + i + '){...on Blob{oid text isBinary}}'; });
+      const r = await API('POST', '/graphql', { query: 'query(' + decl.join(',') + '){repository(owner:$owner,name:$name){' + sel + '}}', variables: vars });
+      const repo = gqlOk(r) && r.json.data.repository;
+      if (!repo || !repo.ref || !repo.ref.target || !repo.ref.target.oid) return null;
+      return { head: repo.ref.target.oid, files: names.map((n, i) => repo['f' + i] && repo['f' + i].oid ? repo['f' + i] : null) };
+    }
+    // -> 'ok' | 'rest' (use the REST path for this batch). Throws when GitHub cannot be reached or keeps moving.
+    const held = [];   // keys set aside by the last commitBatch (their file name belongs to another key)
+    async function commitBatch(x, batch, extras) {
+      for (let round = 0; round < 4; round++) {
+        const names = batch.map(([key]) => fileName(key)), st = await readState(x, names);
+        if (!st) return 'rest';
+        const adds = [], dels = [], after = [], merged = []; held.length = 0;
+        for (let i = 0; i < batch.length; i++) {
+          const key = batch[i][0], name = names[i], f = st.files[i], known = S.sha.get(key);
+          let raw = batch[i][1], theirsRaw = null, theirsSha = f ? f.oid : null;
+          if (f && f.oid !== known) {   // the repo copy is not the one this computer last synced
+            let doc = null;
+            if (typeof f.text === 'string') { try { doc = JSON.parse(f.text); } catch (e) { } }
+            else { const rf = await readFile(x, { name }); doc = rf && rf.doc; theirsSha = rf ? rf.sha : theirsSha; }   // large or binary: REST read
+            if (!doc || doc.key !== key) { held.push(batch[i]); continue; }   // the file name is taken by another key: never overwrite it
+            theirsRaw = JSON.stringify(doc.value === undefined ? null : doc.value);
+          }
+          if (raw === null) {   // delete
+            if (!f) { after.push({ key, name, gone: true }); continue; }
+            if (f.oid !== known) {
+              if (theirsRaw !== S.base.get(key)) { after.push({ key, name, keep: theirsRaw, sha: theirsSha }); merged.push('kept'); continue; }   // changed elsewhere: keep it
+            }
+            dels.push({ path: DIR + '/' + name }); after.push({ key, name, gone: true }); continue;
+          }
+          if (theirsRaw !== null) {
+            if (theirsRaw === raw) { after.push({ key, name, keep: theirsRaw, sha: theirsSha }); continue; }   // already there (e.g. an earlier commit landed without a reply)
+            const baseRaw = S.base.get(key), m = merge(key, baseRaw === undefined ? undefined : JSON.parse(baseRaw), JSON.parse(raw), JSON.parse(theirsRaw));
+            m.losers.forEach(l => extras.push({ sub: 'conflicts', name: name.replace(/\.json$/, '') + '-merged-' + stampNow() + '-' + extras.length + '.json', text: docText(key, JSON.stringify(l === undefined ? null : l)) }));
+            raw = JSON.stringify(m.value === undefined ? null : m.value); merged.push(m.losers.length ? 'lost' : 'merged');
+            if (raw === theirsRaw) { after.push({ key, name, keep: theirsRaw, sha: theirsSha }); continue; }
+          }
+          const text = docText(key, raw);
+          adds.push({ path: DIR + '/' + name, contents: enc(text) }); after.push({ key, name, raw, text });
+        }
+        extras.forEach(e => adds.push({ path: DIR + '/' + e.sub + '/' + e.name, contents: enc(e.text) }));
+        if (adds.length || dels.length) {
+          const keys = batch.map(([k]) => k), headline = 'Weld: save ' + (keys.length === 1 ? keys[0] : keys.length + ' items (' + keys.slice(0, 3).join(', ') + (keys.length > 3 ? ', ...' : '') + ')');
+          const input = { branch: { repositoryNameWithOwner: x.owner + '/' + x.repo, branchName: branchOf(x) }, message: { headline }, expectedHeadOid: st.head, fileChanges: { additions: adds } };
+          if (dels.length) input.fileChanges.deletions = dels;
+          const r = await API('POST', '/graphql', { query: 'mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid}}}', variables: { input } });
+          if (!(gqlOk(r) && r.json.data.createCommitOnBranch && r.json.data.createCommitOnBranch.commit)) {
+            const why = (r && r.json && r.json.errors && r.json.errors.map(e => e.message).join('; ')) || (r && r.error) || ('HTTP ' + (r && r.status));
+            if (r && r.status === 200 && /expected branch to point to|but it did not|expectedHeadOid/i.test(why)) continue;   // moved: re-read, re-merge
+            if (r && r.status === 200) return 'rest';   // refused (permissions, API shape): the REST path reports it properly
+            throw new Error('GitHub did not answer the save (' + why + ')');   // may have landed: the next cycle's read sorts it out
+          }
+        }
+        for (const a of after) {   // applied only once the commit is in
+          if (a.gone) { S.sha.delete(a.key); S.base.delete(a.key); S.names.delete(a.name); if (!S.pending.has(a.key)) S.cache.delete(a.key); continue; }
+          const raw = a.keep !== undefined ? a.keep : a.raw;
+          S.base.set(a.key, raw); S.names.set(a.name, a.key);
+          const sha = a.keep !== undefined ? a.sha : await gitSha(a.text);
+          if (sha) S.sha.set(a.key, sha); else S.sha.delete(a.key);
+          if (!S.pending.has(a.key)) S.cache.set(a.key, raw);   // a newer edit made during the save stays
+        }
+        extras.length = 0;
+        if (merged.length) {
+          S.conflicts += merged.length;
+          toast(merged.includes('kept') && merged.length === 1 ? 'A file you deleted was changed on another computer, so it was kept.'
+            : 'Some of this was also changed on another computer. Both sets of changes were merged' + (merged.includes('lost') ? ' (versions that lost are under _weld-data/conflicts).' : '.'), 9000);
+          changed();
+        }
+        return 'ok';
+      }
+      throw new Error('it kept changing on GitHub. Weld retries on the next save');
+    }
+    async function restBatch(x, batch, extras) {
+      for (const e of extras.splice(0)) {
+        const r = await API('PUT', fpath(x, e.sub, e.name), { message: 'Weld: keep a copy (' + e.sub + ')', content: enc(e.text), branch: branchOf(x) });
+        if (r.status !== 200 && r.status !== 201) { extras.push(e); throw new Error('GitHub answered ' + r.status + ' saving ' + e.sub + '/' + e.name); }
+      }
+      for (let i = 0; i < batch.length; i++) {
+        const [key, raw] = batch[i];
+        try { await writeKey(x, key, raw); }
+        catch (e) { batch.slice(i).forEach(([k, v]) => { if (!S.pending.has(k)) S.pending.set(k, S.cache.has(k) ? S.cache.get(k) : v); }); throw e; }
+      }
+    }
     async function flush() {
       if (S.hold) return;   // kept in pending; release() sends them
-      if (S.flushing) { await S.flushing; if (S.pending.size && !S.timer) return flush(); return; }
+      if (S.flushing) { await S.flushing; if ((S.pending.size || S.extras.length) && !S.timer && !S.hold) return flush(); return; }
       S.flushing = (async () => {
         const x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return;
-        const batch = Array.from(S.pending.entries()); S.pending.clear();
-        for (const [key, raw] of batch) {
-          try { await writeKey(x, key, raw); S.error = ''; }
-          catch (e) { if (!S.pending.has(key)) S.pending.set(key, S.cache.has(key) ? S.cache.get(key) : raw); S.error = 'Could not save to GitHub: ' + ((e && e.message) || e) + '. Weld retries on the next save.'; try { toast(S.error, 9000); } catch (z) { } }
+        while ((S.pending.size || S.extras.length) && !S.hold) {
+          const batch = takeBatch(), extras = S.extras.splice(0);
+          try {
+            if (!S.gql || (await commitBatch(x, batch, extras)) === 'rest') { S.gql = false; held.length = 0; await restBatch(x, batch, extras); }
+            S.error = '';
+            if (held.length) {
+              held.forEach(([k, v]) => { if (!S.pending.has(k)) S.pending.set(k, v); });
+              S.error = 'Could not save ' + held.map(h => h[0]).join(', ') + ': its file name in _weld-data is taken by another key; nothing was overwritten.'; try { toast(S.error, 9000); } catch (z) { }
+              held.length = 0; break;
+            }
+          } catch (e) {
+            batch.forEach(([k, v]) => { if (!S.pending.has(k)) S.pending.set(k, S.cache.has(k) ? S.cache.get(k) : v); });
+            S.extras = extras.concat(S.extras);
+            S.error = 'Could not save to GitHub: ' + ((e && e.message) || e) + '. Weld retries on the next save.'; try { toast(S.error, 9000); } catch (z) { }
+            break;
+          }
         }
       })();
       try { await S.flushing; } finally { S.flushing = null; }
     }
     // Legacy copies (browser storage, the old backup folder): the repo wins. A copy of a key the repo lacks is imported;
     // otherwise it is filed under _weld-data/legacy/ so nothing is lost and nothing comes back. -> 'moved' | 'filed' | null (not safe to remove yet)
-    async function importLegacy(key, value, source) {
-      const x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return null;
-      try {
-        if (!S.cache.has(key) || S.cache.get(key) === null) { set(key, value); await flush(); return S.pending.has(key) ? null : 'moved'; }
-        const raw = JSON.stringify(value);
-        if (raw === S.cache.get(key)) return 'moved';
-        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15), name = fileName(key).replace(/\.json$/, '') + '-' + source + '-' + stamp + '.json';
-        const r = await API('PUT', fpath(x, 'legacy', name), { message: 'Weld: keep an older local copy of ' + key, content: enc(docText(key, raw)), branch: String(x.branch || 'main') });
-        return r.status === 200 || r.status === 201 ? 'filed' : null;
-      } catch (e) { return null; }
+    async function importLegacy(key, value, source) { return (await importLegacyMany([[key, value]], source)).get(key) || null; }
+    // Many at once: everything goes out in as few commits as the size limits allow. -> Map key -> 'moved' | 'filed' | null
+    async function importLegacyMany(items, source) {
+      const out = new Map(), x = c(); if (!x || !S.loaded || S.verified !== ident(x)) return out;
+      const filed = new Map();
+      for (const [key, value] of items) {
+        let raw; try { raw = JSON.stringify(value === undefined ? null : value); } catch (e) { out.set(key, null); continue; }
+        if (!S.cache.has(key) || S.cache.get(key) === null) { out.set(key, set(key, value) ? 'moved' : null); continue; }
+        if (raw === S.cache.get(key)) { out.set(key, 'moved'); continue; }
+        const e = { sub: 'legacy', name: fileName(key).replace(/\.json$/, '') + '-' + source + '-' + stampNow() + '-' + S.extras.length + '.json', text: docText(key, raw) };
+        S.extras.push(e); filed.set(key, e); out.set(key, 'filed');
+      }
+      if (S.timer) { clearTimeout(S.timer); S.timer = null; }
+      try { await flush(); } catch (e) { }
+      for (const [key, r] of out) {
+        if (r === 'moved' && S.pending.has(key)) out.set(key, null);
+        if (r === 'filed' && S.extras.indexOf(filed.get(key)) !== -1) out.set(key, null);
+      }
+      return out;
     }
     function status() {
       if (!c()) return 'Saved in your GitHub repo. Set owner, repo and token in Weld > GitHub to load and save.';
@@ -207,8 +344,8 @@
       if (S.error) return S.error;
       return S.loaded ? 'Saved in GitHub: ' + x.owner + '/' + x.repo + '/' + DIR : 'Loading from GitHub...';
     }
-    return { get, set, load, flush, importLegacy, status, hold, release, held: () => S.hold > 0, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
-      pending: () => S.pending.size, truncated: () => S.truncated, onChange: f => { S.listeners.push(f); }, _state: S };
+    return { get, set, load, flush, importLegacy, importLegacyMany, status, hold, release, held: () => S.hold > 0, ready: () => !!c() && S.loaded, configured: () => !!c(), keys: () => Array.from(S.cache.keys()).filter(k => S.cache.get(k) !== null),
+      pending: () => S.pending.size + S.extras.length, truncated: () => S.truncated, onChange: f => { S.listeners.push(f); }, _state: S };
   }
   return { create, merge, fileName, DIR, canon };
 });

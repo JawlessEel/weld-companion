@@ -606,14 +606,17 @@
   async function repoMigrate() {
     const lg = rpLegacy(); let moved = 0, filed = 0, held = 0;
     if (lg && typeof lg.keys === 'function') {
+      const items = [];
       for (const key of lg.keys().filter(k => lg.owns(k))) {
         const old = lg.get(key); if (old === undefined) continue;
         // Same rule as live vault saves: a chat copy with a plaintext secret-shaped config value stays on this computer.
         const vk = key.indexOf('sbk:') === 0 ? key.slice(key.indexOf(':', 4) + 1) : key;
         if (C.parseKey(vk).kind === 'chat-copy' && C.secretScan(old && old.data).length) { held++; continue; }
-        const r = await RP.importLegacy(key, old, 'browser');
-        if (r) { lg.del(key); if (r === 'moved') moved++; else filed++; }
+        items.push([key, old]);
       }
+      // All of them in as few commits as the size limits allow (1.96.0), not one commit per key.
+      const res = items.length ? await RP.importLegacyMany(items, 'browser') : new Map();
+      for (const [key, r] of res) if (r) { lg.del(key); if (r === 'moved') moved++; else filed++; }
     }
     if (ptReady()) {   // 1.89.x kept these as files in the backup folder
       try {
