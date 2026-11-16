@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.96.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.96.1-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -46,6 +46,9 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
 - [License](#license)
 
 ## Install
+
+For local models and AI clients, see [Weld connections](docs/CONNECTIONS.md)
+(LM Studio, Antigravity and the Gemini macOS app).
 
 1. Install a userscript manager:
    - **[Tampermonkey](https://www.tampermonkey.net/)** — Chrome, Edge, Safari, Opera

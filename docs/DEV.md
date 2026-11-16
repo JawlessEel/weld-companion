@@ -53,6 +53,10 @@ opt-ins, so another location is never populated automatically.
 
 ## Agent bridge (MCP)
 
+For LM Studio, Antigravity and the Gemini macOS app, see the
+[connection guide](CONNECTIONS.md). Local clients can use
+`bridge/weld-mcp-stdio.js` without storing a credential URL in their settings.
+
 Lets agents such as Claude Code, Codex, Gemini CLI, Antigravity and Copilot's agent mode **read the generator you have open and propose changes**, through a small program on your computer. It uses MCP, the standard way these tools connect to other programs.
 
 ```

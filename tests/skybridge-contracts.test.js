@@ -213,9 +213,9 @@ providerOptions.sbApplyMaxTokens('google', google, 99);
 providerOptions.sbApplyTemperature('google', google, 0.5);
 assert.equal(JSON.stringify(google), JSON.stringify({ generationConfig: { maxOutputTokens: 99, temperature: 0.5 } }));
 
-assert.match(source, /redirect:\s*'error'/);
+assert.match(source, /redirect:\s*(['"])error\1/);
 assert.match(source, /request\.abort\(\)/);
-assert.match(source, /callOwnAIStream\(cfg, sys, user, !!payload\.json, maxTokens, temperature, emit, done\)/);
+assert.match(source, /callOwnAIStream\(\s*cfg,\s*sys,\s*user,\s*!!payload\.json,\s*maxTokens,\s*temperature,\s*emit,\s*done,?\s*\)/);
 
 // AI agent panel selectors. Upstream covered these with helperSubmitButton()/helperPromptInput();
 // this fork's equivalents are aiAgentButton()/aiAgentInput() (current aiAgent* ids first,

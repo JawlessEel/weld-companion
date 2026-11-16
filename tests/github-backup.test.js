@@ -67,7 +67,7 @@ const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : 'pytho
   vm.runInContext(shipped.slice(shipped.indexOf('function ghCollectBackup('), shipped.indexOf('function ghBackupNote(')), collectorContext);
   await collectorContext.ghCollectBackup('dad', opts.dslPath, opts.htmlPath, opts.dsl, opts.html);
   assert.equal(collected[0].includeCache, false, 'shared collector disables cache capture unless requested');
-  const localAdapter = shipped.match(/backup:\s*\{[^]*?collect:\s*(function[^\n]+),\s*\n/)[1];
+  const localAdapter = shipped.match(/backup:\s*\{[^]*?collect:\s*(function[^]*?\n\s*\}),\s*\n/)[1];
   vm.runInContext('var localCollect = ' + localAdapter, collectorContext);
   await collectorContext.localCollect('dad', { dsl: opts.dslPath, html: opts.htmlPath }, { dsl: opts.dsl, html: opts.html }, true);
   assert.equal(collected[1].includeCache, true, 'local download continues to capture requested assets');
