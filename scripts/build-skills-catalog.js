@@ -10,7 +10,7 @@ const version = (fs.readFileSync(path.join(root, 'weld-companion.user.js'), 'utf
 
 const typeTitle = Object.fromEntries(S.types.map(t => [t.id, t.title]));
 const source = Object.fromEntries(S.sources.map(s => [s.id, s]));
-const recent = new Set(Extra.rows.map(r => r[1]));
+const recent = new Set(Extra.rows.map(r => r[1]).filter(id => id !== 'prompt-flow-sandwich'));
 const anchor = s => s.toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/ /g, '-');
 const mode = m => m === 'review' ? 'Review only' : 'Makes changes';
 const types = t => t.length ? t.map(x => typeTitle[x] || x).join(', ') : 'Any generator';

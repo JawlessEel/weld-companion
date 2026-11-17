@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 304);
+assert.equal(C.presets.length, 305);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
 assert.equal(C.categories.length, 20);
 for (const p of C.presets) {

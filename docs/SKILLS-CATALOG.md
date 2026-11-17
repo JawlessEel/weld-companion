@@ -1,6 +1,6 @@
 # Weld skills catalog
 
-Every skill preset in **Weld > Skills** (Weld Companion 1.95.0): **304 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
+Every skill preset in **Weld > Skills** (Weld Companion 1.96.2): **305 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
 
 Each entry shows the task text, the workflow and the acceptance check Weld puts in the prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).
 
@@ -10,7 +10,7 @@ Each entry shows the task text, the workflow and the acceptance check Weld puts 
 | --- | ---: | ---: |
 | [Dashboards & live data](#dashboards--live-data) | 11 | 2 |
 | [Prompts, models & plugins](#prompts-models--plugins) | 20 |  |
-| [Debug & repair](#debug--repair) | 13 | 5 |
+| [Debug & repair](#debug--repair) | 14 | 5 |
 | [Design & modernize](#design--modernize) | 11 | 3 |
 | [Add features](#add-features) | 14 | 5 |
 | [AI & media](#ai--media) | 18 | 4 |
@@ -28,7 +28,7 @@ Each entry shows the task text, the workflow and the acceptance check Weld puts 
 | [Dad-Chat projects](#dad-chat-projects) | 34 |  |
 | [Rebrand, simplify & privacy](#rebrand-simplify--privacy) | 9 | 1 |
 | [AI input helpers & toolkit](#ai-input-helpers--toolkit) | 14 | 1 |
-| **Total** | **304** | **44** |
+| **Total** | **305** | **44** |
 
 Modes: **Review only** asks the helper for evidence and recommendations without edits. **Makes changes** asks for the smallest complete change, preserved features and storage, and honest verification.
 
@@ -713,6 +713,46 @@ Reduce the failing workflow to the smallest current inputs, list references, han
 **Done when:** Original failure is resolved or clearly classified; no new parser/runtime failures.
 
 **Inspired by:** [Superpowers](https://github.com/obra/superpowers/blob/8ca22dba9a94f28898bbce59f2537ff4d87c747d/skills/systematic-debugging/SKILL.md), [Matt Pocock skills](https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/skills/engineering/to-spec/SKILL.md)
+
+### Fix prompt-flow sandwich bugs
+
+`prompt-flow-sandwich` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Keep the newest user turn distinct from steering, retrieval and provider serialization.*
+
+Check this generator for the prompt-flow sandwich bug and fix it if present.
+
+SYMPTOM: replies act on the previous input instead of the new one, or treat the new input as part of the last one.
+
+1) STEERING SANDWICH CHECK
+Find every place that injects steering blocks near the generation point (reminder, continuity ledger / state snapshot, author's note, prose/craft director, immersion/scene-state/preference/beat/director-chair blocks, sync-continuity pin, live-state note).
+- If they splice at `history.length - depth` one after another, the earlier inserts shift the later ones: deep blocks land BEFORE the newest user turn while depth-0 blocks land after it — sandwiching the new input between system blocks.
+- FIX: snapshot the post-chat length (after reminder/density) as an anchor, then after all injections move every depth-spliced steering block back to just after the newest genuine user turn, deepest first. Reminder intentionally stays before the last user turn. Tag each steering message with its depth so the repair can sort. Never split an assistant tool_calls turn from its tool results.
+
+2) JUNK PIN CHECK
+Find any manually-synced continuity pin / scene-state global. If a failed or empty compaction can store placeholder echo ("since no scene text was provided", "no data to analyze", "log is empty", "provide the scene", "no recent messages") and that value injects at depth 0 every turn, it hands an empty note the last word.
+- FIX: reject placeholder text at both write time (don't store) and inject time (don't inject, clear poisoned state). Prefer per-thread state over a window-global.
+
+3) RETRIEVAL QUERY CHECK
+Find how the memory/lore search query is built. If it joins the last N user messages (plus assistant tail) into one blob, older inputs crowd the newest one out — and check whether the diagnostic record truncates the newest input away.
+- FIX: lead the query with the current user turn verbatim, older turns as breadth only; store the diagnostic record newest-first.
+
+4) DEMOTE-THEN-MERGE CHECK
+Find the provider serializer: mid-stream system messages demoted to user, then consecutive same-role messages merged. If the merge fuses the genuine newest user turn with demoted steering blocks, the new input loses its turn boundary.
+- FIX: mark demoted blocks, only merge pairs where both sides match (both demoted or both genuine), strip the marker before sending.
+
+VERIFY (no new AI spend needed — use skip-retrieval builds):
+- Rebuild history for the newest user turn and print the tail with roles + depths: zero steering blocks before the newest user turn; order after it deepest-first; sync pin absent when never synced.
+- Mirror the serializer's map → demote → merge steps and confirm the newest user message stays its own turn.
+- Page refreshes with no syntax/perchance errors; report any content-level conflicts you find but do NOT rewrite (e.g. reminders/personas that tell the character to voice the user's lines, stale mechanics text in saved cards/worlds) — list them for me to decide.
+
+**Workflow**
+
+1. Trace steering placement, continuity pins, retrieval queries and provider serialization.
+2. Fix confirmed issues while preserving tool-call boundaries and rejecting poisoned pins.
+3. Verify history and serializer boundaries without AI spend, refresh the page and report content conflicts without rewriting them.
+
+**Done when:** The newest user turn stays distinct, steering follows in depth order, poisoned or unsynced pins are absent, retrieval prioritizes the current turn, and content conflicts are reported.
 
 ### Add a recoverable error boundary
 
