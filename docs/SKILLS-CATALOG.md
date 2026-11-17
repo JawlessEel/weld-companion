@@ -1,6 +1,6 @@
 # Weld skills catalog
 
-Every skill preset in **Weld > Skills** (Weld Companion 1.96.2): **305 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
+Every skill preset in **Weld > Skills** (Weld Companion 1.96.4): **318 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
 
 Each entry shows the task text, the workflow and the acceptance check Weld puts in the prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).
 
@@ -25,10 +25,10 @@ Each entry shows the task text, the workflow and the acceptance check Weld puts 
 | [Stories & worlds](#stories--worlds) | 14 | 6 |
 | [Games & interaction](#games--interaction) | 9 | 4 |
 | [SillyTavern, Chub & character cards](#sillytavern-chub--character-cards) | 33 | 2 |
-| [Dad-Chat projects](#dad-chat-projects) | 34 |  |
+| [Dad-Chat projects](#dad-chat-projects) | 47 |  |
 | [Rebrand, simplify & privacy](#rebrand-simplify--privacy) | 9 | 1 |
 | [AI input helpers & toolkit](#ai-input-helpers--toolkit) | 14 | 1 |
-| **Total** | **305** | **44** |
+| **Total** | **318** | **44** |
 
 Modes: **Review only** asks the helper for evidence and recommendations without edits. **Makes changes** asks for the smallest complete change, preserved features and storage, and honest verification.
 
@@ -727,7 +727,7 @@ SYMPTOM: replies act on the previous input instead of the new one, or treat the 
 1) STEERING SANDWICH CHECK
 Find every place that injects steering blocks near the generation point (reminder, continuity ledger / state snapshot, author's note, prose/craft director, immersion/scene-state/preference/beat/director-chair blocks, sync-continuity pin, live-state note).
 - If they splice at `history.length - depth` one after another, the earlier inserts shift the later ones: deep blocks land BEFORE the newest user turn while depth-0 blocks land after it — sandwiching the new input between system blocks.
-- FIX: snapshot the post-chat length (after reminder/density) as an anchor, then after all injections move every depth-spliced steering block back to just after the newest genuine user turn, deepest first. Reminder intentionally stays before the last user turn. Tag each steering message with its depth so the repair can sort. Never split an assistant tool_calls turn from its tool results.
+- FIX: capture the newest genuine user message by identity before injections as an anchor, then after all injections move every depth-spliced steering block back to just after the newest genuine user turn, deepest first. Reminder intentionally stays before the last user turn. Tag each steering message with its depth so the repair can sort. Never split an assistant tool_calls turn from its tool results.
 
 2) JUNK PIN CHECK
 Find any manually-synced continuity pin / scene-state global. If a failed or empty compaction can store placeholder echo ("since no scene text was provided", "no data to analyze", "log is empty", "provide the scene", "no recent messages") and that value injects at depth 0 every turn, it hands an empty note the last word.
@@ -739,7 +739,7 @@ Find how the memory/lore search query is built. If it joins the last N user mess
 
 4) DEMOTE-THEN-MERGE CHECK
 Find the provider serializer: mid-stream system messages demoted to user, then consecutive same-role messages merged. If the merge fuses the genuine newest user turn with demoted steering blocks, the new input loses its turn boundary.
-- FIX: mark demoted blocks, only merge pairs where both sides match (both demoted or both genuine), strip the marker before sending.
+- FIX: mark demoted blocks, only merge pairs where both sides match (both demoted or both genuine), strip the marker on every send path, including sanitizers that rebuild objects.
 
 VERIFY (no new AI spend needed — use skip-retrieval builds):
 - Rebuild history for the newest user turn and print the tail with roles + depths: zero steering blocks before the newest user turn; order after it deepest-first; sync pin absent when never synced.
@@ -4501,6 +4501,266 @@ On import (and when a shared generator accepts user text), scan card fields, lor
 **Structure references:** Lorebook shapes: card character_book and World Info JSON, Character Card V2 structure (annotated example)
 
 ## Dad-Chat projects
+
+### Fix looping replies and inactive controls
+
+`dad-debug-loop` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Trace sampling parameters, repetition detection and conflicting prompt layers.*
+
+For the reported repetition, inspect the actual provider request builder and sanitizer: compare selected sampling controls with parameters sent or stripped, and expose inactive controls when appropriate. Run repetition and opening detectors against the same small recent tail and a varied synthetic control; check whether meaningful multiword phrases outrank glue words. Trace duplicated or contradictory persona, author note, ledger, density and craft instructions. Fix confirmed mechanical faults without rewriting user content. Verify the real builder and detectors with fabricated inputs, no model calls, and report remaining live proof.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Fix speech attribution and voicing
+
+`dad-debug-attribution` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Trace user dialogue and character voice rules through the actual prompt.*
+
+Inspect the relevant exchange and complete built payload with names resolved. Identify conflicting attribution and voicing instructions across narrator, density and craft layers. Where the requested single-character mode requires it, distinguish quoted user speech from the character own speech; preserve intentional co-writing and shared-cast behavior. Change user-managed cards or reminders only when requested. Verify the real assembled prompt without generation and report whether a real turn remains untested.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Diagnose provider request failures
+
+`dad-debug-provider` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Trace error, parameter filtering and stored credential resolution.*
+
+Capture the exact HTTP status and a redacted error body. Trace the failing model request through builder, parameter sanitizer, endpoint registry and credential selection, including stored endpoint snapshots versus configuration fallback. Correct only failures supported by evidence, preserve existing saved endpoints and never print keys. Test with stubbed requests and fabricated credentials; make a live call only when explicitly authorized. Report any required credential re-entry and unverified live behavior.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Repair stale previews and missing assets
+
+`dad-debug-stale` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Refresh and trace missing UI, broken handlers and served files.*
+
+Refresh before diagnosing stale DOM; inspect console, relevant control bindings and HTTP responses for files the affected path actually uses. Re-read files changed by other sessions before editing. Restore confirmed broken wiring or markup without removing features. If a preview server demonstrably needs a write event, rewrite affected text byte-identically and re-probe. Never text-round-trip binaries; hash-check binary copies. Exercise the repaired path and report inaccessible checks.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Harden imports against malformed data
+
+`dad-debug-shapes` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Find every reader and verify malformed records and saved data.*
+
+Capture the error and trace every reader and writer of the malformed field, including open, dirty-check and save paths. Validate external shapes, normalize only where the schema supports an unambiguous conversion, and handle malformed existing records without data loss or silent destructive migration. Exercise string, object, null and valid fixtures through real paths; restore any live state touched and report what could not be verified.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Fix missing old context in long chats
+
+`dad-debug-context` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Audit live context budgets, summary thresholds and overflow.*
+
+Trace the actual model window and tier selection, recent-message allocation and summary backfill gate. Check stale constants, thresholds tuned to another tier and oversized catch-up chunks. Compare fabricated long free and pro histories: oldest unsummarized overflow should trigger appropriately, chunking must preserve order and message alignment, and existing free-tier behavior should remain intact. Verify without model calls; distinguish simulated results from a real provider run.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Skill: dadchat-curated-density (prompt packing and budgets), Dad-Chat chat-turn flow and prompt assembly
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Diagnose story contradictions and stale steering
+
+`dad-debug-continuity` · **Review only** · Chat, characters & memory, Stories & worlds
+
+*Trace a disputed fact through memory, summaries, notes and branches.*
+
+Find the disputed turn and supporting earlier turn using a minimal redacted excerpt. Trace what retrieval, summaries, ledger, state, pinned anchors, reminders and author notes contributed at that leaf; identify conflicting instructions and priority or depth. Inspect related branches where appropriate. Recommend a mechanism fix and specific amendments, but do not rewrite conversation, saved records or user-managed steering unless requested. Verify using retrieval and prompt builders without generation.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Skill: dadchat-curated-density (prompt packing and budgets)
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Remove unwanted preset mechanics
+
+`dad-debug-presets` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Find repeated unwanted style or rules in source and saved records.*
+
+For the exact mechanics the user asks to remove, locate all source variants and distinguish false positives. Remove confirmed preset reinjection while preserving the intended narrative behavior. Separately inventory matching saved cards, worlds, threads, summaries and facts; do not migrate saved content without an explicit request. Verify source searches, built prompts and refresh without generation, and report remaining saved records.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Change single-voice or co-writing rules
+
+`dad-debug-voicing` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Apply the requested voice policy consistently and preserve saved content.*
+
+Use the user requested single-voice or co-writing direction. Trace preset sources, narrator, director blocks, reminders and saved cards for contradictory rules. Update the requested scope only; list saved records and do not migrate them unless explicitly requested. Test the assembled prompt for the chosen policy and conflicting old rules without model calls; report untouched saved content.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Verify a generator change without generation
+
+`dad-debug-no-spend` · **Review only** · Chat, characters & memory, Stories & worlds
+
+*Run the actual builders and paths with synthetic or stubbed inputs.*
+
+Verify the requested change with fabricated inputs, stub providers and skip-generation or skip-retrieval paths where available. Execute assertions against actual builder roles, ordering, boundaries and request parameters; inspect visual changes at the affected viewport if applicable. Save and restore live state touched. Reload and exercise the relevant path when available, check console and Perchance errors, and report what passed, what was unavailable and what requires a real generation. Do not make model, image or music calls.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat chat-turn flow and prompt assembly, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Align Forge exports with DadChat
+
+`dad-forge-alignment` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Audit and repair character, lorebook and world interchange.*
+
+Inventory actual Forge exporters and receiving DadChat importers and compare with the project current templates. Check dad-char type/version/data wrapper, persona versus bio, greetings, example dialogue, user persona, lore keys and priorities, enabled/scan-depth mapping, world bible, entries and optional Living State. Preserve literal text, Unicode and unrelated Tavern exports; report unsupported fields and avoid authoring runtime-only fields. Verify detection and round trips of synthetic character, standalone lorebook and world fixtures, including PNG metadata when supported, without overwriting saved content.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat file types: detection, direction and authoring rules, Tavern, Forge, World Info, JanitorAI, dexie and Story Forge file shapes, Tavern V2/V3 <-> Dad-native field mapping
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Align sibling DadChat integrations
+
+`dad-family-parity` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Check slots, bridge, presence and vault behavior against current contracts.*
+
+Inventory the target and actual reference implementations before changing anything. For the requested parity scope, compare bridge feature detection, presence and bus envelopes, local session slots, Dad-native interchange and vault support. Treat vault sender availability as conditional: archived or removed features stay dormant unless explicitly requested. Preserve local-only slots and per-generator vault ownership; do not add storage migration or delete records. Test supported paths, denied or absent companion and malformed messages with fixtures; report unavailable live checks.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Rules for a generator that joins the Weld family, Skill: dadchat-session-slots (local save slots, file compatibility), Skill: dadchat-presence-bus (presence and dad:genvault channels), Skill: generator-vault-bridge (vault storage and bus contract)
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Audit or improve generator vault management
+
+`dad-vault-manager` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Handle backup inventory, inspection and export with owner-safe boundaries.*
+
+Trace the existing vault storage and requested management workflow. Support both documented generator snapshot shapes and dad-full chat copies; distinguish read-only legacy keys and tombstones. Preserve owner tags, secret redaction and exact stored data; never log private values or repair, migrate, purge or delete records without explicit authorization. Test listing, sanitized inspection, export and denied storage with fabricated records and preserve existing backups.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Skill: generator-vault-bridge (vault storage and bus contract), Skill: dadchat-dad-full (dad-full JSON envelope)
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
 
 ### Map the project against the layout
 
