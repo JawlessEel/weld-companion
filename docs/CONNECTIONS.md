@@ -73,7 +73,31 @@ from `weld_status` to every editor tool. A poll heartbeat is not an indication o
 which tab is active; the bridge refuses ambiguous commands instead of choosing
 another generator.
 
-## Checks
+## Gemini web and iPhone
+
+The account-level **Weld Remote** custom Connected App uses
+`https://as-mac-mini-1.tail319f4f.ts.net/weld/mcp`. This is separate from the local
+Gemini macOS connector: a phone cannot launch a Node command on the Mac.
+
+The existing Tailscale Funnel terminates HTTPS at the OAuth gateway on loopback
+port 8767. Its `/weld/mcp` route forwards through the MCP hub's `weld` entry to
+the stdio adapter and the loopback bridge. The public URL contains no bridge
+credential. Weld uses a separate OAuth issuer at `/weld`, and resource-bound
+tokens cannot call the other Mac MCP services; legacy hub tokens cannot call Weld.
+
+On the same Google account, select **Weld Remote** after typing `@` in Gemini web
+or on iPhone. Start with “Use weld_status and list the connected generators.”
+For source or proposal requests, pass the intended generator name as `tab`.
+Actions retain Gemini's confirmation prompts and Weld's editor diff review.
+The local handshake was verified, but the Gemini web smoke test and live iPhone
+use still need verification.
+
+The Mac must be awake, Tailscale and the bridge must be running, and the intended
+Perchance tab must stay open with its Weld bridge connected. The iPhone does not
+need a userscript or Tailscale connection: Gemini's servers call the authenticated
+public endpoint. This does not inject the Weld drawer into iPhone Safari.
+
+## Verification commands
 
 ```sh
 npm run build
