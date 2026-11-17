@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/JawlessEel/weld-companion/issues
 // @downloadURL  https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
 // @updateURL    https://raw.githubusercontent.com/JawlessEel/weld-companion/main/weld-companion.user.js
-// @version      1.96.2
+// @version      1.96.3
 // @description  Quality-of-life upgrades for Perchance: favorites & recently-used, theme/reading comfort, save/copy/pin results, result history (undo-reroll), resizable inputs, generator folder management & CRUD, and an AI Helper you can edit or point at your own GPT (OpenAI / Anthropic / Google). All local, account-free. Companion to the Weld plugin suite; plus a federated Data Manager, an AICC pack (Lore Library, character round-trip, repair & recovery with quarantine), a Tools tab (AI Helper, character files), and a Library tab for readers (Scrapbook, chat story export, backup guardian) with night light in Comfort.
 // @author       therealwestninja
 // @match        https://perchance.org/*
@@ -9373,7 +9373,7 @@
       placeholder: "Optional system instruction for the selected provider.",
     });
     instruction.value = cfg.instruction;
-    var intercept = el("input", { type: "checkbox" });
+    var intercept = el("input", { type: "checkbox", class: "wc-ai-route-setting" });
     intercept.checked = cfg.interceptAgent;
     var primer = el("input", { type: "checkbox" });
     primer.checked = cfg.usePrimer;
@@ -10016,9 +10016,37 @@
   }
   // Current Perchance uses aiAgent* ids; retain the legacy aiHelper* selectors.
   // Interception is opt-in; explicit native drafts bypass it.
+  function updateHelperRouteToggle(btn) {
+    if (!btn || !btn.parentNode) return;
+    var toggle = btn.parentNode.querySelector(".wc-ai-route-toggle");
+    if (!toggle) {
+      toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "wc-ai-route-toggle";
+      toggle.style.cssText = "margin-left:6px;padding:4px 7px;background:#252a34;color:#eee;border:1px solid #69717f;border-radius:4px;cursor:pointer;font-size:12px";
+      toggle.addEventListener("click", function () {
+        var cfg = aiConfig();
+        cfg.interceptAgent = !cfg.interceptAgent;
+        if (!gset("ai", cfg)) return;
+        var setting = document.querySelector(".wc-ai-route-setting");
+        if (setting) setting.checked = cfg.interceptAgent;
+        updateHelperRouteToggle(btn);
+      });
+      btn.parentNode.insertBefore(toggle, btn.nextSibling);
+    }
+    var cfg = aiConfig();
+    var routed = cfg.interceptAgent && cfg.provider !== "builtin";
+    var label = routed ? "Weld: On" : "Weld: Off";
+    if (toggle.textContent !== label) toggle.textContent = label;
+    toggle.setAttribute("aria-pressed", String(routed));
+    toggle.title = routed ? "Send goes to Weld. Click to use Perchance AI instead." : "Send uses Perchance AI. Click to route through Weld.";
+    toggle.disabled = cfg.provider === "builtin";
+    if (toggle.disabled) toggle.title = "Perchance AI is selected. Choose a Weld model in AI settings to enable routing.";
+  }
   function hookHelperSubmit() {
     var btn = aiAgentButton(),
       input = aiAgentInput();
+    updateHelperRouteToggle(btn);
     if (btn && !btn.dataset.wcHook) {
       btn.dataset.wcHook = "1";
       btn.addEventListener("click", routeAgentToWorkspace, true);

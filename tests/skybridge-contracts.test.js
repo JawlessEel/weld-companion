@@ -258,6 +258,7 @@ const hook = load(
   {
     aiAgentButton: () => agentBtn,
     aiAgentInput: () => agentInput,
+    updateHelperRouteToggle: () => {},
     routeAgentToWorkspace: () => { routed++; return true; },
     aiAgentTouchMode: () => touch,
   },
