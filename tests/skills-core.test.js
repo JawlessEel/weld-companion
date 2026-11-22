@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 318);
+assert.equal(C.presets.length, 319);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
 assert.equal(C.categories.length, 20);
 for (const p of C.presets) {
@@ -123,7 +123,7 @@ assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000'
 // Each card and Dad-Chat skill carries a reference; existing presets also have worked examples.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
 assert.equal(cardSkills.length, 33);
-assert.equal(dadSkills.length, 47);
+assert.equal(dadSkills.length, 48);
 const compactPlaybooks = new Set(['dad-debug-loop', 'dad-debug-attribution', 'dad-debug-provider', 'dad-debug-stale', 'dad-debug-shapes', 'dad-debug-context', 'dad-debug-continuity', 'dad-debug-presets', 'dad-debug-voicing', 'dad-debug-no-spend', 'dad-forge-alignment', 'dad-family-parity', 'dad-vault-manager']);
 for (const p of cardSkills.concat(dadSkills)) {
   assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');

@@ -1423,6 +1423,12 @@ Request: "Make the chat bubbles easier to read on phones."
 Edit styling.css only: font size, line height, max-width in rem; check the inline first-paint
 copy in index.html is untouched or updated to match. Test 360px, 768px and desktop widths, light
 and dark themes (theme-customizer variables), long messages and code blocks.`,
+    'dad-theme-preset': String.raw`
+Request: "Add a dark preset from black, cobalt, azure, magenta, dark yellow and orange."
+Copy the shape of an existing dark preset in theme-customizer.js and add one new entry: --bg-main
+#07080C, --bg-sec #0E1A3D, --bg-ter #1B2F6E, --accent #00A6FF, --dad-rune-b #E6007A, text #E6ECFF,
+dark yellow #C49A00 and orange #FF6B1A in free slots. Existing presets stay byte-identical. Reload,
+pick the preset in the Theme Customizer, confirm zero console errors and that toggleAppTheme still works.`,
     'dad-perf-size': String.raw`
 Good report: "Fixed chars per turn for Henry Tucker: about 25k. Top three savings: system
 instruction block (~5.5k), towns entry (~3.6k), duplicate frontier entries (~3k). app.js loads
@@ -1652,6 +1658,7 @@ Bad result: JSON.parse(reply) with no catch, or eval/innerHTML on the reply.`
     'dad-prompt-tune': ['dad-flow', 'dad-rules'],
     'dad-provider-add': ['dad-layout', 'dad-code-rules'],
     'dad-ui-polish': ['dad-layout', 'dad-code-rules'],
+    'dad-theme-preset': ['dad-layout', 'dad-code-rules'],
     'dad-perf-size': ['dad-layout', 'dad-flow', 'dad-rules'],
     'dad-persistence-audit': ['dad-data', 'dad-layout', 'dad-code-rules'],
     'dad-hub-work': ['dad-hub', 'dad-layout', 'dad-code-rules', 'dad-file-chat'],

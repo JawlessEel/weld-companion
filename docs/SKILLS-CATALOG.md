@@ -1,6 +1,6 @@
 # Weld skills catalog
 
-Every skill preset in **Weld > Skills** (Weld Companion 1.96.4): **318 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
+Every skill preset in **Weld > Skills** (Weld Companion 1.97.0): **319 skills in 20 sections**. 44 of them are new in 1.93.0 (marked). Generated from `src/skills-*.js` by `npm run docs:skills`; if this file and the source disagree, the source wins.
 
 Each entry shows the task text, the workflow and the acceptance check Weld puts in the prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).
 
@@ -25,10 +25,10 @@ Each entry shows the task text, the workflow and the acceptance check Weld puts 
 | [Stories & worlds](#stories--worlds) | 14 | 6 |
 | [Games & interaction](#games--interaction) | 9 | 4 |
 | [SillyTavern, Chub & character cards](#sillytavern-chub--character-cards) | 33 | 2 |
-| [Dad-Chat projects](#dad-chat-projects) | 47 |  |
+| [Dad-Chat projects](#dad-chat-projects) | 48 |  |
 | [Rebrand, simplify & privacy](#rebrand-simplify--privacy) | 9 | 1 |
 | [AI input helpers & toolkit](#ai-input-helpers--toolkit) | 14 | 1 |
-| **Total** | **318** | **44** |
+| **Total** | **319** | **44** |
 
 Modes: **Review only** asks the helper for evidence and recommendations without edits. **Makes changes** asks for the smallest complete change, preserved features and storage, and honest verification.
 
@@ -4929,6 +4929,26 @@ Add or repair the provider or model in USER DETAILS inside providers.js (window.
 *Improve CSS and shell markup while keeping first paint intact.*
 
 Improve the interface described in USER DETAILS. Most changes belong in src/styling.css; touch index.html markup only when the DOM must change, and keep the duplicated loading-screen CSS in index.html and styling.css in sync. Use the existing theme variables so theme-customizer still works. Check 360px, 768px and desktop widths, light and dark, long messages, code blocks and loading and error states. Do not rename element ids that app.js or the studios query.
+
+**Workflow**
+
+1. Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.
+2. Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.
+3. Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.
+
+**Done when:** The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.
+
+**Structure references:** Dad-Chat project layout and load order, Dad-Chat editing conventions and live verification
+
+**Inspired by:** [Dad-Chat architecture (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md), [Dad-native format (Weld docs)](https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md)
+
+### Add a dark theme preset to the Theme Customizer
+
+`dad-theme-preset` · **Makes changes** · Chat, characters & memory, Stories & worlds
+
+*Register a new dark preset from a six-color palette without touching existing themes.*
+
+Add ONE new dark theme preset to Dad-Chat. If USER DETAILS names a palette or theme name use it; otherwise build a preset from black, cobalt, azure, magenta, dark yellow and orange. First read the theme-modals invariants in the references and src/theme-customizer.js (plus src/styling.css and index.html only if existing presets require them). Match the exact preset schema, token structure and preview/thumbnail conventions of the existing dark presets, and never overwrite, reorder or modify an existing theme. Suggested mapping, adjusted to cover every token the customizer supports: black #07080C for --bg-main (canvas); cobalt #0E1A3D for --bg-sec (surfaces) and #1B2F6E for --bg-ter (borders and elevated chrome); azure #00A6FF for --accent, rgba(0, 166, 255, 0.14) for --accent-dim and --dad-rune-a; magenta #E6007A for --dad-rune-b, rgba(230, 0, 122, 0.35) for --dad-rune-glow and the danger or secondary accent; dark yellow #C49A00 for muted or secondary accent, labels or a free token slot; orange #FF6B1A for a warm highlight, status or accent slot; readable primary text such as #E6ECFF so long chats stay comfortable. All six colors must be visibly represented and text contrast must stay clean. Respect every invariant: keep the Perchance header dark, keep toggleAppTheme and the customizer sync intact, and use tr() and data-i18n* for every UI label. Then reload the generator and check in the live page that the preset is registered, selectable in the Theme Customizer, applies without console errors or perchanceErrors, and that the existing presets still apply. Report the theme name, files edited, exact tokens and hex codes, and the verification result.
 
 **Workflow**
 
