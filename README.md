@@ -8,7 +8,7 @@ Favorites · reading comfort · save & pin results · undo-reroll · a full gene
 
 [![Checks](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml/badge.svg)](https://github.com/JawlessEel/weld-companion/actions/workflows/test.yml)
 [![Userscript](https://img.shields.io/badge/type-userscript-4493f8)](#install)
-[![Version](https://img.shields.io/badge/version-1.97.0-3fb950)](#)
+[![Version](https://img.shields.io/badge/version-1.98.0-3fb950)](#)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-supported-00485b)](https://www.tampermonkey.net/)
 [![Violentmonkey](https://img.shields.io/badge/Violentmonkey-supported-663399)](https://violentmonkey.github.io/)
 [![Local & account-free](https://img.shields.io/badge/your%20data-100%25%20local-3fb950)](#privacy--safety)
@@ -33,6 +33,8 @@ Weld Companion runs **outside** the generator sandbox as a browser userscript, s
   - [Project — read, check & export any generator](#project--read-check--export-any-generator-v1570)
   - [Skills - application and generator library](#skills--application-and-generator-library-v1600)
   - [Dev — folder sync, AI agents & GitHub](#dev--folder-sync-ai-agents--github-v1580)
+  - [Agents — in-browser assistants that read your generator](#agents--in-browser-assistants-that-read-your-generator)
+  - [Snippets — code boilerplate](#snippets--code-boilerplate)
   - [Tools — AI Helper & character files](#tools--ai-helper--character-files)
   - [Data Manager — browse, edit & back up every generator's IndexedDB](#data-manager--browse-edit--back-up-every-generators-indexeddb)
   - [AICC pack — Lore Library, character round-trip & repair](#aicc-pack--lore-library-character-round-trip--repair)
@@ -65,13 +67,14 @@ Weld Companion adds **one ⚡ Weld item** to Perchance's menu bar — styled lik
 | Tab | What's in it |
 | :-- | :----------- |
 | **Backups** | Inventory, inspect, download and delete the generator backup copies held in Weld, check a Dad-Chat family generator's persistence rungs, and **save copies to a folder you choose** (local drive or cloud-synced folder; add-only, secrets held back). See [docs/BACKUPS.md](docs/BACKUPS.md). |
-| **Skills** | 206 presets in 18 grouped sections for dashboards, chat/story systems, SillyTavern/Chub card and lore features, Dad-Chat projects (code and Dad-native content), Skybridge setup, rebranding, AI input helpers, prompt studios, plugins, debugging and more, with type/mode filters and native AI handoff. |
+| **Skills** | The single home for AI prompt-skills. 319 generator-build presets in grouped sections (dashboards, chat/story, SillyTavern/Chub cards & lore, Dad-Chat, Skybridge, rebranding, AI input helpers, prompt studios, plugins, debugging, **AI image generation**, **Website builder**) with type/mode filters and native AI handoff — **plus** the author's **Working rules**, **AI methods**, **Prompt engineering**, **Review & safety**, **Web layout & UI** and **3D & WebGL (Three.js)** skills (ready-to-send prompts badged single-shot / multi-run). Build a prompt, review it, then **Send to Perchance AI**, **→ AI Helper**, or copy it. |
+| 🤖 **Agents** | Named, reusable assistants that run against the generator you're viewing. Each one uses **your own AI model** to plan, run **read-only** lookups over the generator (the same investigate loop the Dev tab uses), and report back — explain a generator, hunt bugs, suggest improvements, or plan a feature. Agents never change a generator. Watch the lookups live, stop any time, and define your own with a custom role and tool set. |
 | ★ **Generators** | Your whole generator directory grouped by your real Perchance folders, plus favorites & recents — with search, sort (incl. **Edited** / **Views**), per-row open/edit, and a **Stats** button that pulls real **view counts + last-edited times** from Perchance's public API. A **This Generator** panel shows the open generator's status and an **About this page** card (public stats — views, last edited, title, imports — for *any* generator, even ones you don't own), plus owner actions. |
 | 📒 **Library** | The reader's home, grouped by task. **📚 Collect**: a permanent **Scrapbook** of saved results (searchable, taggable, exportable), **Chat stories** (read or export any AICC thread as styled HTML, Markdown, or text), **clipboard history**, and your **👍/👎 ratings**. **🛡 Care**: a **backup guardian**, a **time tracker** (per-generator minutes, CSV export), a **time capsule**, **output rules** (post-processing on save), and **Move everything** (full state export/import). Plus **search everything**, **session replay**, and a **spaced-repetition review queue** in Collect; **My Perchance** stats, **tab snapshots**, **My boundaries**, and a **Ctrl/Cmd+Shift+S** quick-save hotkey; a **keepsake HTML archive** and **recommendation bundles** to share generators; **lore link health** (catches removed/quarantined uploads before they break a character), **generator watch** (update notifications for favorites), and a one-click **platform speed check**; night light gains an **ambient mode** that follows hour and season. A sticky header keeps save / read-aloud / rate / random-favorite in reach. |
 | 🗃 **Data** | A launcher for the **Data Manager**: browse, edit, back up, export and import the IndexedDB databases of every generator you've visited — full CRUD, deep-scan search, sweep backup, undo for destructive actions. When an AI Character Chat database is open, the **AICC pack** panels appear automatically. |
 | ⇅ **GitHub** | Two-way GitHub sync for the open generator — **⬇ Pull** (repo → editor, undoable) and **⬆ Push** (editor → repo in one atomic commit), with per-generator file mappings and global repo defaults. |
 | 👁 **Comfort** | Eye-comfort theme filters, font size, line height, max width, a dyslexia-friendly font, focus mode — and an option to apply the same sizing to the **code editor**. |
-| ✂ **Snippets** | Ready-to-paste Perchance code snippets — `aiTextPlugin`, `kv-plugin`, and other boilerplate — dropped at your cursor into the matching DSL or HTML pane on an `#edit` page. |
+| ✂ **Snippets** | A **file-tree** of ready-to-paste Perchance **code** boilerplate — `$meta`, plugin imports, `grab()`, `aiTextPlugin` call/stream, `textToImagePlugin`, `uploadPlugin`, `superFetch`, `kv-plugin`, the `<image>` hint — grouped by editor pane. Click one to drop it at your cursor in the matching DSL or HTML pane (on an `#edit` page). Filter as you type. (AI prompt-skills live in the **Skills** tab.) |
 | 🛠 **Tools** | Tool cards. **AI Helper**: a custom instruction, or route the helper to your own **OpenAI / Anthropic / Google** model *or a free, private **local model** (Ollama / OpenAI-compatible)*. **Character Files**: import/export AICC character `.json`, or fetch from a GitHub raw URL. **🧪 Diagnostics**: a one-click **self-test** of the companion's capabilities (anchor, storage, fetch + Perchance API, your AI provider) with a copyable report. |
 
 ### Quality-of-life
@@ -247,11 +250,20 @@ See [the Project guide](docs/PROJECT.md).
 
 ### Skills — application and generator library (v1.60.0)
 
-The **Skills** tab provides **319 presets in 20 collapsible sections**, with search, generator/application type filters, review/implementation filters and saved favorites. It treats Perchance projects as full applications: data terminals, advanced branching story bots, image/vision studios, prompt editors and reusable plugins. Presets cover real feed contracts and calculations, source freshness, report/AI-packet parity, branch isolation, sync conflicts, character-card interoperability and bounded model routing, alongside debugging, design, performance and quality. The **Websites & site builders** section (24 skills) adds a one-click AI website builder page (one idea box, single or multi page, AI fills every field), per-field Rewrite & Fill, multi-page navigation, section library, design tokens, copywriting, images, SEO, forms, widgets, safe preview and export, plus cross-cutting edge-case skills (structured AI output, context budgets, blocked sandbox features, size limits, two tabs, Unicode, undo). Each task includes a workflow and acceptance checks; selected research sources are linked in the detail view. Add your goal, optionally include fresh editor findings, review the editable prompt and send it directly to Perchance's native AI input. Existing helper drafts are preserved; press **Send** there to run it. Review-only instructions request an audit without code changes. No third-party skill code, agents or hooks are installed.
-
-**New in 1.95.0 — roleplay and story engine skills.** 13 new skills (stop godmoding and stock phrases, clean reasoning leaks and self-replies, stop `update()` wiping inputs, story turns that update stats and inventory, an RPG HUD with state-driven odds, defanging instructions hidden in imported cards and lore, per-chat scene sheets, cast extraction, record/replay chat tests, consistent story illustrations, discoverability, chat layout essentials, and a Dad-Chat zero-error runtime check), and 14 existing chat, story, lore and game skills now carry their own workflow and acceptance check instead of the section defaults. Adapted from the Perchance bundle in the Skill Database.
+The **Skills** tab provides **362 presets in 26 collapsible sections**, with search, generator/application type filters, review/implementation filters and saved favorites. It treats Perchance projects as full applications: data terminals, advanced branching story bots, image/vision studios, prompt editors and reusable plugins. Presets cover real feed contracts and calculations, source freshness, report/AI-packet parity, branch isolation, sync conflicts, character-card interoperability and bounded model routing, alongside debugging, design, performance and quality. Each task includes a workflow and acceptance checks; selected research sources are linked in the detail view. Add your goal, optionally include fresh editor findings, review the editable prompt and send it directly to Perchance's native AI input. Existing helper drafts are preserved; press **Send** there to run it. Review-only instructions request an audit without code changes. No third-party skill code, agents or hooks are installed.
 
 **New in 1.65.0 — Dad-Chat skills and structure references.** A **Dad-Chat projects** section (24 skills) builds prompts to diagnose, fix, add, improve and enhance code inside a Dad Chat (dad-chat-v2) Perchance project, and to write characters, lore and worlds in the Dad-native format. Every Dad-Chat skill and all SillyTavern/Chub card, lore and chat skills now carry a **structure reference** (file layout and flow diagrams, annotated JSON shapes, PNG chunk layout, prompt order) plus a **worked example** inside the prompt, so the AI helper sees the real layout instead of guessing. The detail view lets you read exactly what gets added. The Dad-Chat source documents are bundled in [docs/dad-chat](docs/dad-chat/README.md).
+
+**Working skills — ready-to-send prompts.** Alongside the composed generator-build presets, the Skills tab now hosts six categories of **direct** prompts (badged `single-shot` / `multi-run`) — the single home for all AI prompt-skills:
+
+- **📐 Working rules** — the author's build/review disciplines: Map the Build, Prove the Wire, Force the Wire, Red-Room the Surface, Sweep for Wins, Offset Don't Flatten, Factory Build, Campaign, Harness the Surface, and a Working Guidelines overview.
+- **🧠 AI methods** — distinctive UI design, a manual test plan, a theme generator, generative/canvas art, an output discernment check, generator spec & iterate, a self-contained component build, README co-authoring, and Diagram the System (right diagram type for the question + a readable layout, as Mermaid or inline SVG — adapted from the archify method).
+- **🎯 Prompt engineering** — for the `root.aiTextPlugin` prompts *inside* your generator: a Prompt Builder (metaprompt), Refine Until It Passes (a multi-run evaluator→optimizer loop), a Few-Shot Example Pack, Schema-Locked JSON Output, a Hallucination Guard, and prompt chaining.
+- **🛡 Review & safety** — a phased Security Review (JSON findings), a Threat Model, and an Edge-Input Attack Battery, aimed at the threats that actually bite on Perchance (user text reaching `innerHTML`, bad odds, silent failures).
+- **🎨 Web layout & UI** — for the #1 complaint that AI web layouts look generic: De-Slop a Layout (name the slop tells, rewrite with intent), Pick a Design Direction (derive one aesthetic from a generation engine + tonal dials, not an adjective), Build a Striking Layout, a Responsive & Mobile Pass, a Visual Polish Micro-Pass, Review a UI (a slop rubric that grades the screen like an independent reviewer — veto conditions, a 480px three-second test, banned defaults, data realism, score /10), and Node / Flow Editor UI (a node-graph editor done right — React Flow with the gotchas AIs miss, or hand-rolled SVG + pointer events for a single-file Perchance page). Built on the anti-slop guidance from Anthropic's frontend-design / web-artifacts-builder skills, the oil-ui reviewer method, and the xyflow docs.
+- **🧊 3D & WebGL (Three.js)** — for "it can't make good 3D models": a Light, Tone & Grounding Rig (the real fix for the flat/plastic look), Model by Blockout & Proportion, Dial in PBR Materials, a Stylized Low-Poly Look, Procedural Geometry from Parameters, a 3D Performance Budget, and Combat & Game Feel (hitstop, aim-snapping, input buffering, dodge priority, telegraphs, camera discipline, difficulty tuning — adapted from the guizang game-skill method).
+
+A direct skill's detail shows its full prompt; a "**→ AI Helper**" action loads it straight into your own AI Helper (Tools → Model chat), to send or multi-run it there, alongside the native **Send to Perchance AI** and **Copy**.
 
 See [the Skills guide](docs/SKILLS.md). No separate model configuration is required for the native handoff.
 
@@ -267,6 +279,27 @@ The **🧩 Dev** tab connects the generator you are editing to files, to AI codi
 - **Find usages and rename** across both panels, **editor markers** beside lines with findings, and a **regression check** that compares output before and after an edit.
 
 See [the Dev guide](docs/DEV.md) for setup, per-agent instructions, the security model, and what has and has not been verified.
+
+### Agents — in-browser assistants that read your generator
+
+The **🤖 Agents** tab runs small, goal-directed assistants against the generator you're viewing. Where the Dev tab's *agent bridge* lets an **external** coding agent drive Weld over MCP, the Agents tab is the **in-browser** version: pick an agent, give it a job, and it works the problem itself using **your own configured AI model** — no local process, no extra setup beyond a model.
+
+Each agent runs a **plan → look up → observe → answer** loop. It can only use **read-only lookups** — the same ones the Dev tab's "investigate" mode offers (outline, findings, numbered lines, search, find-usages, imports, HTML map) — so **an agent can never change a generator.** It reads, reasons, and reports; you decide what to do with the answer.
+
+- **Built-in agents:** **📖 Explain this generator**, **🐛 Find likely bugs**, **✨ Suggest improvements**, and **🗺 Plan a new feature** (describe the feature and it drafts an ordered plan against the real structure).
+- **Watch it work.** The transcript shows each lookup the agent runs as it happens, then its final answer. **Stop** aborts a run at any point; the round budget (1–8 lookups) is bounded so a run always ends.
+- **Make your own.** Create a custom agent with its own name, role (system prompt), default goal, allowed tools, and round budget. Custom agents are stored locally (and travel in **Move everything**). A built-in can be **Duplicated** as a starting point.
+- **Requirements.** Agents need **your own AI model** (OpenAI / Anthropic / Google or a free local Ollama / OpenAI-compatible model) set up in the **Tools** tab — the built-in Perchance helper can't be driven automatically, and the tab says so. They work best with a generator open (the lookups read the current one).
+
+Treat everything an agent reads from a generator as **data, not instructions** — the agents' roles tell the model exactly that, so a crafted generator can't turn an agent against you.
+
+See [the Agents guide](docs/AGENTS.md).
+
+### Snippets — code boilerplate
+
+The **✂ Snippets** tab is a **file-tree** of ready-to-paste Perchance **code** boilerplate (`$meta`, core/Weld/data imports, `grab()`, `aiTextPlugin` call & stream, `textToImagePlugin`, `uploadPlugin`, `superFetch`, `kv-plugin`, the `<image>` hint), grouped by editor pane. Expand a pane folder, filter as you type, and click a snippet to drop it at your cursor in the matching **DSL** or **HTML** pane (on an `#edit` page).
+
+*(AI prompt-skills — the author's **Working rules**, **AI methods**, **Prompt engineering** and **Review & safety** — live in the [Skills tab](#skills--application-and-generator-library-v1600), the single home for all AI prompts.)* See [the Snippets guide](docs/SNIPPETS.md).
 
 ### Tools — AI Helper & character files
 

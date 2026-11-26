@@ -181,4 +181,5 @@ mk.toasts = [];
     assert.ok(g.stats.commits.every(c => c.fileChanges.additions.every(a => a.path.startsWith('_weld-data/'))), 'only _weld-data is ever written');
   }
   console.log('repo store tests passed');
+  process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

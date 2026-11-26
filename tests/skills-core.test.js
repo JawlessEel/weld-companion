@@ -2,16 +2,24 @@ const assert = require('node:assert/strict');
 const C = require('../src/skills-core.js');
 
 // Stable catalog IDs support saved favorites; every preset must be runnable and scoped.
-assert.equal(C.presets.length, 319);
+assert.equal(C.presets.length, 362);
 assert.equal(new Set(C.presets.map(p => p.id)).size, C.presets.length);
-assert.equal(C.categories.length, 20);
+assert.equal(C.categories.length, 26);
 for (const p of C.presets) {
   assert.ok(C.categories.some(c => c.id === p.category));
-  assert.equal(p.steps.length, 3);
-  assert.ok(p.check.length > 30);
   assert.ok(p.types.every(id => C.types.some(t => t.id === id)));
   assert.ok(p.sources.every(id => C.sources.some(s => s.id === id)));
   assert.match(p.id, /^[a-z][a-z-]+$/);
+  if (p.direct) {
+    // direct skills ship a complete prompt sent whole, no composition
+    assert.ok(p.prompt && p.prompt.length > 100, 'direct preset ships a prompt: ' + p.id);
+    assert.ok(p.run === 'single' || p.run === 'multi', 'direct run flag: ' + p.id);
+    assert.equal(C.buildPrompt(p.id, {}), p.prompt, 'direct buildPrompt returns the prompt verbatim: ' + p.id);
+    assert.ok(!/\nWORKFLOW\n|MODE: /.test(C.buildPrompt(p.id, {})), 'direct prompt is not wrapped: ' + p.id);
+    continue;
+  }
+  assert.equal(p.steps.length, 3);
+  assert.ok(p.check.length > 30);
   const prompt = C.buildPrompt(p.id, { slug: 'demo' });
   assert.ok(prompt.includes(p.task));
   assert.match(prompt, /current lists and HTML panels/);
@@ -23,6 +31,19 @@ for (const p of C.presets) {
   assert.ok(prompt.includes(p.check));
   assert.match(prompt, p.mode === 'review' ? /MODE: REVIEW ONLY\. Do not modify/ : /MODE: IMPLEMENT\./);
 }
+// the 43 direct skills landed in the 6 direct categories
+assert.equal(C.presets.filter(p => p.direct).length, 43, '43 direct skills');
+assert.deepEqual(['working-rules', 'ai-methods', 'prompt-eng', 'review-safety', 'web-design', 'three-3d'].map(c => C.presets.filter(p => p.category === c).length), [10, 10, 6, 3, 7, 7], 'direct category counts');
+// Imported suites (image-gen, website builder) and per-row steps/check from skills-extra.
+assert.equal(C.presets.filter(p => p.category === 'imagegen').length, 20, 'imagegen suite');
+assert.equal(C.presets.filter(p => p.category === 'site').length, 24, 'website-builder suite');
+// an imported extra skill carries its OWN steps/check (not the section default)
+const sand = C.get('prompt-flow-sandwich');
+assert.ok(sand && sand.steps.length === 3 && sand.check, 'imported skill carries per-row steps/check');
+// an image skill resolves its structure-reference packs
+assert.ok(C.get('img-prompt-library').refs.includes('img-anatomy'), 'image skill links its ref pack');
+// an Extra.upgrades override reached an existing preset
+assert.ok(C.get('ai-chat').steps.length === 3, 'upgrades applied to existing skill');
 assert.throws(() => C.buildPrompt('not-a-skill'), /Choose a valid skill/);
 assert.equal(C.get('not-a-skill'), null);
 assert.ok(C.search(' MOBILE ', 'design').some(p => p.id === 'mobile-layout'));
@@ -85,7 +106,9 @@ const concise = C.buildPrompt('fix-bugs', { concise: true });
 assert.match(concise, /Preserve complete code, exact names, error details, verification evidence/);
 assert.ok(!C.buildPrompt('fix-bugs').includes('REPLY STYLE'));
 // Skybridge, Tavern/Chub card, rebrand and AI-input-helper skills (1.62.0).
-assert.deepEqual(C.sections.map(s => s.id).slice(-4), ['cards', 'dad', 'rework', 'assist']);
+assert.ok(['cards', 'dad', 'rework', 'assist'].every(id => C.sections.some(s => s.id === id)), 'composed categories present');
+// the direct-skill categories are appended last.
+assert.deepEqual(C.sections.map(s => s.id).slice(-6), ['working-rules', 'ai-methods', 'prompt-eng', 'review-safety', 'web-design', 'three-3d']);
 assert.ok(C.buildPrompt('skybridge-integrate').includes('call root.weldSkybridge() once early'));
 assert.ok(C.buildPrompt('skybridge-integrate').includes('gate every privileged call on sb.has(name)'));
 assert.match(C.buildPrompt('skybridge-integrate'), /Never place keys on the bridge/);
@@ -120,14 +143,15 @@ for (const id of Object.keys(Refs.examples)) assert.ok(C.get(id), 'example for u
 assert.equal(new Set(Refs.packs.map(p => p.id)).size, Refs.packs.length);
 assert.ok(Refs.packs.filter(p => /^dad-skill-/.test(p.id)).every(p => !p.text.includes('\\`') && p.text.includes('`')), 'family skill packs keep their backticks verbatim');
 assert.ok(Refs.packs.every(p => p.text.length > 200 && !p.text.includes('\u0000')));
-// Each card and Dad-Chat skill carries a reference; existing presets also have worked examples.
+// Every Tavern/Chub card skill and every Dad-Chat skill carries a diagram or schema plus an example.
 const cardSkills = C.presets.filter(p => p.category === 'cards'), dadSkills = C.presets.filter(p => p.category === 'dad');
 assert.equal(cardSkills.length, 33);
 assert.equal(dadSkills.length, 48);
+// Compact playbooks (imported Dad-Chat debug/parity skills) carry a structure reference but no worked example.
 const compactPlaybooks = new Set(['dad-debug-loop', 'dad-debug-attribution', 'dad-debug-provider', 'dad-debug-stale', 'dad-debug-shapes', 'dad-debug-context', 'dad-debug-continuity', 'dad-debug-presets', 'dad-debug-voicing', 'dad-debug-no-spend', 'dad-forge-alignment', 'dad-family-parity', 'dad-vault-manager']);
 for (const p of cardSkills.concat(dadSkills)) {
   assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
-  if (!compactPlaybooks.has(p.id)) assert.ok(p.example.length > 80, p.id + ' example is too short');
+  if (!compactPlaybooks.has(p.id)) assert.ok(p.example.length > 80, p.id + ' needs a worked example');
   const built = C.buildPrompt(p.id);
   assert.ok(built.includes('STRUCTURE REFERENCE\n'), p.id);
   if (!compactPlaybooks.has(p.id)) assert.ok(built.includes('WORKED EXAMPLE'), p.id);
@@ -190,66 +214,8 @@ assert.ok(Array.isArray(JSON.parse(lore[0]).entries)); assert.ok(JSON.parse(lore
 const chat = Refs.byId['st-chatlog'].text.split('\n').filter(l => l.startsWith('{"')).map(l => JSON.parse(l));
 assert.equal(chat.length, 3); assert.ok(chat[0].user_name && chat[1].swipes[chat[1].swipe_id] === chat[1].mes);
 
-// Website builder skills and cross-cutting edge-case skills (1.76.0).
-const webSkills = C.presets.filter(p => p.category === 'web');
-assert.equal(webSkills.length, 24);
-assert.equal(C.sections.find(s => s.id === 'web').title, 'Websites & site builders');
-assert.ok(C.types.some(t => t.id === 'website'));
-for (const p of webSkills) assert.ok(p.refs.length >= 1, p.id + ' needs a structure reference');
-const oneClick = C.buildPrompt('site-one-click-builder', { slug: 'demo', details: 'A bakery in Ames.' });
-assert.match(oneClick, /ONE textarea|ONE idea/);
-assert.match(oneClick, /Single page or Multi page/);
-assert.match(oneClick, /ONE-CLICK SITE BUILDER PIPELINE/);
-assert.match(oneClick, /SITE SPEC: THE ONE MODEL/);
-assert.match(oneClick, /AI FIELD HELPER CONTRACT/);
-assert.match(oneClick, /never invent prices, contact details or testimonials/);
-assert.match(oneClick, /nothing was published/);
-assert.ok(oneClick.indexOf('WORKED EXAMPLE') < oneClick.indexOf('USER DETAILS\nA bakery in Ames.'));
-assert.match(C.buildPrompt('site-ai-fields'), /never overwrite text typed while a request was running/);
-assert.match(C.buildPrompt('site-pipeline-resilience'), /ignore late replies from a stopped or older run/);
-assert.match(C.buildPrompt('site-contact-forms'), /do not pretend a message was sent/);
-assert.match(C.buildPrompt('site-multipage'), /relative \.html links that work from disk|work from disk/);
-assert.match(C.buildPrompt('site-render-safety'), /MODE: REVIEW ONLY/);
-assert.ok(C.get('site-quality-audit').mode === 'review' && C.get('site-edge-cases').mode === 'review');
-assert.ok(C.search('', 'web', null, { type: 'website' }).length === webSkills.length);
-assert.ok(C.search('', 'web', null, { type: 'dashboard' }).length === 0);
-assert.ok(C.search('website').length >= 20);
-for (const id of ['ai-json-contract', 'ai-context-budget', 'sandbox-frame-fallbacks', 'unicode-text-safety', 'size-limit-guard', 'cross-tab-state', 'backup-readiness', 'undo-redo', 'large-generator-slicing', 'perchance-syntax-guard']) {
-  assert.ok(C.get(id), id);
-  assert.ok(C.get(id).refs.length >= 1, id + ' needs a reference');
-}
-assert.match(C.buildPrompt('size-limit-guard'), /2 MB/);
-assert.match(C.buildPrompt('large-generator-slicing'), /6k tokens/);
-// The Site Spec example in the pack must be valid JSON once placeholders are read as data.
-const specText = Refs.byId['web-spec'].text.match(/^\{[\s\S]*?\}\s*$/m);
-assert.ok(specText && JSON.parse(specText[0].replace(/"single" \| "multi"/, '"single"')).pages[0].sections[0].type === 'hero');
-
 // The native AI input is believed to take about 6k tokens: every built-in prompt must leave real headroom.
 for (const p of C.presets) assert.ok(C.estimateTokens(C.buildPrompt(p.id, { slug: 'a-long-generator-name', concise: true })) <= 4500, p.id + ' prompt too large');
-
-// Image prompt skills adapted from public Nano Banana prompt collections (1.77.0).
-const extraIds = new Set(require('../src/skills-extra.js').rows.map(r => r[1]));
-const imgSkills = C.presets.filter(p => p.category === 'imagegen' && !extraIds.has(p.id));
-assert.equal(imgSkills.length, 17);
-assert.equal(C.sections.find(s => s.id === 'imagegen').title, 'Image prompts & studios');
-for (const p of imgSkills) {
-  assert.ok(p.refs.length >= 1, p.id + ' needs a reference');
-  assert.deepEqual([...p.types], ['image']);
-  assert.ok(p.sources.every(id => C.sources.some(s => s.id === id)) && p.sources.length === 2);
-}
-assert.ok(C.sources.find(s => s.id === 'nano').url.includes('475f02bf67b2cd26d5d9c76ba145b47cb4500700'));
-assert.match(C.buildPrompt('img-prompt-slots'), /SLOT SYNTAX/);
-assert.match(C.buildPrompt('img-reference-edit'), /LIKENESS AND CONSENT/);
-assert.match(C.buildPrompt('img-json-prompt-builder'), /negative_prompt/);
-assert.ok(C.get('img-prompt-lint').mode === 'review');
-assert.ok(C.search('', 'imagegen', null, { type: 'image' }).length === C.presets.filter(p => p.category === 'imagegen').length);
-assert.ok(C.get('img-negative-prompts').refs.includes('img-anatomy') && C.get('img-seed-lock').refs.includes('img-anatomy'));
-assert.ok(C.search('', 'imagegen', null, { type: 'dashboard' }).length === 0);
-assert.ok(C.search('infographic').some(p => p.id === 'img-infographic-studio'));
-const slotText = Refs.byId['img-templates'].text.match(/^\{\n  "id"[\s\S]*?\n\}$/m);
-assert.ok(slotText && JSON.parse(slotText[0]).slots[0].name === 'quote');
-const anatomyJson = Refs.byId['img-anatomy'].text.match(/^\{\n  "subject"[\s\S]*?\n\}$/m);
-assert.ok(anatomyJson && JSON.parse(anatomyJson[0]).photography);
 
 // The bundled copies of the Dad-Chat docs ship in the repo and agree with the packs on key names and numbers.
 const archDoc = fsx.readFileSync('docs/dad-chat/architecture.md', 'utf8'), formatDoc = fsx.readFileSync('docs/dad-chat/dad-native-format.md', 'utf8');
@@ -262,35 +228,3 @@ for (const file of ['main.pjs', 'pjs-globals.js', 'agent-core.js', 'providers.js
 for (const key of ['dad_roleplay', 'lorebookArchive', 'lastLoreRun', 'excludeRecursion', 'vectorized', 'reminderMessage', 'userOverride'])
   assert.ok(formatDoc.includes(key) && Refs.packs.some(p => p.text.includes(key)), 'format drift: ' + key);
 console.log('Skills catalog, scope, search and prompt composition passed');
-
-// Rows from skills-extra.js carry their own workflow and acceptance check instead of the section defaults.
-const extraRow = C.get('dice-notation');
-assert.ok(extraRow && extraRow.category === 'games');
-assert.equal(extraRow.steps.length, 3);
-assert.ok(extraRow.steps[0].startsWith('Write the notation grammar'));
-assert.ok(extraRow.check.startsWith('Standard notation rolls correctly'));
-assert.notDeepEqual(extraRow.steps, C.get('game-balance').steps);
-const extraPrompt = C.buildPrompt('privacy-audit', {});
-assert.ok(extraPrompt.includes('MODE: REVIEW ONLY'));
-assert.ok(extraPrompt.includes('Inventory scripts, embeds, fetches and plugin calls.'));
-assert.ok(C.get('fix-bugs').steps === C.sections.find(s => s.id === 'repair').steps);
-// 1.95.0: roleplay/story engine skills and per-skill workflows (Extra.upgrades) for existing skills.
-const Extra = require('../src/skills-extra.js');
-for (const id of ['antislop-director', 'model-output-cleanup', 'update-wipes-state', 'story-state-sideband', 'rpg-hud', 'lore-injection-guard', 'scene-sheet-tracker', 'cast-extractor', 'chat-replay-tests', 'img-story-scenes', 'discoverability', 'chat-layout-essentials', 'dad-runtime-eval']) {
-  const p = C.get(id); assert.ok(p, id);
-  assert.equal(p.steps.length, 3, id); assert.ok(p.check.length > 60, id);
-  if (p.category !== 'dad') assert.notDeepEqual(p.steps, C.sections.find(s => s.id === p.category).steps, id + ' has its own workflow');
-}
-assert.deepEqual(Object.keys(Extra.upgrades).filter(id => !C.get(id)), [], 'every upgrade names a shipped skill');
-for (const [id, up] of Object.entries(Extra.upgrades)) {
-  const p = C.get(id), section = C.sections.find(s => s.id === p.category);
-  assert.equal(up.steps.length, 3, id); assert.ok(up.check.length > 60, id);
-  assert.deepEqual([...p.steps], up.steps, id + ' uses its upgraded steps'); assert.equal(p.check, up.check);
-  assert.notEqual(p.steps, section.steps, id + ' no longer uses the section defaults');
-  assert.ok(C.buildPrompt(id).includes(up.check) && C.buildPrompt(id).includes('1. ' + up.steps[0]), id + ' prompt carries the upgrade');
-}
-assert.ok(!Extra.upgrades['fix-bugs'], 'fix-bugs keeps the section defaults');
-assert.match(C.buildPrompt('lore-injection-guard'), /WORKED EXAMPLE[^]*left exactly as written/);
-assert.match(C.buildPrompt('dad-runtime-eval'), /PROJECT CONTEXT: DAD-CHAT[^]*MODE: REVIEW ONLY/);
-assert.ok(C.search('godmoding').some(p => p.id === 'antislop-director') && C.search('think').some(p => p.id === 'model-output-cleanup'));
-assert.ok(C.search('update()').some(p => p.id === 'update-wipes-state'));

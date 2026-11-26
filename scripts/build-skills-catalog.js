@@ -10,13 +10,15 @@ const version = (fs.readFileSync(path.join(root, 'weld-companion.user.js'), 'utf
 
 const typeTitle = Object.fromEntries(S.types.map(t => [t.id, t.title]));
 const source = Object.fromEntries(S.sources.map(s => [s.id, s]));
-const recent = new Set(Extra.rows.map(r => r[1]).filter(id => id !== 'prompt-flow-sandwich'));
+const Image = require(path.join(root, 'src', 'skills-image.js'));
+const Web = require(path.join(root, 'src', 'skills-web.js'));
+const recent = new Set([].concat(Image.rows, Web.rows, Extra.rows).map(r => r[1]));
 const anchor = s => s.toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/ /g, '-');
 const mode = m => m === 'review' ? 'Review only' : 'Makes changes';
 const types = t => t.length ? t.map(x => typeTitle[x] || x).join(', ') : 'Any generator';
 
 function skill(p) {
-  const L = [`### ${p.title}`, '', `\`${p.id}\` · **${mode(p.mode)}** · ${types(p.types)}${recent.has(p.id) ? ' · new in 1.93.0' : ''}`, '',
+  const L = [`### ${p.title}`, '', `\`${p.id}\` · **${mode(p.mode)}** · ${types(p.types)}${recent.has(p.id) ? ' · imported' : ''}`, '',
     `*${p.description}*`, '', p.task, '', '**Workflow**', ''];
   p.steps.forEach((s, i) => L.push(`${i + 1}. ${s}`));
   L.push('', `**Done when:** ${p.check}`, '');
@@ -27,9 +29,9 @@ function skill(p) {
 
 const md = ['# Weld skills catalog', '',
   `Every skill preset in **Weld > Skills** (Weld Companion ${version}): **${S.presets.length} skills in ${S.categories.length} sections**. ` +
-  `${recent.size} of them are new in 1.93.0 (marked). Generated from \`src/skills-*.js\` by \`npm run docs:skills\`; if this file and the source disagree, the source wins.`, '',
+  `${recent.size} of them are imported suites (image generation, website builder and extra skills; marked). Generated from \`src/skills-*.js\` by \`npm run docs:skills\`; if this file and the source disagree, the source wins.`, '',
   'Each entry shows the task text, the workflow and the acceptance check Weld puts in the prompt. How to run a skill: [SKILLS.md](SKILLS.md). Research sources: [SKILLS-SOURCES.md](SKILLS-SOURCES.md).', '',
-  '## Contents', '', '| Section | Skills | New in 1.93.0 |', '| --- | ---: | ---: |'];
+  '## Contents', '', '| Section | Skills | Imported |', '| --- | ---: | ---: |'];
 for (const c of S.categories) {
   const list = S.presets.filter(p => p.category === c.id);
   md.push(`| [${c.title}](#${anchor(c.title)}) | ${list.length} | ${list.filter(p => recent.has(p.id)).length || ''} |`);

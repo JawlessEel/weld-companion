@@ -1,54 +1,37 @@
 # Generator skills
 
-Open **Weld > Skills** on a Perchance generator. The library contains **291 presets in 20 sections** for full browser applications as well as creative generators. Dashboards and complex applications come first; all original 48 preset IDs remain compatible with favorites.
+Open **Weld > Skills** on a Perchance generator. The library contains **362 presets in 26 sections** for full browser applications as well as creative generators. Dashboards and complex applications come first; all original 48 preset IDs remain compatible with favorites. Two sections — **AI image generation** (prompt libraries, template/slot builders, edit-recipe studios, consent safeguards) and **Website builder** (idea → multi-section site, SEO, design tokens, render safety) — plus Dad-Chat troubleshooting playbooks and extra repair/quality skills were imported from the companion fork. The last six sections are **direct skills** — ready-to-send prompts, the single home for all AI prompt-skills (the [Snippets tab](SNIPPETS.md) is code boilerplate only). A full generated listing of every preset lives in [SKILLS-CATALOG.md](SKILLS-CATALOG.md) (`npm run docs:skills`).
 
 | Section | Presets |
 | --- | ---: |
-| Dashboards & live data | 11 |
-| Prompts, models & plugins | 20 |
-| Debug & repair | 12 |
-| Design & modernize | 10 |
-| Add features | 14 |
-| AI & media | 17 |
-| Image prompts & studios | 19 |
-| Data & persistence | 14 |
-| Performance & reliability | 9 |
-| Accessibility & quality | 10 |
-| Code & planning | 11 |
+| Dashboards & live data | 9 |
+| Prompts, models & plugins | 11 |
+| Debug & repair | 8 |
+| Design & modernize | 8 |
+| Add features | 8 |
+| AI & media | 12 |
+| Data & persistence | 10 |
+| Performance & reliability | 8 |
+| Accessibility & quality | 8 |
+| Code & planning | 7 |
 | Create a generator | 7 |
-| Websites & site builders | 24 |
-| Text & randomness | 7 |
-| Stories & worlds | 10 |
-| Games & interaction | 8 |
-| SillyTavern, Chub & character cards | 32 |
-| Dad-Chat projects | 33 |
-| Rebrand, simplify & privacy | 9 |
-| AI input helpers & toolkit | 14 |
+| Text & randomness | 5 |
+| Stories & worlds | 8 |
+| Games & interaction | 5 |
+| SillyTavern, Chub & character cards | 31 |
+| Dad-Chat projects | 29 |
+| Rebrand, simplify & privacy | 8 |
+| AI input helpers & toolkit | 13 |
+| 📐 Working rules (direct) | 10 |
+| 🧠 AI methods (direct) | 10 |
+| 🎯 Prompt engineering (direct) | 6 |
+| 🛡 Review & safety (direct) | 3 |
+| 🎨 Web layout & UI (direct) | 7 |
+| 🧊 3D & WebGL — Three.js (direct) | 7 |
 
 Browse collapsible sections or combine search, generator/application type, task mode and favorites. Generic tasks remain available for every type. Dashboard tasks cover feed adapters, financial calculations, provenance/freshness, terminal layouts, charts, recovery, report parity and AI analyst grounding. Advanced story/chat tasks cover branches, ensemble characters, memory, card interoperability, sync conflicts, vault recall and multimodal workflows. The prompts/models/plugins section covers compiled prompts, preset exchange, model capabilities, routing, reusable interfaces and agent/tool contracts.
 
 **Skybridge** (Prompts, models & plugins): connect a generator to Weld Companion with the real `weld.skybridge` API (import, trigger call, capability checks, storage, own-model AI, bus) and diagnose a link that will not form. **SillyTavern, Chub & character cards**: Character Card V2/V3 import and export (JSON and PNG), field mapping and validation, alternate greetings and swipes, macros, example dialogue, Author’s Note and depth prompts, prompt inspector, Continue/Regenerate/Impersonate, personas, quick replies, regex rules, expressions, rolling summary, chat-log import/export, group chat, World Info upgrades (secondary keys, probability, recursion, budgets, timed effects), lorebook editor and import/export, and a Chub-style library. **Rebrand, simplify & privacy**: audit and replace branding, centralize it in one config block, remove promotional links and community/social chat features, go fully local. **AI input helpers & toolkit**: Rewrite & Fill buttons for prompt inputs (rewrite filled text, generate empty fields from the others and the generator context), fill-all, locks and undo, streaming with Stop, usage guard, diagnostics panel, command palette, share links and templates. Rebrand and removal skills apply only to generators you own or may modify and keep licence and attribution notices. Format-specific prompts tell the helper to check real sample files and keep unknown fields; they do not assert behavior of any particular app version.
-
-## More skills across sections (1.93.0)
-
-32 skills from `src/skills-extra.js`, each with its own workflow and acceptance check: error boundary, dead-code, plugin and CSS-leak audits; print layout and keyboard shortcuts; read-aloud, voice input, local usage stats, What's new panel and CSV import with column mapping; AI rewrite diffs, prompt-injection review and content preferences; negative prompts and seed lock; storage meter; profiling report; splitting a generator into imports and a maintainer guide; syllable names and list hygiene; story timeline and book export; dice notation, inventory and quests, dialogue trees; dashboard alerts and watchlists; batch card import; prompt history recall; and an outbound-data privacy audit. Full text: [SKILLS-CATALOG.md](SKILLS-CATALOG.md).
-
-## Image prompts & studios (1.77.0)
-
-Section **Image prompts & studios** has 17 skills for generators that call an image model. They are original task instructions inspired by two public prompt collections ([ZeroLu/awesome-nanobanana-pro](https://github.com/ZeroLu/awesome-nanobanana-pro) and [YouMind-OpenLab/awesome-nano-banana-pro-prompts](https://github.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts)); no prompts or images from them are bundled. Four references travel with the prompts: **prompt anatomy and the structured (JSON) prompt shape**, the **prompt library categories, template model and slot syntax**, **edit recipes** (outpaint, remove, restore, try-on, translate, infographic, cover, product, avatars, keyframes, miniatures) and **likeness and consent rules**.
-
-Skills: prompt library and gallery, fill-in-the-blank templates, JSON prompt builder, photo style composer, reference-image editing with identity lock, edit recipes, infographic studio, cover/thumbnail/poster studio, product and try-on studio, avatar and sticker sets, storyboard keyframes, isometric and miniature presets, prompt lint (review), A/B variations, aspect ratio presets, importer with source credit, and consent/labeling safeguards.
-
-## Websites & site builders (1.76.0)
-
-Section **Websites & site builders** (type filter: *Websites & site builders*) has 24 skills. Their prompts carry four structure references: the **Site Spec** (one JSON model behind a site), the **one-click pipeline**, the **AI field helper contract** and **safe render and export**, plus the **edge cases checklist**.
-
-- **One-click builder:** *Add a one-click AI website builder page* puts a page in the generator where the user types one idea, picks single or multi page and presses Build. Staged, validated AI requests (brief, plan, pages, design, images, SEO) fill an editable Site Spec with a live preview, Stop, per-stage Retry and export. Nothing is published and nothing is invented (prices, contact details, testimonials stay empty unless supplied).
-- **AI in every field:** Rewrite, Fill, Variants, Undo and Lock per field, Fill all empty with a preview, and per-section *Change this* with accept or reject.
-- **Structure and design:** multi-page navigation, single-page scrolling, a section library, design tokens with contrast checks, copywriting, images with alt text, SEO tags, honest contact forms, accessible widgets, feature blocks (blog, portfolio, pricing, booking, catalog), wrapping an existing generator in a full site, a project library, live preview and export bundles.
-- **Reviews:** safe rendering, quality audit and an edge-case walkthrough.
-
-Cross-cutting edge-case skills in other sections: dependable structured AI output (`ai-json-contract`), context budgets (`ai-context-budget`), blocked storage, clipboard and downloads (`sandbox-frame-fallbacks`), any language and long text (`unicode-text-safety`), Weld size limits (`size-limit-guard`), two tabs (`cross-tab-state`), backup readiness (`backup-readiness`), undo and redo (`undo-redo`), slicing big work for the helper input cap (`large-generator-slicing`) and Perchance syntax traps (`perchance-syntax-guard`). The **Perchance and Weld limits** reference (2 MB generator writes, 2 MB storage values, roughly 6k-token helper input, sandboxed frame) is attached to the skills it affects.
 
 ## Structure references and worked examples (1.65.0)
 
@@ -58,6 +41,19 @@ A prompt for a card, lore, chat-log or Dad-Chat skill has two extra parts, place
 - **WORKED EXAMPLE**: a short concrete request and the shape of a good (and sometimes bad) result. The helper is told to adapt it, never copy its sample values.
 
 The skill detail view lists the packs included and lets you read each one before you send. Packs say they summarize public conventions; the project's own code and real sample files win, and the helper must report differences. Other skills are unchanged.
+
+## Direct skills — ready-to-send prompts
+
+The last four sections hold **direct skills**: a direct skill is a pre-written prompt, not a composed workflow. Its detail view shows a run badge (**Single-shot prompt** or **Multi-run prompt**) and a **The prompt that gets sent** disclosure with the full, editable text — there is no task/steps/check composition stage. These moved out of the old Snippets tab so Skills is the one place for AI prompt-skills.
+
+- **📐 Working rules** (10) — the author's working-rules (prove-the-wire, verify-as-wired, byte-identical gate, and the rest), as prompts you can drop on any task.
+- **🧠 AI methods** (10) — reusable methods (rotate-45, factory-build, reverse-treeshake, test-the-negative and friends) phrased as instructions to the helper, plus *Diagram the System* — pick the right diagram type from the question, lay it out so it reads (main path as a spine, branches hung off their owner, conditions on the edge), and emit clean Mermaid or inline SVG (adapted from the archify authoring method).
+- **🎯 Prompt engineering** (6) — prompt-shaping skills (tighten a prompt, add structure, write a system preamble, and so on).
+- **🛡 Review & safety** (3) — review and safety passes to run over generated output.
+- **🎨 Web layout & UI** (6) — the biggest "it looks AI-made" complaint, answered. *De-Slop a Layout* names the generic tells (centered column, Inter font, purple gradient, uniform rounded corners, timid spacing) and rewrites with intent; *Pick a Design Direction* derives one bold aesthetic from a concrete generation engine + five tonal dials (not an adjective) with a real type/color/space system; *Build a Striking Layout* produces the production HTML/CSS; a *Responsive & Mobile Pass* and *Visual Polish Micro-Pass* finish it; *Review a UI (slop rubric)* grades a layout like an independent reviewer — acceptance vetoes, the 480px three-second test, banned-defaults and data-realism checks, and a score out of 10; and *Node / Flow Editor UI* builds a node-graph editor (nodes, edges, drag-to-connect, pan/zoom) either in React Flow — with the setup rules an AI always gets wrong (import the stylesheet, size the parent, memoize `nodeTypes`, wire `onNodesChange`, handles inside custom nodes) — or hand-rolled in plain SVG + pointer events for a single-file Perchance page. Grounded in the anti-slop guidance from Anthropic's frontend-design / web-artifacts-builder skills, the oil-ui reviewer method, and the xyflow (React Flow) docs.
+- **🧊 3D & WebGL — Three.js** (7) — the "it can't make good 3D models" complaint, answered where the problem actually is. *Light, Tone & Grounding Rig* fixes the flat/plastic look (ACESFilmic tone mapping, sRGB, an IBL environment, a 3-point + rim light rig, grounded contact shadows); *Model by Blockout & Proportion* builds recognizable models by silhouette and ratio instead of a pile of default primitives; *Dial in PBR Materials* kills the plastic surface; *Stylized Low-Poly Look* makes simple geometry an intentional style; *Procedural Geometry from Parameters* generates meshes with correct normals/UVs and seeded variation; *3D Performance Budget* keeps it at 60fps (adaptive DPR, degrade order, context-loss handling); and *Combat & Game Feel* adds the systems that make a browser action game satisfying — hitstop, aim-snapping, input buffering, dodge priority, telegraphs, camera discipline, difficulty tuning (adapted from the guizang game-skill method).
+
+A direct skill's **Send to Perchance AI** and **Copy prompt** work as for any skill; a third **→ AI Helper** action loads the prompt straight into your own AI Helper input (Tools → Model chat, the OpenAI-compatible endpoint), so you can send it through your configured model instead of Perchance's. Any details you type are appended to the prompt verbatim.
 
 ## Dad-Chat projects (29 skills)
 
@@ -72,7 +68,7 @@ The source documents are in [dad-chat/](dad-chat/README.md). When they change, u
 
 Dropdown options use opaque backgrounds and text colors from Weld's adopted theme, with matching native dark/light controls (1.60.1).
 
-Every preset, with its full task text, is listed in [SKILLS-CATALOG.md](SKILLS-CATALOG.md). Every preset has a workflow and acceptance checks. The detail view distinguishes **Review only** from **Makes changes**; researched additions link to their primary sources at inspected revisions or current official provider docs. See [selection rationale and all 14 repositories](SKILLS-SOURCES.md). These are original Perchance adaptations, not installed third-party agent packages.
+Every preset has a workflow and acceptance checks. The detail view distinguishes **Review only** from **Makes changes**; researched additions link to their primary sources at inspected revisions or current official provider docs. See [selection rationale and all 14 repositories](SKILLS-SOURCES.md). These are original Perchance adaptations, not installed third-party agent packages.
 
 ## Run a skill
 
@@ -98,4 +94,4 @@ Favorites persist through Weld storage and contain only catalog IDs. Search, sel
 
 ## Development
 
-Edit `src/skills-core.js` (catalog and pure prompt composition), `src/skills-refs.js` (structure packs, preset-to-pack links and worked examples), `src/skills-dad.js` (Dad-Chat rows), `src/skills-web.js` (website and edge-case rows), `src/skills-image.js` (image prompt rows), `src/skills-extra.js` (1.93.0 rows with their own workflow and check) and `src/skills-ui.js` (interface), then run `npm run build` and `npm run check`. The generated `SKILLS` block belongs to the build. Native helper internals are feature-detected by the shared `openPerchanceAI` adapter; live validation and installation in a userscript manager are separate checks.
+Edit `src/skills-core.js` (catalog and pure prompt composition), `src/skills-refs.js` (structure packs, preset-to-pack links and worked examples), `src/skills-dad.js` (Dad-Chat rows), `src/skills-direct.js` (the direct-skill prompts — the four `RULES`/`METHODS`/`PROMPTS`/`REVIEW` arrays) and `src/skills-ui.js` (interface), then run `npm run build` and `npm run check`. The generated `SKILLS` block belongs to the build. Native helper internals are feature-detected by the shared `openPerchanceAI` adapter; live validation and installation in a userscript manager are separate checks.
