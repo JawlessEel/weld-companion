@@ -24,3 +24,4 @@
 
 2026-11-17 · Codex · Added DadChat troubleshooting skills and documented the Gemini remote connection.
 - 2026-11-21 · 1.97.0 · New Dad-Chat skill dad-theme-preset (Skills tab): adds a dark preset to the Theme Customizer from a six-color palette without touching existing themes. Not tried in a real userscript manager.
+- 2026-11-26 · 1.98.0 · Merged upstream/main (55ec7fc) into fork main: brings in read-only in-browser Agents tab, code-only Snippets tree, 362-skill catalog with direct prompt-skills, collapsible settings/backup cards, Skybridge local-host fetch allowlist, opt-in passphrase-encrypted credential carry, and inert HTML sanitization, while preserving the fork's GitHub _weld-data/ repo store, batched GraphQL sync, and Skybridge rate-limit/storage guards. Opened upstream PR therealwestninja/weld-companion#10 from pr/repo-store-skybridge-guards. Not tried in a real userscript manager.

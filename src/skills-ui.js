@@ -10,8 +10,17 @@
     expanded: new Set(), concise: false,
     favorites: Array.isArray(stored) ? stored.filter(id => C.get(id)) : [], details: '', findings: false, draft: '', dirty: false };
   const note = text => E('div', { class: 'wc-section-note', text });
-  const fieldStyle = { width: '100%', boxSizing: 'border-box', border: '1px solid var(--wc-line,#555)', borderRadius: '8px',
+  const LINE = '1px solid var(--wc-line,#555)';   // standard divider (the active-accent border is a deliberate exception)
+  const fieldStyle = { width: '100%', boxSizing: 'border-box', border: LINE, borderRadius: '8px',
     padding: '10px', background: 'var(--wc-input,rgba(0,0,0,.18))', color: 'inherit', font: 'inherit' };
+  // Declutter: fold secondary controls behind a collapsed disclosure so fewer show at once.
+  function collapse(title, hint) {
+    const d = E('details', { class: 'wc-disclose' });
+    d.appendChild(E('summary', {}, [E('span', { text: title }), hint ? E('span', { class: 'wc-disclose-hint', text: hint }) : null]));
+    const body = E('div', { class: 'wc-disclose-body' });
+    d.appendChild(body);
+    return { el: d, body: body };
+  }
   function render(parent) {
     const slug = H.slug() || '';
     if (S.slug !== slug) {
@@ -49,7 +58,7 @@
       if (!matches.length) { list.appendChild(note('No matching skills. Try another search or turn off Favorites only.')); return; }
       groups.forEach(g => {
         const autoExpand = Boolean(S.query || S.category || S.type || S.mode || S.favoritesOnly);
-        const attrs = { 'data-section': g.id, style: { border: '1px solid var(--wc-line,#555)', borderRadius: '9px', padding: '10px' } };
+        const attrs = { 'data-section': g.id, style: { border: LINE, borderRadius: '9px', padding: '10px' } };
         if (autoExpand || S.expanded.has(g.id)) attrs.open = '';
         const section = E('details', attrs);
         section.addEventListener('toggle', () => {
@@ -64,12 +73,12 @@
         const active = p.id === S.selected;
         grid.appendChild(E('button', { type: 'button', 'data-skill': p.id, 'aria-pressed': String(active),
           style: { textAlign: 'left', padding: '12px', borderRadius: '9px', cursor: 'pointer', color: 'inherit', font: 'inherit',
-            border: active ? '1px solid var(--wc-accent,#f39245)' : '1px solid var(--wc-line,#555)',
+            border: active ? '1px solid var(--wc-accent,#f39245)' : LINE,
             background: active ? 'rgba(243,146,69,.12)' : 'rgba(255,255,255,.035)' },
           onclick: () => { S.selected = p.id; drawList(); drawDetail(); build(); if (detail.scrollIntoView) detail.scrollIntoView({ block: 'nearest' }); }
         }, [E('strong', { text: (S.favorites.includes(p.id) ? '\u2605 ' : '') + p.title }),
           E('div', { text: p.description, style: { fontSize: '12px', opacity: '.8', marginTop: '5px', lineHeight: '1.5' } }),
-          E('div', { text: p.mode === 'review' ? 'Review only' : 'Makes changes', style: { fontSize: '11px', opacity: '.65', marginTop: '7px' } })]));
+          E('div', { text: p.direct ? (p.run === 'multi' ? 'Multi-run prompt' : 'Single-shot prompt') : (p.mode === 'review' ? 'Review only' : 'Makes changes'), style: { fontSize: '11px', opacity: '.65', marginTop: '7px' } })]));
         });
         section.appendChild(grid); list.appendChild(section);
       });
@@ -87,12 +96,20 @@
               S.favorites = next; drawDetail(); drawList();
             } catch (e) { message(e.message || String(e), true); }
           } })]));
-      detail.appendChild(note((p.mode === 'review' ? 'Review only: ' : 'Makes changes: ') + p.description));
-      detail.appendChild(note('Fits: ' + (p.types.length ? p.types.map(id => C.types.find(t => t.id === id).title).join(', ') : 'All generator and application types')));
-      const workflow = E('details', { 'aria-label': 'Skill workflow' }, [E('summary', { text: 'Workflow & acceptance checks', style: { cursor: 'pointer', padding: '8px 0' } }),
-        note(p.task),
-        E('ol', {}, p.steps.map(step => E('li', { text: step, style: { marginBottom: '6px' } }))), note('Acceptance: ' + p.check)]);
-      detail.appendChild(workflow);
+      if (p.direct) {
+        detail.appendChild(note((p.run === 'multi' ? 'Multi-run skill: ' : 'Single-shot skill: ') + p.description));
+        const pre = { whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.5', margin: '6px 0', padding: '8px', borderRadius: '8px', background: 'var(--wc-input,rgba(0,0,0,.18))', maxHeight: '320px', overflow: 'auto' };
+        detail.appendChild(E('details', { 'aria-label': 'The prompt' }, [
+          E('summary', { text: 'The prompt that gets sent', style: { cursor: 'pointer', padding: '8px 0' } }),
+          E('pre', { text: p.prompt, style: pre })]));
+      } else {
+        detail.appendChild(note((p.mode === 'review' ? 'Review only: ' : 'Makes changes: ') + p.description));
+        detail.appendChild(note('Fits: ' + (p.types.length ? p.types.map(id => C.types.find(t => t.id === id).title).join(', ') : 'All generator and application types')));
+        const workflow = E('details', { 'aria-label': 'Skill workflow' }, [E('summary', { text: 'Workflow & acceptance checks', style: { cursor: 'pointer', padding: '8px 0' } }),
+          note(p.task),
+          E('ol', {}, p.steps.map(step => E('li', { text: step, style: { marginBottom: '6px' } }))), note('Acceptance: ' + p.check)]);
+        detail.appendChild(workflow);
+      }
       if (p.refs.length || p.example) {
         const blockStyle = { whiteSpace: 'pre-wrap', fontSize: '11px', lineHeight: '1.45', margin: '6px 0', padding: '8px', borderRadius: '8px',
           background: 'var(--wc-input,rgba(0,0,0,.18))', maxHeight: '260px', overflow: 'auto' };
@@ -132,32 +149,38 @@
     const mode = E('select', { 'aria-label': 'Task mode', style: fieldStyle }, [E('option', { value: '', text: 'Review & implementation' }),
       E('option', { value: 'review', text: 'Review only' }), E('option', { value: 'change', text: 'Make changes' })]);
     mode.value = S.mode; mode.addEventListener('change', () => { S.mode = mode.value; drawList(); });
-    wrap.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '12px 0' } },
+    wrap.appendChild(search);
+    const quick = collapse('Quick picks', 'common tasks');
+    quick.body.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' } },
       [['dashboard-architecture', 'Plan dashboard'], ['create-dashboard', 'Build an app'], ['fix-bugs', 'Fix problems'], ['custom-feature', 'Add a feature'], ['lorebook-builder', 'Build lorebook'], ['skybridge-integrate', 'Connect Skybridge'], ['ai-input-assist', 'Rewrite & Fill buttons'], ['card-spec-export', 'Tavern card export'], ['dad-diagnose', 'Diagnose Dad-Chat'], ['dad-add-feature', 'Add Dad-Chat feature'], ['dad-character-create', 'Dad-native character']].map(([id, title]) =>
         E('button', { type: 'button', class: 'wc-btn wc-mini', text: title, onclick: () => {
           S.selected = id; S.query = ''; S.category = ''; S.type = ''; S.mode = ''; S.favoritesOnly = false;
           search.value = ''; category.value = ''; type.value = ''; mode.value = ''; fav.checked = false;
           S.expanded.add(C.get(id).category); drawList(); drawDetail(); build();
         } }))));
-    wrap.appendChild(search);
-    wrap.appendChild(E('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,190px),1fr))', gap: '8px', marginTop: '8px' } }, [type, mode]));
-    wrap.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', margin: '10px 0' } }, [category,
+    wrap.appendChild(quick.el);
+    const filters = collapse('Filters', 'type · mode · category');
+    filters.body.appendChild(E('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,190px),1fr))', gap: '8px', marginTop: '4px' } }, [type, mode]));
+    filters.body.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', margin: '10px 0 2px' } }, [category,
       E('label', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, [fav, E('span', { text: 'Favorites only' })])]));
+    wrap.appendChild(filters.el);
     count = E('div', { style: { fontSize: '12px', opacity: '.7', marginBottom: '8px' }, 'aria-live': 'polite' }); wrap.appendChild(count);
     list = E('div', { 'aria-label': 'Skill presets', style: { display: 'grid', gap: '8px', maxHeight: '380px', overflowY: 'auto', padding: '2px' } }); wrap.appendChild(list);
-    detail = E('div', { style: { borderTop: '1px solid var(--wc-line,#555)', marginTop: '18px', paddingTop: '16px' } }); wrap.appendChild(detail);
-    wrap.appendChild(E('label', { for: 'wc-skill-details', text: 'Your goal or extra instructions (optional)' }));
+    detail = E('div', { style: { borderTop: LINE, marginTop: '18px', paddingTop: '16px' } }); wrap.appendChild(detail);
+    const opts = collapse('Options', 'your goal · live findings · concise');
+    opts.body.appendChild(E('label', { for: 'wc-skill-details', text: 'Your goal or extra instructions (optional)' }));
     const details = E('textarea', { id: 'wc-skill-details', rows: '3', placeholder: 'What should change? Any style, feature or behavior to preserve?',
       style: Object.assign({}, fieldStyle, { marginTop: '6px', resize: 'vertical' }) });
-    details.value = S.details; details.addEventListener('input', () => { S.details = details.value; dirty(); }); wrap.appendChild(details);
+    details.value = S.details; details.addEventListener('input', () => { S.details = details.value; dirty(); }); opts.body.appendChild(details);
     const findings = E('input', { type: 'checkbox', 'aria-label': 'Include live findings' }); findings.checked = S.findings;
     findings.addEventListener('change', () => { S.findings = findings.checked; dirty(); });
-    wrap.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', margin: '10px 0' } },
+    opts.body.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', margin: '10px 0' } },
       [findings, E('span', { text: 'Include live findings (analyzed when you build the prompt)' })]));
     const concise = E('input', { type: 'checkbox', 'aria-label': 'Concise helper replies' }); concise.checked = S.concise;
     concise.addEventListener('change', () => { S.concise = concise.checked; dirty(); });
-    wrap.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', margin: '10px 0' } },
+    opts.body.appendChild(E('label', { style: { display: 'flex', alignItems: 'center', gap: '7px', margin: '10px 0' } },
       [concise, E('span', { text: 'Concise helper replies (keep complete code & evidence)' })]));
+    wrap.appendChild(opts.el);
     wrap.appendChild(E('button', { type: 'button', class: 'wc-btn', text: 'Build prompt', onclick: build }));
     wrap.appendChild(E('label', { for: 'wc-skill-prompt', text: 'Instructions to send (editable)', style: { display: 'block', marginTop: '14px' } }));
     prompt = E('textarea', { id: 'wc-skill-prompt', rows: '9', style: Object.assign({}, fieldStyle, { margin: '6px 0 10px', resize: 'vertical', fontSize: '12px', lineHeight: '1.5' }) });
@@ -176,7 +199,16 @@
         message(copied === true ? 'Prompt copied.' : 'Clipboard unavailable. Select the instructions and copy them manually.', copied !== true);
       } catch (e) { message(e.message || String(e), true); }
     } });
-    wrap.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px' } }, [send, copy]));
+    const toHelper = E('button', { type: 'button', class: 'wc-btn', text: '→ AI Helper', title: 'Load the prompt into your own AI Helper (Tools → Model chat), to send or multi-run it there',
+      onclick: () => {
+        try {
+          if (S.dirty) throw new Error('Build the prompt first to include your changed details.');
+          if (!S.draft.trim()) throw new Error('Build a prompt first.');
+          if (typeof H.openAI !== 'function') throw new Error('AI Helper is unavailable. Update the complete Weld userscript.');
+          H.openAI(S.draft, null); message('Loaded into the AI Helper (Tools → Model chat).');
+        } catch (e) { message(e.message || String(e), true); }
+      } });
+    wrap.appendChild(E('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px' } }, [send, toHelper, copy]));
     status = E('div', { role: 'status', 'aria-live': 'polite', style: { marginTop: '10px', fontSize: '12px' } }); wrap.appendChild(status);
     parent.appendChild(wrap); drawList(); drawDetail();
     if (!S.draft) build(); else { ready(); message(S.dirty ? 'Details changed. Select Build prompt to include them.' : 'Your edited prompt is preserved for this page session.'); }

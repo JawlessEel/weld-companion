@@ -6,6 +6,7 @@
 })(typeof window === 'object' ? window : globalThis, function (P) {
   'use strict';
   const VERSION = 1;
+  const SEVERITY_RANK = { error: 0, warn: 1, info: 2 };   // finding severity order, shared by get_findings and the push gate
 
   // ------------------------------------------------------------------ primer
   // Condensed from Perchance's tutorial and known-bugs list. Given to models so they write
@@ -71,7 +72,7 @@
           distinct_outputs: a.outputSpace ? a.outputSpace.text : null, stats: a.stats };
       },
       get_findings: args => {
-        const a = analysisOf(src()), rank = { error: 0, warn: 1, info: 2 }, max = rank[(args && args.min_severity) || 'warn'];
+        const a = analysisOf(src()), rank = SEVERITY_RANK, max = rank[(args && args.min_severity) || 'warn'];
         const list = a.findings.filter(f => rank[f.severity] <= (max == null ? 1 : max));
         return { counts: a.counts, findings: list.slice(0, 60).map(f => ({ severity: f.severity, pane: f.pane, line: f.line, message: f.message, hint: f.hint || undefined })), truncated: list.length > 60 };
       },
@@ -97,7 +98,9 @@
         return { matches: out, truncated: out.length >= 80 };
       },
       find_usages: args => {
-        const s = src(), r = scanName(s.dsl, s.html, String((args && args.name) || ''), null);
+        const name = String((args && args.name) || '');
+        if (!validName(name)) return { name: args && args.name, error: '"' + name + '" is not a valid list name.', uses: [], count: 0, truncated: false };
+        const s = src(), r = scanName(s.dsl, s.html, name, null);
         return { name: args && args.name, uses: r.hits.slice(0, 100), count: r.hits.length, truncated: r.hits.length > 100 };
       },
       get_imports: () => {
@@ -152,10 +155,27 @@
   function formatToolResults(results) {
     return results.map(r => 'RESULT of ' + r.tool + ' ' + JSON.stringify(r.args) + ':\n' + (r.error ? 'ERROR: ' + r.error : clip(typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 1), 14000))).join('\n\n');
   }
-  // ask(system, user) -> Promise<string>. Never calls a tool outside INVESTIGATE_TOOLS.
+  // Build the read-only lookup protocol text for an arbitrary tool subset (used by agents).
+  function buildInvestigateProtocol(toolList) {
+    const first = toolList[0] ? toolList[0][0] : 'get_outline';
+    return [
+      'You may look things up before answering. To run lookups reply with ONLY one or more fenced blocks, each holding one JSON request:',
+      '```weld-tool',
+      '{"tool":"' + first + '","args":{}}',
+      '```',
+      'Weld runs them (read-only) and replies with the results, then you continue. Available tools:',
+      toolList.map(t => '- ' + t[0] + ' ' + t[1]).join('\n'),
+      'When you have enough information, give your final answer with no weld-tool block. You can never change anything with these tools.'
+    ].join('\n');
+  }
+  // ask(system, user) -> Promise<string>. Never calls a tool outside its allowed list.
+  // o.tools (optional) restricts the agent to a subset [[name,desc],...]; default = INVESTIGATE_TOOLS.
   async function investigate(o) {
-    const allowed = new Set(INVESTIGATE_TOOLS.map(t => t[0])), maxRounds = o.maxRounds || 4, steps = [];
-    const system = o.system + '\n\n' + INVESTIGATE_PROTOCOL;
+    const custom = Array.isArray(o.tools) && o.tools.length;
+    const toolList = custom ? o.tools.filter(t => Array.isArray(t) && typeof t[0] === 'string') : INVESTIGATE_TOOLS;
+    const allowed = new Set(toolList.map(t => t[0])), maxRounds = o.maxRounds || 4, steps = [];
+    // Default path stays byte-identical to the shipped protocol; a custom subset builds its own.
+    const system = o.system + '\n\n' + (custom ? buildInvestigateProtocol(toolList) : INVESTIGATE_PROTOCOL);
     let transcript = o.user, reply = '';
     for (let round = 0; round <= maxRounds; round++) {
       if (o.isCancelled && o.isCancelled()) throw new Error('Stopped.');
@@ -482,7 +502,7 @@
 
   // ------------------------------------------------------------- push gate
   function gateReport(analysis, level) {
-    const rank = { error: 0, warn: 1, info: 2 }, max = rank[level || 'warn'];
+    const rank = SEVERITY_RANK, max = rank[level || 'warn'];
     const list = analysis.findings.filter(f => rank[f.severity] <= max);
     return { count: list.length, lines: list.slice(0, 6).map(f => '• ' + f.pane + (f.line ? ' line ' + f.line : '') + ': ' + f.message), more: Math.max(0, list.length - 6) };
   }

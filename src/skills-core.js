@@ -9,20 +9,30 @@
   const host = typeof window === 'object' ? window : globalThis;
   const Refs = viaRequire ? require('./skills-refs.js') : (host.WeldSkillsRefs || { packs: [], byId: {}, links: {}, examples: {} });
   const Dad = viaRequire ? require('./skills-dad.js') : (host.WeldSkillsDad || { rows: [] });
+  // DIRECT (pre-written) skills: ready-to-send prompts, not composed from a task. Shown as their own categories.
+  const Direct = viaRequire ? require('./skills-direct.js') : (host.WeldSkillsDirect || { RULES: [], METHODS: [], PROMPTS: [], REVIEW: [], WEBUI: [], THREED: [] });
+  // Imported skill-data modules (image-gen, website-builder, extra). Same row-tuple shape as `rows`,
+  // with two optional trailing slots: [category, id, title, desc, mode, task, types, sources, steps, check].
+  const Image = viaRequire ? require('./skills-image.js') : (host.WeldSkillsImage || { rows: [] });
   const Web = viaRequire ? require('./skills-web.js') : (host.WeldSkillsWeb || { rows: [] });
-  const ImagePrompts = viaRequire ? require('./skills-image.js') : (host.WeldSkillsImage || { rows: [] });
-  const Extra = viaRequire ? require('./skills-extra.js') : (host.WeldSkillsExtra || { rows: [] });
+  const Extra = viaRequire ? require('./skills-extra.js') : (host.WeldSkillsExtra || { rows: [], upgrades: {} });
   const categories = [
     ['dashboards', 'Dashboards & live data'],
     ['agents', 'Prompts, models & plugins'],
     ['repair', 'Debug & repair'], ['design', 'Design & modernize'],
-    ['features', 'Add features'], ['ai', 'AI & media'], ['imagegen', 'Image prompts & studios'],
+    ['features', 'Add features'], ['ai', 'AI & media'],
     ['data', 'Data & persistence'], ['performance', 'Performance & reliability'],
     ['quality', 'Accessibility & quality'], ['engineering', 'Code & planning'],
-    ['create', 'Create a generator'], ['web', 'Websites & site builders'], ['text', 'Text & randomness'],
+    ['create', 'Create a generator'], ['text', 'Text & randomness'],
     ['story', 'Stories & worlds'], ['games', 'Games & interaction'],
     ['cards', 'SillyTavern, Chub & character cards'], ['dad', 'Dad-Chat projects'], ['rework', 'Rebrand, simplify & privacy'],
-    ['assist', 'AI input helpers & toolkit']
+    ['assist', 'AI input helpers & toolkit'],
+    // Imported suites (from the fork): image-generation prompt tooling and a full website builder.
+    ['imagegen', 'AI image generation'], ['site', 'Website builder'],
+    // Direct (pre-written) skill categories — ready-to-send working prompts, not composed from a task.
+    ['working-rules', 'Working rules'], ['ai-methods', 'AI methods'],
+    ['prompt-eng', 'Prompt engineering'], ['review-safety', 'Review & safety'],
+    ['web-design', 'Web layout & UI'], ['three-3d', '3D & WebGL (Three.js)']
   ].map(([id, title]) => Object.freeze({ id, title }));
   // Stable IDs are stored as favorites; task instructions stay in the shipped catalog.
   const rows = [
@@ -135,9 +145,7 @@
     "Prat011/awesome-llm-skills": "35e1ea23b6c5f50c420d5591973aa8ad4f2931ff",
     "affaan-m/ECC": "ef648e01899ba3e8dc6371642deaaf64b4477775",
     "anthropics/skills": "8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4",
-    "nextlevelbuilder/ui-ux-pro-max-skill": "477bcb28c9812b385cb51a4605ddf30d7b2266e2",
-    "ZeroLu/awesome-nanobanana-pro": "475f02bf67b2cd26d5d9c76ba145b47cb4500700",
-    "YouMind-OpenLab/awesome-nano-banana-pro-prompts": "99bf468962de7df08166543ce67dad25f41e27fb"
+    "nextlevelbuilder/ui-ux-pro-max-skill": "477bcb28c9812b385cb51a4605ddf30d7b2266e2"
 });
   const sources = Object.freeze([
     ['superpowers', 'Superpowers', 'obra/superpowers', 'skills/systematic-debugging/SKILL.md'],
@@ -150,9 +158,7 @@
     ['llm', 'Awesome LLM Skills', 'Prat011/awesome-llm-skills', 'algorithmic-art/SKILL.md'],
     ['ecc', 'ECC', 'affaan-m/ECC', '.agents/skills/frontend-patterns/SKILL.md'],
     ['anthropic', 'Anthropic skills', 'anthropics/skills', 'skills/frontend-design/SKILL.md'],
-    ['ux', 'UI UX Pro Max', 'nextlevelbuilder/ui-ux-pro-max-skill', '.claude/skills/ui-ux-pro-max/SKILL.md'],
-    ['nano', 'Awesome Nano Banana Pro (prompt collection)', 'ZeroLu/awesome-nanobanana-pro', 'README.md'],
-    ['nanoym', 'Awesome Nano Banana Pro Prompts (YouMind)', 'YouMind-OpenLab/awesome-nano-banana-pro-prompts', 'README.md']
+    ['ux', 'UI UX Pro Max', 'nextlevelbuilder/ui-ux-pro-max-skill', '.claude/skills/ui-ux-pro-max/SKILL.md']
   ].map(([id, title, repo, path]) => Object.freeze({ id, title, url: 'https://github.com/' + repo + '/blob/' + sourceRevisions[repo] + '/' + path, path })).concat([
     Object.freeze({ id: 'binance', title: 'Binance market data docs', url: 'https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints', path: '' }),
     Object.freeze({ id: 'binance-streams', title: 'Binance stream docs', url: 'https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams', path: '' }),
@@ -161,13 +167,15 @@
     Object.freeze({ id: 'ccv3', title: 'Character Card V3 specification', url: 'https://github.com/kwaroran/character-card-spec-v3', path: '' }),
     Object.freeze({ id: 'st-docs', title: 'SillyTavern documentation', url: 'https://docs.sillytavern.app/', path: '' }),
     Object.freeze({ id: 'st-worldinfo', title: 'SillyTavern World Info docs', url: 'https://docs.sillytavern.app/usage/core-concepts/worldinfo/', path: '' }),
-    Object.freeze({ id: 'dad-arch', title: 'Dad-Chat architecture (Weld docs)', url: 'https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/architecture.md', path: '' }),
-    Object.freeze({ id: 'dad-format', title: 'Dad-native format (Weld docs)', url: 'https://github.com/JawlessEel/weld-companion/blob/main/docs/dad-chat/dad-native-format.md', path: '' })
+    Object.freeze({ id: 'dad-arch', title: 'Dad-Chat architecture (Weld docs)', url: 'https://github.com/therealwestninja/weld-companion/blob/main/docs/dad-chat/architecture.md', path: '' }),
+    Object.freeze({ id: 'dad-format', title: 'Dad-native format (Weld docs)', url: 'https://github.com/therealwestninja/weld-companion/blob/main/docs/dad-chat/dad-native-format.md', path: '' }),
+    // Image-prompt skill sources (ideas only; no prompts or images bundled).
+    Object.freeze({ id: 'nano', title: 'Awesome Nano Banana Pro (prompt collection)', url: 'https://github.com/ZeroLu/awesome-nanobanana-pro', path: '' }),
+    Object.freeze({ id: 'nanoym', title: 'Awesome Nano Banana Pro Prompts (YouMind)', url: 'https://github.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts', path: '' })
   ]));
   const types = Object.freeze([
     ['dashboard', 'Dashboards & applications'], ['agent', 'Prompt studios & plugins'], ['text', 'Random & text'], ['image', 'AI images & galleries'], ['chat', 'Chat, characters & memory'],
-    ['story', 'Stories & worlds'], ['game', 'Games & RPGs'], ['art', 'Procedural art'], ['utility', 'Tools & utilities'],
-    ['website', 'Websites & site builders']
+    ['story', 'Stories & worlds'], ['game', 'Games & RPGs'], ['art', 'Procedural art'], ['utility', 'Tools & utilities'], ['website', 'Websites & pages']
   ].map(([id, title]) => Object.freeze({ id, title })));
   const guides = {
     dashboards: ['Build a dependable application', 'Map real sources, data contracts, units, timestamps and the current application state.', 'Validate data at each boundary and keep UI, calculations and network lifecycle separate.', 'Check normal data, gaps, stale feeds, failures, symbol changes and saved layouts.', 'Displayed values have traceable sources and timestamps; stale or missing data is never presented as live.'],
@@ -181,15 +189,22 @@
     quality: ['Verify real use', 'Inspect the real user journey and its failure boundaries.', 'Prioritize concrete accessibility, input and compatibility barriers.', 'Check keyboard, special characters, empty/error states and intended browsers.', 'Observed passes and failures are listed separately from untested coverage.'],
     engineering: ['Plan & maintain', 'Map both panels, contracts, imports and persisted state.', 'Identify a bounded improvement with explicit acceptance criteria.', 'Compare changed behavior against the existing workflows and contracts.', 'Deliver actionable evidence and next steps without unrelated refactoring.'],
     create: ['Build a working foundation', 'Use the brief to define audience, output and the smallest usable workflow.', 'Implement complete paired lists/HTML code with supported imports and clear state.', 'Run first load, generation, controls, errors and a narrow-screen check.', 'A usable generator runs in preview; unfinished wiring and placeholder behavior are unacceptable.'],
-    imagegen: ['Make image prompts dependable', 'Read the real image plugin call and input options first; keep the prompt text, settings and reference images as separate pieces of state.', 'Assemble prompts in one visible function, keep user text intact, ask before using real-person photos and never invent plugin options.', 'Check empty, long, special-character, failed and repeated requests, and read generated text in images with your own eyes.', 'The user sees and can edit the exact prompt, nothing generates or uploads without an action, and failures keep earlier work.'],
-    web: ['Build a site that works without surprises', 'Read the brief and the current generator; define one Site Spec that fields, preview, save and export all share.', 'Fill it in small validated AI stages, keep every field editable, and render only through the safe renderer.', 'Check an empty and a vague idea, single and multi page, Stop, a failed stage, reload, mobile width and export opened from disk.', 'The site builds from one idea, every value is editable, nothing is invented or published, and a failed stage never loses finished work.'],
     text: ['Control generated output', 'Inspect list structure, weights, evaluation timing and shared selections.', 'Preserve intended probabilities while improving valid combinations.', 'Sample bounded local outputs and exercise reroll/lock behavior.', 'Outputs satisfy the stated constraints; statistical claims include sample size and limits.'],
     story: ['Keep the world coherent', 'Map characters, facts, narrative state and the current content structure.', 'Make story rules explicit and retain established lore and saved progress.', 'Walk representative scenes, branches, restarts and resumed sessions.', 'No missing branches, contradictory tracked facts or lost progress in tested paths.'],
     games: ['Make interaction playable', 'Identify the rules, win/loss states and actual game loop.', 'Keep transitions, probabilities, controls and saved state consistent.', 'Play start-to-finish and test restart, invalid actions and boundaries.', 'Progress remains reachable and no tested path soft-locks or duplicates rewards.'],
     dad: ['Work inside a Dad-Chat project with its real structure', 'Read the project against the layout diagram first and name the exact file and function you will touch; confirm every documented name in the real source.', 'Keep any change narrow and in the right file (load order, window.* API and storage keys unchanged); content tasks write the Dad-native format, never a Tavern shape.', 'Reload and exercise the changed path, or say you could not; check console and perchanceErrors; list anything unverified.', 'The change sits in the correct file, saved data and window.* names still work, content validates against the Dad-native schema and nothing in it runs as code.'],
     cards: ['Match real chat-card conventions', 'Read the actual chat, character and lore code, plus real sample cards or logs where supplied; use the STRUCTURE REFERENCE in the prompt to map each field to the target convention.', 'Treat card and lore text as data, keep unknown fields, and show users exactly what reaches the model.', 'Round-trip a small non-sensitive card, a Unicode edge case, a malformed file and a long chat before and after the change.', 'Imports and exports preserve fields, nothing in a card runs as code, and prompt contents are visible and bounded.'],
     rework: ['Change identity safely', 'Inventory every place the target element appears in both panels, imports, metadata, storage labels and network calls.', 'Change only what the user owns or may modify; keep license notices, required attribution, saved-data keys, IDs and list names.', 'Reload from a fresh and an existing saved state and confirm nothing broke or still leaks the old element.', 'Old branding or social features are gone from every visible and network path, and existing saved data still loads.'],
-    assist: ['Add helpers that fit the generator', 'Derive the generator purpose, inputs and available text/AI plugins from the actual source.', 'Keep helpers opt-in, reversible, bounded and clearly labeled; never auto-run paid or slow calls.', 'Test empty, filled, failing, cancelled and repeated actions on each input.', 'Every helper has loading, error, cancel and undo behavior and never overwrites user text without a way back.']
+    assist: ['Add helpers that fit the generator', 'Derive the generator purpose, inputs and available text/AI plugins from the actual source.', 'Keep helpers opt-in, reversible, bounded and clearly labeled; never auto-run paid or slow calls.', 'Test empty, filled, failing, cancelled and repeated actions on each input.', 'Every helper has loading, error, cancel and undo behavior and never overwrites user text without a way back.'],
+    // Direct-skill categories: the prompt is shipped whole, so these guide steps are placeholders (never rendered for a direct skill).
+    'working-rules': ['Battle-tested review and build disciplines — pick one, review it, send it.', '', '', '', ''],
+    'ai-methods': ['Design, critique and test techniques adapted for Perchance generators.', '', '', '', ''],
+    'prompt-eng': ['Techniques for the root.aiTextPlugin prompts inside your generator.', '', '', '', ''],
+    'review-safety': ['Audit a generator for the threats that actually bite on Perchance.', '', '', '', ''],
+    'web-design': ['Kill the generic "AI slop" look — build layouts with a real aesthetic point of view.', '', '', '', ''],
+    'three-3d': ['Make Three.js / WebGL look right — lighting, materials, models and performance.', '', '', '', ''],
+    'imagegen': ['Build image-prompt tooling — libraries, templates, studios and safeguards — around the generator’s own image plugin.', 'Read how the generator calls its image plugin and what input shapes it accepts.', 'Build the feature as data and UI; render all prompt text as text and never auto-generate or auto-upload.', 'Verify empty, oversized, repeated and malformed inputs, and that nothing is sent without the user.', 'Prompts render as text, inputs are validated, and no image is generated or uploaded without an explicit user action.'],
+    'site': ['Turn an idea into a real multi-section website or page, generated safely and editable afterwards.', 'Agree the brief, pages and sections, and read what the generator can actually render and store.', 'Generate section by section with real-looking content, a token-based design system and safe rendering.', 'Verify long content, missing fields, narrow screens, export and re-editing a generated section.', 'The site matches the brief, renders safely with no injected markup, and every section stays editable.']
   };
   const sections = Object.freeze(categories.map(c => Object.freeze(Object.assign({}, c, {
     description: guides[c.id][0], steps: Object.freeze(guides[c.id].slice(1, 4)), check: guides[c.id][4]
@@ -459,15 +474,25 @@
     'prompt-quality': ['image', 'chat', 'story', 'text'], 'prompt-presets': ['image', 'chat', 'story', 'text'],
     'ai-resilience': ['image', 'chat', 'story'], 'output-variety': ['text', 'story', 'game']
   };
-  // Extra.upgrades: per-skill workflow and acceptance check (and optionally task) for rows that used the section defaults.
+  // Imported rows (image-gen, website, extra) carry their own steps/check in slots 8-9; when present they
+  // replace the section defaults. Extra.upgrades does the same for existing presets by id.
   const upgrades = Extra.upgrades || {};
-  const presets = Object.freeze(rows.concat(additions, Dad.rows, Web.rows, ImagePrompts.rows, Extra.rows).map(([category, id, title, description, mode, task, fit, origin, ownSteps, ownCheck]) => {
-    const up = upgrades[id] || {}; ownSteps = up.steps || ownSteps; ownCheck = up.check || ownCheck; task = up.task || task;
-    return Object.freeze({ category, id, title, description, mode, task,
+  const composed = rows.concat(additions, Dad.rows, Image.rows || [], Web.rows || [], Extra.rows || [])
+    .map(([category, id, title, description, mode, task, fit, origin, rowSteps, rowCheck]) =>
+    Object.freeze({ category, id, title, description, mode, task,
       types: Object.freeze(fit || specialized[id] || []), sources: Object.freeze(origin || []),
       refs: Object.freeze((Refs.links[id] || []).filter(r => Refs.byId[r])), example: Refs.examples[id] || '',
-      steps: ownSteps ? Object.freeze(ownSteps.slice()) : sections.find(c => c.id === category).steps, check: ownCheck || guides[category][4] });
-  }));
+      steps: Object.freeze((upgrades[id] && upgrades[id].steps) || rowSteps || sections.find(c => c.id === category).steps),
+      check: (upgrades[id] && upgrades[id].check) || rowCheck || guides[category][4] }));
+  // Pre-written skills become `direct` presets: their prompt is sent whole, bypassing the task->prompt composition.
+  const DIRECT_CATS = { RULES: 'working-rules', METHODS: 'ai-methods', PROMPTS: 'prompt-eng', REVIEW: 'review-safety', WEBUI: 'web-design', THREED: 'three-3d' };
+  const directPresets = [];
+  Object.keys(DIRECT_CATS).forEach(k => (Direct[k] || []).forEach(s => directPresets.push(Object.freeze({
+    category: DIRECT_CATS[k], id: s.id, title: s.name, description: s.desc, mode: 'review', task: s.prompt,
+    types: Object.freeze([]), sources: Object.freeze([]), refs: Object.freeze([]), example: '',
+    steps: Object.freeze([]), check: '', direct: true, run: s.run === 'multi' ? 'multi' : 'single', prompt: s.prompt
+  }))));
+  const presets = Object.freeze(composed.concat(directPresets));
   const get = id => presets.find(p => p.id === id) || null;
   function search(query, category, favorites, filters) {
     const f = filters || {};
@@ -484,6 +509,8 @@
     const p = get(id);
     if (!p) throw new Error('Choose a valid skill first.');
     const o = options || {};
+    // Direct skills ship a complete prompt; send it whole (plus any extra instruction), no composition.
+    if (p.direct) { const extra = String(o.details || '').trim(); return p.prompt + (extra ? '\n\n' + extra : ''); }
     const type = types.find(t => t.id === o.type);
     if (o.type && !type) throw new Error('Choose a known generator type.');
     if (type && p.types.length && !p.types.includes(type.id)) throw new Error('This skill does not match the selected generator type. Choose a matching skill or All generator & app types.');
