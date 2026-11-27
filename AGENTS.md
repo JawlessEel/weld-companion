@@ -62,3 +62,6 @@ rules; newer task-specific restrictions and read-only requests take precedence.
 Preserve unrelated uncommitted work, secrets, required checks/reviews and the
 upstream push block. Force-push, shared-history rewrites, destructive deletion,
 discarding other work and access/security changes still need separate approval.
+
+## Running the bridge on Aaron's hosts (2026-11-22)
+Deploying, autostarting or exposing the bridge (ASUS Startup `Weld bridge.vbs`, Weld Remote on Funnel :8443, Mac `com.weld.bridge`) is MCP server work: follow `D:\projects\MCP_server\MCP_SERVER_OPERATIONS.md` / skill `mcp-server-operations`, with Aaron's OK first. Never re-run `bridge\install-autostart.ps1` on the ASUS: it overwrites `Weld bridge.vbs` so it starts node directly and bypasses `D:\projects\MCP_server\scripts\run-weld-bridge.ps1` (logging + single instance). Keep the .vbs pointed at that wrapper.
